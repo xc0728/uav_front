@@ -535,12 +535,8 @@ watch(
   <!-- 多边形网格化 -->
   <div v-if="functionName === '多边形网格化'" class="calc-content">
 
-    <div class="tip">
-      点击地图添加节点；需至少 3 个点组成闭合多边形；底部高度需小于顶部高度。
-    </div>
-
     <form class="form" @submit.prevent="submitPolygonGrid">
-      <div class="form-row compact">
+      <div class="form-row">
         <label class="form-label" for="poly-level">层级</label>
         <input
           id="poly-level"
@@ -551,6 +547,8 @@ watch(
           class="form-input"
           required
         >
+      </div>
+      <div class="form-row">
         <label class="form-label" for="poly-bottom">底面高(m)</label>
         <input
           id="poly-bottom"
@@ -562,6 +560,8 @@ watch(
           placeholder="底面高度"
           required
         >
+      </div>
+      <div class="form-row">
         <label class="form-label" for="poly-top">顶面高(m)</label>
         <input
           id="poly-top"
@@ -573,6 +573,10 @@ watch(
           placeholder="顶面高度"
           required
         >
+      </div>
+
+      <div class="tip">
+        点击地图添加节点；需至少 3 个点组成闭合多边形；底部高度需小于顶部高度。
       </div>
 
       <div class="points-head">
@@ -650,12 +654,8 @@ watch(
   <!-- 多边形网格化（带洞） -->
   <div v-else-if="functionName === '多边形网格化（带洞）'" class="calc-content">
 
-    <div class="tip tip-blue">
-      点击地图添加外边界点；绘制完外边界后可切换到"绘制洞"模式添加洞；需至少 3 个点组成闭合多边形。
-    </div>
-
     <form class="form" @submit.prevent="submitPolygonGridWithHoles">
-      <div class="form-row compact">
+      <div class="form-row">
         <label class="form-label" for="polyh-level">层级</label>
         <input
           id="polyh-level"
@@ -666,6 +666,8 @@ watch(
           class="form-input"
           required
         >
+      </div>
+      <div class="form-row">
         <label class="form-label" for="polyh-bottom">底面高(m)</label>
         <input
           id="polyh-bottom"
@@ -677,6 +679,8 @@ watch(
           placeholder="底面高度"
           required
         >
+      </div>
+      <div class="form-row">
         <label class="form-label" for="polyh-top">顶面高(m)</label>
         <input
           id="polyh-top"
@@ -688,6 +692,10 @@ watch(
           placeholder="顶面高度"
           required
         >
+      </div>
+
+      <div class="tip tip-blue">
+        点击地图添加外边界点；绘制完外边界后可切换到"绘制洞"模式添加洞；需至少 3 个点组成闭合多边形。
       </div>
 
       <div class="mode-switch">
@@ -862,12 +870,8 @@ watch(
   <!-- 多边形表面网格化 -->
   <div v-else-if="functionName === '多边形表面网格化'" class="calc-content">
 
-    <div class="tip">
-      点击地图添加节点；需至少 3 个点组成闭合多边形；底部高度需小于顶部高度。
-    </div>
-
     <form class="form" @submit.prevent="submitSurfaceGrid">
-      <div class="form-row compact">
+      <div class="form-row">
         <label class="form-label" for="surface-level">层级</label>
         <input
           id="surface-level"
@@ -878,6 +882,8 @@ watch(
           class="form-input"
           required
         >
+      </div>
+      <div class="form-row">
         <label class="form-label" for="surface-bottom">底面高(m)</label>
         <input
           id="surface-bottom"
@@ -889,6 +895,8 @@ watch(
           placeholder="底面高度"
           required
         >
+      </div>
+      <div class="form-row">
         <label class="form-label" for="surface-top">顶面高(m)</label>
         <input
           id="surface-top"
@@ -900,6 +908,10 @@ watch(
           placeholder="顶面高度"
           required
         >
+      </div>
+
+      <div class="tip">
+        点击地图添加节点；需至少 3 个点组成闭合多边形；底部高度需小于顶部高度。
       </div>
 
       <div class="points-head">
@@ -1010,25 +1022,9 @@ watch(
   gap: 12px;
 }
 
-.form-row.compact {
-  gap: 4px;
-  flex-wrap: nowrap;
-  margin-bottom: -8px;
-}
-
-.form-row.compact .form-label {
-  flex: 0 0 52px;
-  font-size: 12px;
-}
-
-.form-row.compact .form-input {
-  min-width: 0;
-  flex: 1;
-}
-
 .calc-content .form-label,
 .form-label {
-  flex: 0 0 72px;
+  width: 72px;
   font-size: 13px;
   color: #94a3b8;
   flex-shrink: 0;
@@ -1037,18 +1033,19 @@ watch(
 .calc-content .form-input,
 .form-input {
   flex: 1;
-  height: 32px;
-  padding: 0 10px;
-  border-radius: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(0, 0, 0, 0.2);
   color: #f1f5f9;
-  font-size: 13px;
+  font-size: 14px;
   outline: none;
+  transition: all 0.15s ease;
 }
 
 .form-input:focus {
-  border-color: rgba(59, 130, 246, 0.55);
+  border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.06);
 }
 
 .points-head {

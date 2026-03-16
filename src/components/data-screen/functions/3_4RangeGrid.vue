@@ -185,9 +185,6 @@ async function submitRangeGrid() {
 
 <template>
   <div v-if="functionName === '立方体网格化'" class="calc-content">
-    <div class="tip">
-      点击地图绘制矩形范围（2个对角点，自动生成轴对齐矩形）；底部高度需小于顶部高度。
-    </div>
 
     <form class="form" @submit.prevent="submitRangeGrid">
       <div class="form-row">
@@ -227,6 +224,10 @@ async function submitRangeGrid() {
           placeholder="顶面高度"
           required
         >
+      </div>
+
+      <div class="tip">
+        点击地图绘制矩形范围（2个对角点，自动生成轴对齐矩形）；底部高度需小于顶部高度。
       </div>
 
       <div class="points-head">
@@ -327,25 +328,27 @@ async function submitRangeGrid() {
 }
 
 .form-label {
-  flex: 0 0 80px;
+  width: 72px;
   font-size: 13px;
   color: #94a3b8;
+  flex-shrink: 0;
 }
 
 .form-input {
   flex: 1;
-  height: 32px;
-  padding: 0 10px;
-  border-radius: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(0, 0, 0, 0.2);
   color: #f1f5f9;
-  font-size: 13px;
+  font-size: 14px;
   outline: none;
+  transition: all 0.15s ease;
 }
 
 .form-input:focus {
-  border-color: rgba(59, 130, 246, 0.55);
+  border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.06);
 }
 
 .points-head {

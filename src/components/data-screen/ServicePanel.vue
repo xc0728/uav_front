@@ -209,19 +209,22 @@ defineExpose({
           <div class="header-left">
             <!-- 列表模式：显示功能选择标题 -->
             <template v-if="panelMode === 'list'">
-              <Settings2 :size="20" class="header-icon" />
-              <span class="panel-title">功能选择</span>
+              <template v-if="!isControlPanelCollapsed">
+                <Settings2 :size="20" class="header-icon" />
+                <span class="panel-title">功能选择</span>
+              </template>
             </template>
             <!-- 计算模式：显示服务信息 -->
             <template v-else>
-              <div class="header-service-info">
+              <div v-if="!isControlPanelCollapsed" class="header-service-info">
                 <span class="header-function-name">{{ activeFunctionName }}</span>
               </div>
             </template>
           </div>
           <div class="header-actions">
-            <!-- 控制面板收起按钮放在右上角 -->
+            <!-- 收起/展开按钮 - 列表模式下始终显示 -->
             <button
+              v-if="panelMode === 'list'"
               type="button"
               class="icon-btn"
               @click="toggleControlPanelCollapse"
@@ -230,9 +233,20 @@ defineExpose({
               <ChevronLeft v-if="!isControlPanelCollapsed" :size="18" />
               <ChevronRight v-else :size="18" />
             </button>
-            <!-- 关闭按钮 - 仅在计算模式下显示 -->
+            <!-- 控制面板收起按钮 - 仅在计算模式下显示 -->
             <button
               v-if="panelMode === 'calc'"
+              type="button"
+              class="icon-btn"
+              @click="toggleControlPanelCollapse"
+              :title="isControlPanelCollapsed ? '展开面板' : '折叠面板'"
+            >
+              <ChevronLeft v-if="!isControlPanelCollapsed" :size="18" />
+              <ChevronRight v-else :size="18" />
+            </button>
+            <!-- 关闭按钮 - 仅在计算模式下展开时显示 -->
+            <button
+              v-if="panelMode === 'calc' && !isControlPanelCollapsed"
               type="button"
               class="icon-btn close-btn"
               @click="closeCalcPanel"
@@ -310,14 +324,6 @@ defineExpose({
           <!-- 列表模式折叠时 -->
           <template v-if="panelMode === 'list'">
             <button
-              type="button"
-              class="collapsed-expand-btn"
-              @click="toggleControlPanelCollapse"
-              title="展开面板"
-            >
-              <ChevronRight :size="18" />
-            </button>
-            <button
               v-for="s in services"
               :key="s.id"
               type="button"
@@ -330,21 +336,7 @@ defineExpose({
           </template>
           <!-- 计算模式折叠时 -->
           <template v-else>
-            <button
-              type="button"
-              class="collapsed-expand-btn"
-              @click="toggleControlPanelCollapse"
-              title="展开面板"
-            >
-              <ChevronRight :size="18" />
-            </button>
-            <button
-              type="button"
-              class="collapsed-item calc-collapsed-icon"
-              :title="activeFunctionName"
-            >
-              <component :is="activeServiceIcon" :size="20" />
-            </button>
+            <!-- 已移除底部按钮，仅保留顶部展开按钮 -->
           </template>
         </div>
       </div>
@@ -370,8 +362,8 @@ defineExpose({
 
 /* ==================== 左侧控制面板 ==================== */
 .control-panel {
-  width: 420px;
-  max-width: 420px;
+  width: 360px;
+  max-width: 360px;
   height: 100%;
   background: rgba(15, 23, 42, 0.95);
   display: flex;
@@ -432,7 +424,7 @@ defineExpose({
 }
 
 .header-function-name {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
   color: #f1f5f9;
   white-space: nowrap;
@@ -442,7 +434,7 @@ defineExpose({
 }
 
 .panel-title {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 600;
   color: #f1f5f9;
 }
@@ -518,7 +510,7 @@ defineExpose({
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.02);
   color: #cbd5e1;
-  font-size: 14px;
+  font-size: 16px;
   text-align: left;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -579,7 +571,7 @@ defineExpose({
   border: none;
   background: transparent;
   color: #94a3b8;
-  font-size: 13px;
+  font-size: 15px;
   text-align: left;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -668,7 +660,7 @@ defineExpose({
   border: 1px solid rgba(59, 130, 246, 0.4);
   background: rgba(15, 23, 42, 0.95);
   color: #60a5fa;
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -748,7 +740,7 @@ defineExpose({
 }
 
 .calc-service-name {
-  font-size: 12px;
+  font-size: 14px;
   color: #64748b;
 }
 
@@ -829,7 +821,7 @@ defineExpose({
 }
 
 .calc-content :deep(.form-section-title) {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   color: #60a5fa;
   margin-bottom: 14px;
@@ -852,7 +844,7 @@ defineExpose({
 }
 
 .calc-content :deep(.form-label) {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   color: #94a3b8;
 }
@@ -886,7 +878,7 @@ defineExpose({
   border: 1px solid rgba(59, 130, 246, 0.2);
   border-radius: 8px;
   color: #60a5fa;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.5;
   margin-bottom: 16px;
 }
@@ -972,7 +964,7 @@ defineExpose({
   border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 8px;
   color: #fca5a5;
-  font-size: 13px;
+  font-size: 15px;
   margin-bottom: 16px;
 }
 
@@ -999,7 +991,7 @@ defineExpose({
 }
 
 .calc-content :deep(.result-stat-label) {
-  font-size: 12px;
+  font-size: 13px;
   color: #64748b;
 }
 
@@ -1033,7 +1025,7 @@ defineExpose({
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: 13px;
+  font-size: 15px;
   color: #cbd5e1;
 }
 
@@ -1044,7 +1036,7 @@ defineExpose({
 
 .calc-content :deep(.point-coord) {
   font-family: 'Monaco', 'Consolas', monospace;
-  font-size: 12px;
+  font-size: 13px;
   color: #94a3b8;
 }
 
