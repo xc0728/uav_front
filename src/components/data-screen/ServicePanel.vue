@@ -263,6 +263,23 @@ defineExpose({
           </div>
         </div>
 
+        <!-- 计算窗口收起时：在展开按钮正下方垂直显示窗口名称，单字均匀分布填满整条 -->
+        <div
+          v-if="isControlPanelCollapsed && panelMode === 'calc'"
+          class="collapsed-calc-title-wrap"
+          @click="toggleControlPanelCollapse"
+          title="展开面板"
+        >
+          <div class="collapsed-calc-title">
+            <span
+              v-for="(char, i) in activeFunctionName"
+              :key="i"
+              class="collapsed-calc-char"
+              :class="{ 'collapsed-calc-paren': char === '（' || char === '）' }"
+            >{{ char === '（' ? '︵' : char === '）' ? '︶' : char }}</span>
+          </div>
+        </div>
+
         <!-- 面板内容 - 列表模式 -->
         <div v-if="!isControlPanelCollapsed && panelMode === 'list'" class="panel-content">
           <!-- 列表模式：显示服务列表 -->
@@ -328,8 +345,8 @@ defineExpose({
           </div>
         </div>
 
-        <!-- 折叠时仅显示图标 -->
-        <div v-if="isControlPanelCollapsed" class="panel-collapsed-content">
+        <!-- 折叠时仅显示图标（仅列表模式；计算模式用上方 collapsed-calc-title-wrap 占满整条） -->
+        <div v-if="isControlPanelCollapsed && panelMode === 'list'" class="panel-collapsed-content">
           <!-- 列表模式折叠时 -->
           <template v-if="panelMode === 'list'">
             <button
@@ -595,6 +612,44 @@ defineExpose({
   flex-shrink: 0;
 }
 
+/* 计算窗口收起时，在展开按钮正下方垂直显示窗口名称，单字均匀分布填满整条 */
+.collapsed-calc-title-wrap {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  cursor: pointer;
+  min-height: 0;
+}
+
+.collapsed-calc-title {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  width: 100%;
+  gap: 24px;
+}
+
+.collapsed-calc-char {
+  font-size: 18px;
+  font-family: "SimHei", "Microsoft YaHei", sans-serif;
+  font-weight: bold;
+  color: #ffffff;
+  flex-shrink: 0;
+}
+
+/* 括号使用竖排专用字符 ︵︶，在垂直排列时自然正确显示 */
+.collapsed-calc-paren {
+  font-weight: bold;
+  opacity: 1;
+}
+
+.collapsed-calc-title-wrap:hover .collapsed-calc-char {
+  color: #60a5fa;
+}
+
 /* 折叠时的图标列表 */
 .panel-collapsed-content {
   flex: 1;
@@ -624,6 +679,24 @@ defineExpose({
 .collapsed-expand-btn:hover {
   background: rgba(59, 130, 246, 0.25);
   border-color: #3b82f6;
+}
+
+.collapsed-function-name {
+  writing-mode: vertical-lr;
+  text-orientation: upright;
+  font-size: 14px;
+  color: #e2e8f0;
+  padding: 8px 4px;
+  cursor: pointer;
+  letter-spacing: 2px;
+  max-height: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.collapsed-function-name:hover {
+  color: #60a5fa;
 }
 
 .calc-collapsed-icon {
