@@ -131,6 +131,13 @@ async function submitPointGrid() {
 async function submitPointBufferGrid() {
   pointGridError.value = ''
   pointGridResult.value = null
+
+  // 验证：半径必须小于等于高度，否则会有网格位于地平线以下导致计算错误
+  if (pointGridForm.radius > pointGridForm.height) {
+    pointGridError.value = `半径（${pointGridForm.radius}m）不能大于高度（${pointGridForm.height}m），否则会有网格位于地平线以下导致计算错误`
+    return
+  }
+
   pointGridLoading.value = true
 
   try {
@@ -330,6 +337,9 @@ async function submitPointBufferGrid() {
             required
           >
         </div>
+        <div v-if="pointGridForm.radius > pointGridForm.height" class="radius-error-tip">
+          半径（{{ pointGridForm.radius }}m）不能大于高度（{{ pointGridForm.height }}m）
+        </div>
         <div class="form-row">
           <label class="form-label" for="pgp-radius">半径(m)</label>
           <input
@@ -358,7 +368,7 @@ async function submitPointBufferGrid() {
           <button
             type="submit"
             class="btn-primary"
-            :disabled="pointGridLoading"
+            :disabled="pointGridLoading || pointGridForm.radius > pointGridForm.height"
           >
             <Loader2 v-if="pointGridLoading" :size="14" class="spin" />
             {{ pointGridLoading ? '计算中...' : '开始计算' }}
@@ -409,6 +419,16 @@ async function submitPointBufferGrid() {
   background: rgba(59, 130, 246, 0.1);
   border-radius: 6px;
   border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.radius-error-tip {
+  font-size: 12px;
+  color: #fca5a5;
+  padding: 8px 12px;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 6px;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  margin-bottom: 8px;
 }
 
 .form {

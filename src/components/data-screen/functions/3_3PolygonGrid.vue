@@ -113,6 +113,8 @@ const errorHoles = ref('')
 const resultHoles = ref(null)
 
 const canSubmitHoles = computed(() => {
+  // 检查是否有未完成的洞
+  if (currentHolePoints.value.length >= 3) return false
   if (outerPolygon.value.length < 3) return false
   // 检查每个外边界点的有效性
   for (const p of outerPolygon.value) {
@@ -699,26 +701,37 @@ watch(
       </div>
 
       <div class="mode-switch">
-        <button
-          type="button"
-          class="mode-btn"
-          :class="{ active: drawingMode === 'outer' }"
-          @click="switchToOuter"
-          :disabled="loadingHoles"
-        >
-          <span class="mode-dot outer-dot"></span>
-          外边界 ({{ outerPolygon.length }})
-        </button>
-        <button
-          type="button"
-          class="mode-btn"
-          :class="{ active: drawingMode === 'hole' }"
-          @click="switchToHole"
-          :disabled="loadingHoles || outerPolygon.length < 3"
-        >
-          <span class="mode-dot hole-dot"></span>
-          绘制洞
-        </button>
+        <div class="mode-btn-group">
+          <button
+            type="button"
+            class="mode-btn btn-equal"
+            :class="{ active: drawingMode === 'outer' }"
+            @click="switchToOuter"
+            :disabled="loadingHoles"
+          >
+            <span class="mode-dot outer-dot"></span>
+            外边界 ({{ outerPolygon.length }})
+          </button>
+          <button
+            type="button"
+            class="mode-btn btn-equal"
+            :class="{ active: drawingMode === 'hole' }"
+            @click="switchToHole"
+            :disabled="loadingHoles || outerPolygon.length < 3"
+          >
+            <span class="mode-dot hole-dot"></span>
+            绘制洞
+          </button>
+          <button
+            type="button"
+            class="mode-btn btn-equal btn-danger"
+            @click="clearAllHoles"
+            :disabled="loadingHoles"
+          >
+            <Trash2 :size="12" />
+            清空
+          </button>
+        </div>
         <button
           v-if="drawingMode === 'hole' && currentHolePoints.length >= 3"
           type="button"
@@ -823,16 +836,10 @@ watch(
         </div>
       </div>
 
+      <div v-if="currentHolePoints.length >= 3" class="tip tip-warning">
+        请点击"完成当前洞"后再进行计算
+      </div>
       <div class="form-actions">
-        <button
-          type="button"
-          class="btn-danger"
-          @click="clearAllHoles"
-          :disabled="loadingHoles"
-        >
-          <Trash2 :size="14" />
-          清空
-        </button>
         <button
           type="submit"
           class="btn-primary"
@@ -1007,6 +1014,13 @@ watch(
   background: rgba(59, 130, 246, 0.08);
   border-color: rgba(59, 130, 246, 0.18);
   color: #93c5fd;
+}
+
+.tip-warning {
+  background: rgba(245, 158, 11, 0.08);
+  border-color: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+  margin-top: 8px;
 }
 
 .form {
@@ -1227,13 +1241,21 @@ watch(
 /* 绘制模式切换 */
 .mode-switch {
   display: flex;
+  flex-direction: column;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.mode-btn-group {
+  display: flex;
+  gap: 8px;
+  width: 100%;
 }
 
 .mode-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   padding: 8px 14px;
   border-radius: 6px;
@@ -1243,6 +1265,16 @@ watch(
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+/* 等宽按钮样式：外边界、绘制洞、清空 */
+.mode-btn.btn-equal {
+  flex: 1;
+  min-width: 60px;
+  max-width: 100px;
+  padding: 8px 8px;
+  font-size: 11px;
 }
 
 .mode-btn:hover:not(:disabled) {

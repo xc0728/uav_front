@@ -873,6 +873,7 @@ defineExpose({
 .calc-content {
   flex: 1;
   padding: 20px;
+  overflow-x: hidden;
   overflow-y: auto;
 }
 

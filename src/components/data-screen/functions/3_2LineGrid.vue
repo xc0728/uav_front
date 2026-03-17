@@ -100,11 +100,47 @@ const pipeForm = reactive({
 const canSubmitPipe = computed(() => points.value.length >= 2 &&
   Number.isFinite(Number(pipeForm.level)) &&
   Number.isFinite(Number(pipeForm.halfWidth)) &&
-  Number.isFinite(Number(pipeForm.halfHeight)))
+  Number.isFinite(Number(pipeForm.halfHeight)) &&
+  // 半高必须小于所有输入点的高度
+  pipeForm.halfHeight <= Math.min(...points.value.map(p => p.height)))
+
+const pipeHalfHeightError = ref(null)
+
+// 监听半高和输入点高度的变化，更新错误提示
+watch(
+  () => [pipeForm.halfHeight, points.value],
+  () => {
+    if (points.value.length === 0) {
+      pipeHalfHeightError.value = null
+      return
+    }
+    const minHeight = Math.min(...points.value.map(p => p.height))
+    // 半高必须小于所有输入点的高度，否则会有网格位于地平线以下
+    if (pipeForm.halfHeight > minHeight) {
+      const idx = points.value.findIndex(p => p.height === minHeight)
+      pipeHalfHeightError.value = {
+        halfHeight: pipeForm.halfHeight,
+        pointHeight: minHeight,
+        pointIdx: idx + 1
+      }
+    } else {
+      pipeHalfHeightError.value = null
+    }
+  },
+  { deep: true }
+)
 
 async function submitLinePipeGrid() {
   error.value = ''
   result.value = null
+
+  // 验证：半高必须小于等于所有输入点的高度
+  const minHeight = Math.min(...points.value.map(p => p.height))
+  if (pipeForm.halfHeight > minHeight) {
+    error.value = `半高（${pipeForm.halfHeight}m）不能大于输入点的高度（${minHeight}m），否则会有网格位于地平线以下导致计算错误`
+    return
+  }
+
   loading.value = true
 
   try {
@@ -283,6 +319,9 @@ async function submit() {
             required
           >
         </div>
+        <div v-if="pipeHalfHeightError" class="radius-error-tip">
+          半高（{{ pipeHalfHeightError.halfHeight }}m）不能大于第{{ pipeHalfHeightError.pointIdx }}个输入点的高度（{{ pipeHalfHeightError.pointHeight }}m）
+        </div>
       </template>
 
       <div class="tip">
@@ -331,7 +370,7 @@ async function submit() {
         <button
           type="submit"
           class="btn-primary"
-          :disabled="loading || (functionName === '线矩形缓冲区（管道）网格化' ? !canSubmitPipe : !canSubmit)"
+          :disabled="loading || (functionName === '线矩形缓冲区（管道）网格化' ? !canSubmitPipe : !canSubmit) || (functionName === '线矩形缓冲区（管道）网格化' && !!pipeHalfHeightError)"
         >
           <Loader2 v-if="loading" :size="14" class="spin" />
           {{ loading ? '计算中...' : '开始计算' }}
@@ -376,6 +415,16 @@ async function submit() {
   background: rgba(34, 197, 94, 0.08);
   border-radius: 6px;
   border: 1px solid rgba(34, 197, 94, 0.18);
+}
+
+.radius-error-tip {
+  font-size: 12px;
+  color: #fca5a5;
+  padding: 8px 12px;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 6px;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  margin-bottom: 8px;
 }
 
 .form {
