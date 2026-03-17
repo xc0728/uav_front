@@ -239,7 +239,7 @@ defineExpose({
               <ChevronLeft v-if="!isControlPanelCollapsed" :size="18" />
               <ChevronRight v-else :size="18" />
             </button>
-            <!-- 控制面板收起按钮 - 仅在计算模式下显示 -->
+            <!-- 控制面板收起/展开按钮 - 计算模式下始终显示 -->
             <button
               v-if="panelMode === 'calc'"
               type="button"
@@ -263,10 +263,10 @@ defineExpose({
           </div>
         </div>
 
-        <!-- 面板内容 -->
-        <div v-if="!isControlPanelCollapsed" class="panel-content">
+        <!-- 面板内容 - 列表模式 -->
+        <div v-if="!isControlPanelCollapsed && panelMode === 'list'" class="panel-content">
           <!-- 列表模式：显示服务列表 -->
-          <div v-if="panelMode === 'list'" class="service-list">
+          <div class="service-list">
             <div
               v-for="s in services"
               :key="s.id"
@@ -308,9 +308,12 @@ defineExpose({
               </Transition>
             </div>
           </div>
+        </div>
 
+        <!-- 面板内容 - 计算模式，使用 v-show 保持组件状态 -->
+        <div v-show="!isControlPanelCollapsed && panelMode === 'calc'" class="panel-content">
           <!-- 计算模式：显示计算组件 -->
-          <div v-else class="calc-view">
+          <div class="calc-view">
             <component
               :is="activeComponent"
               ref="activeComponentRef"
@@ -326,7 +329,7 @@ defineExpose({
         </div>
 
         <!-- 折叠时仅显示图标 -->
-        <div v-else class="panel-collapsed-content">
+        <div v-if="isControlPanelCollapsed" class="panel-collapsed-content">
           <!-- 列表模式折叠时 -->
           <template v-if="panelMode === 'list'">
             <button
@@ -339,10 +342,6 @@ defineExpose({
             >
               <component :is="s.icon" :size="20" />
             </button>
-          </template>
-          <!-- 计算模式折叠时 -->
-          <template v-else>
-            <!-- 已移除底部按钮，仅保留顶部展开按钮 -->
           </template>
         </div>
       </div>
