@@ -325,13 +325,6 @@ async function submitGridInfo() {
 
 <template>
   <div class="calc-content">
-    <div class="form-actions" style="margin-bottom: 16px;">
-      <button type="button" class="btn-danger" @click="clearGrids">
-        <Trash2 :size="14" />
-        清除已生成格网
-      </button>
-    </div>
-
     <!-- 经纬度高转网格编码 -->
     <template v-if="functionName === '经纬度高转网格编码'">
       <form class="form" @submit.prevent="submitPointToGrid">
@@ -701,8 +694,8 @@ async function submitGridInfo() {
       </div>
     </template>
 
-    <!-- 清除格网按钮放在底部 -->
-    <div class="form-actions" style="margin-top: 16px;">
+    <!-- 清除格网按钮 - 仅在网格编码获取网格信息时显示底部按钮 -->
+    <div v-if="functionName === '网格编码获取网格信息'" class="form-actions" style="margin-top: 16px;">
       <button type="button" class="btn-danger" @click="clearGrids">
         <Trash2 :size="14" />
         清除已生成格网
@@ -815,8 +808,6 @@ async function submitGridInfo() {
 }
 
 .child-codes-row .result-v {
-  max-height: 150px;
-  overflow-y: auto;
   display: flex;
   flex-wrap: wrap;
   align-content: flex-start;

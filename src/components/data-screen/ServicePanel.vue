@@ -108,6 +108,12 @@ function toggleServiceDropdown(id) {
   openServiceId.value = openServiceId.value === id ? null : id
 }
 
+// 展开面板并打开指定服务的下拉菜单
+function expandAndOpenDropdown(serviceId) {
+  isControlPanelCollapsed.value = false
+  openServiceId.value = serviceId
+}
+
 // 打开计算面板
 function openCalcPanel(service, funcName) {
   activeServiceName.value = service.name
@@ -328,7 +334,7 @@ defineExpose({
               :key="s.id"
               type="button"
               class="collapsed-item"
-              @click="toggleServiceDropdown(s.id)"
+              @click="expandAndOpenDropdown(s.id)"
               :title="s.shortName"
             >
               <component :is="s.icon" :size="20" />

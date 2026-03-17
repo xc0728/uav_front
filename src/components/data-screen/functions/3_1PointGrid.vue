@@ -16,9 +16,11 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'showPoint', 'showGrid', 'show-line'])
 
-// 清除已生成的格网
+// 清除已生成的格网和中心点
 function clearGrids() {
   emit('showGrid', { cells: [] })
+  // 清除中心点
+  emit('showPoint', null)
 }
 
 const pointGridForm = reactive({
@@ -242,15 +244,14 @@ async function submitPointBufferGrid() {
             {{ pointGridLoading ? '计算中...' : '开始计算' }}
           </button>
         </div>
-        <!-- 清除格网按钮放在表单内部，始终可见 -->
-        <div class="form-actions" style="margin-top: 12px;">
-          <button type="button" class="btn-danger" @click="clearGrids">
-            <Trash2 :size="14" />
-            清除已生成格网
-          </button>
-        </div>
       </form>
       <div v-if="pointGridError" class="error">{{ pointGridError }}</div>
+      <div class="form-actions" style="margin: 12px 0 0; justify-content: flex-end;">
+        <button type="button" class="btn-danger" @click="clearGrids">
+          <Trash2 :size="14" />
+          清除已生成格网
+        </button>
+      </div>
       <div v-if="pointGridResult" class="result">
         <div class="result-row">
           <span class="result-k">网格编码</span>
@@ -363,8 +364,7 @@ async function submitPointBufferGrid() {
             {{ pointGridLoading ? '计算中...' : '开始计算' }}
           </button>
         </div>
-        <!-- 清除格网按钮放在表单内部，始终可见 -->
-        <div class="form-actions" style="margin-top: 12px;">
+        <div class="form-actions" style="margin-top: 12px; justify-content: flex-end;">
           <button type="button" class="btn-danger" @click="clearGrids">
             <Trash2 :size="14" />
             清除已生成格网
@@ -372,38 +372,17 @@ async function submitPointBufferGrid() {
         </div>
       </form>
       <div v-if="pointGridError" class="error">{{ pointGridError }}</div>
-      <div v-if="pointGridResult" class="result">
+      <div v-if="pointGridResult" class="result result--green">
         <div class="result-row">
           <span class="result-k">网格数量</span>
-          <span class="result-v">{{ pointGridResult.data?.count }}</span>
-        </div>
-        <div class="result-header">网格详情</div>
-        <div
-          v-for="(cell, index) in pointGridResult.data?.cells"
-          :key="index"
-          class="result-cell"
-        >
-          <div class="result-cell-title">网格 {{ index + 1 }}</div>
-          <div class="result-row">
-            <span class="result-k">网格编码</span>
-            <span class="result-v code">{{ cell.code }}</span>
-          </div>
-          <div class="result-row">
-            <span class="result-k">中心点</span>
-            <span class="result-v">{{ cell.center?.[0] }}, {{ cell.center?.[1] }}, {{ cell.center?.[2] }}</span>
-          </div>
-          <div class="result-row">
-            <span class="result-k">边界范围</span>
-            <span class="result-v">{{ cell.minlon?.toFixed(6) }} ~ {{ cell.maxlon?.toFixed(6) }}, {{ cell.minlat?.toFixed(6) }} ~ {{ cell.maxlat?.toFixed(6) }}</span>
-          </div>
-          <div class="result-row">
-            <span class="result-k">高度范围</span>
-            <span class="result-v">{{ cell.bottom?.toFixed(2) }} ~ {{ cell.top?.toFixed(2) }}</span>
-          </div>
+          <span class="result-v">{{ pointGridResult.data?.cells?.length || 0 }}</span>
         </div>
         <div class="result-row">
           <span class="result-k">状态</span>
           <span class="result-v">{{ pointGridResult.status }}</span>
+        </div>
+        <div class="result-hint">
+          已在地图上绘制返回网格边界
         </div>
       </div>
     </template>
@@ -471,12 +450,14 @@ async function submitPointBufferGrid() {
 .form-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 12px;
   margin-top: 6px;
 }
 
 .btn-primary {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   padding: 10px 22px;
   border-radius: 8px;
@@ -516,6 +497,49 @@ async function submitPointBufferGrid() {
   background: rgba(239, 68, 68, 0.1);
   font-size: 13px;
   color: #fca5a5;
+}
+
+.success-tip {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(34, 197, 94, 0.1);
+  font-size: 12px;
+  color: #4ade80;
+}
+
+/* 点缓冲区（球体）网格化：绿色底边和绿色字体，与 PolygonGrid 一致 */
+.result--green {
+  margin-top: 16px;
+  padding: 14px;
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  border-radius: 8px;
+}
+
+.result--green .result-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 13px;
+}
+
+.result--green .result-k {
+  color: #64748b;
+}
+
+.result--green .result-v {
+  color: #86efac;
+  font-weight: 500;
+}
+
+.result--green .result-hint {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(34, 197, 94, 0.2);
+  font-size: 12px;
+  color: #86efac;
+  text-align: center;
 }
 
 .result {
@@ -577,6 +601,7 @@ async function submitPointBufferGrid() {
 .btn-danger {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   padding: 8px 10px;
   border-radius: 8px;

@@ -701,8 +701,23 @@ function clearGridVisual() {
   }
 }
 
+function clearCenterPoint() {
+  if (!viewer) return
+  // 清除 center-point (flyToPoint 添加的)
+  const centerEntity = viewer.entities.getById('center-point')
+  if (centerEntity) {
+    viewer.entities.remove(centerEntity)
+  }
+  // 清除 grid-center-point (drawGridBoundary 添加的)
+  const gridCenterEntity = viewer.entities.getById('grid-center-point')
+  if (gridCenterEntity) {
+    viewer.entities.remove(gridCenterEntity)
+  }
+}
+
 defineExpose({
   flyToPoint,
+  clearCenterPoint,
   drawGridBoundary,
   drawLinePath,
   drawPolygon,

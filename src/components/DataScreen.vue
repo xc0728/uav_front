@@ -27,8 +27,16 @@ function handleMapPointSelected(payload) {
 
 function handleShowPoint(payload) {
   console.log('[DataScreen] 收到 showPoint 事件:', payload)
-  if (!payload || !cesiumMapRef.value) {
+  if (!cesiumMapRef.value) {
     console.log('[DataScreen] cesiumMapRef 不存在')
+    return
+  }
+  // 如果 payload 为 null 或 undefined，清除中心点
+  if (!payload) {
+    if (typeof cesiumMapRef.value.clearCenterPoint === 'function') {
+      console.log('[DataScreen] 清除中心点')
+      cesiumMapRef.value.clearCenterPoint()
+    }
     return
   }
   const { longitude, latitude, height } = payload

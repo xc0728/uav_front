@@ -636,19 +636,18 @@ async function submit() {
 }
 
 .result {
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px dashed rgba(255, 255, 255, 0.1);
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  margin-top: 16px;
+  padding: 14px;
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  border-radius: 8px;
 }
 
 .result-row {
-  display: grid;
-  grid-template-columns: 80px 1fr;
-  gap: 10px;
-  font-size: 14px;
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 13px;
 }
 
 .result-k {
@@ -656,14 +655,17 @@ async function submit() {
 }
 
 .result-v {
-  color: #e2e8f0;
-  font-variant-numeric: tabular-nums;
-  word-break: break-all;
+  color: #86efac;
+  font-weight: 500;
 }
 
 .result-hint {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(34, 197, 94, 0.2);
   font-size: 12px;
-  color: rgba(34, 197, 94, 0.9);
+  color: #86efac;
+  text-align: center;
 }
 </style>
 
