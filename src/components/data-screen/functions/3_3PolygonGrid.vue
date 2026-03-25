@@ -111,6 +111,7 @@ const currentHolePoints = ref([])
 const loadingHoles = ref(false)
 const errorHoles = ref('')
 const resultHoles = ref(null)
+const loadingDemo = ref(false)
 
 const canSubmitHoles = computed(() => {
   // 检查是否有未完成的洞
@@ -239,6 +240,38 @@ function resetFormHoles() {
   errorHoles.value = ''
   resultHoles.value = null
   emit('show-polygon', null)
+}
+
+// 加载演示数据
+async function loadDemoData() {
+  loadingDemo.value = true
+  try {
+    const resp = await fetch('/response(1).json')
+    if (!resp.ok) throw new Error('加载失败')
+    const data = await resp.json()
+
+    if (data?.data?.cells?.length) {
+      emit('show-polygon', null)
+      emit('showGrid', {
+        cells: data.data.cells.map(cell => ({
+          bounds: {
+            north: cell.maxlat,
+            south: cell.minlat,
+            east: cell.maxlon,
+            west: cell.minlon,
+            top: cell.top,
+            bottom: cell.bottom,
+          },
+          code: cell.code,
+          center: cell.center,
+        })),
+      })
+    }
+  } catch (err) {
+    errorHoles.value = err?.message || '加载演示数据失败'
+  } finally {
+    loadingDemo.value = false
+  }
 }
 
 function setPointFromMapHoles(lon, lat, height) {
@@ -850,6 +883,12 @@ watch(
         </button>
       </div>
       <div class="form-actions" style="margin-top: 12px;">
+        <button type="button" class="btn-secondary" @click="loadDemoData" :disabled="loadingDemo">
+          <Loader2 v-if="loadingDemo" :size="14" class="spin" />
+          {{ loadingDemo ? '加载中...' : '加载演示数据' }}
+        </button>
+      </div>
+      <div class="form-actions" style="margin-top: 12px;">
         <button type="button" class="btn-danger" @click="clearGrids">
           <Trash2 :size="14" />
           清除已生成格网
@@ -1209,6 +1248,30 @@ watch(
 }
 
 .btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.1);
+  color: #86efac;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  border-color: rgba(34, 197, 94, 0.5);
+  background: rgba(34, 197, 94, 0.2);
+}
+
+.btn-secondary:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
