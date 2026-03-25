@@ -5,10 +5,12 @@ import * as Cesium from 'cesium'
 const cesiumEl = ref(null)
 let viewer = null
 let handler = null
+let tileset = null
 
 const lon = ref(null)
 const lat = ref(null)
 const height = ref(null)
+const show3DTiles = ref(true)
 
 const emit = defineEmits(['point-selected'])
 
@@ -715,6 +717,12 @@ function clearCenterPoint() {
   }
 }
 
+function toggle3DTiles() {
+  if (!tileset) return
+  show3DTiles.value = !show3DTiles.value
+  tileset.show = show3DTiles.value
+}
+
 defineExpose({
   flyToPoint,
   clearCenterPoint,
@@ -724,6 +732,7 @@ defineExpose({
   clearLineVisual,
   clearPolygonVisual,
   clearGridVisual,
+  toggle3DTiles,
 })
 
 onMounted(async () => {
@@ -756,7 +765,7 @@ onMounted(async () => {
   viewer.scene.globe.depthTestAgainstTerrain = false
 
   try {
-    const tileset = await Cesium.Cesium3DTileset.fromUrl('/dq3dtiles/tileset.json')
+    tileset = await Cesium.Cesium3DTileset.fromUrl('/dq3dtiles/tileset.json')
     viewer.scene.primitives.add(tileset)
     await viewer.zoomTo(tileset)
   } catch (error) {
@@ -861,6 +870,14 @@ onBeforeUnmount(() => {
         <span class="value">{{ formatNum(height, 2) }} m</span>
       </div>
     </div>
+
+    <!-- 3D底图开关 -->
+    <div class="tileset-toggle" @click="toggle3DTiles">
+      <span class="toggle-label">3D底图</span>
+      <div class="toggle-switch" :class="{ active: show3DTiles }">
+        <div class="toggle-slider" />
+      </div>
+    </div>
   </section>
 </template>
 
@@ -906,5 +923,62 @@ onBeforeUnmount(() => {
   font-family: 'SF Mono', 'Monaco', monospace;
   font-variant-numeric: tabular-nums;
   color: #fff;
+}
+
+/* 3D底图滑动开关 */
+.tileset-toggle {
+  position: absolute;
+  right: 20px;
+  bottom: 70px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(10px);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s ease;
+}
+
+.tileset-toggle:hover {
+  background: rgba(15, 23, 42, 0.95);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.toggle-label {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.toggle-switch {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  background: rgba(100, 116, 139, 0.5);
+  border-radius: 10px;
+  transition: background 0.3s ease;
+}
+
+.toggle-switch.active {
+  background: rgba(59, 130, 246, 0.7);
+}
+
+.toggle-slider {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.3s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.toggle-switch.active .toggle-slider {
+  transform: translateX(16px);
 }
 </style>
