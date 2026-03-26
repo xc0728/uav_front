@@ -1,14 +1,16 @@
 <script setup>
 import { ref, computed, defineProps } from 'vue'
-import { ChevronRight, ChevronLeft, ChevronDown, X, Grid3X3, Navigation, Map, Calculator, Box, Settings2 } from 'lucide-vue-next'
+import { ChevronRight, ChevronLeft, ChevronDown, X, Grid3X3, Navigation, Map, Calculator, Box, Settings2, Database } from 'lucide-vue-next'
 import InteropFusion from './functions/1_GridInterop.vue'
-import TiltPhotogrammetry from './functions/2_StorageEnter.vue'
+import TiltPhotogrammetry from './functions/2_Osgb_Grid.vue'
 import GridSplit from './functions/3_1PointGrid.vue'
 import LineGrid from './functions/3_2LineGrid.vue'
 import PolygonGrid from './functions/3_3PolygonGrid.vue'
 import RangeGrid from './functions/3_4RangeGrid.vue'
 import PathPlanning from './functions/4_PathPlanning.vue'
 import SpatialRelation from './functions/5_SpatialRelation.vue'
+import AirspaceGridQuery from './functions/6_AirspaceGridQuery.vue'
+import GridAggregation from './functions/8_GridAggregation.vue'
 
 const props = defineProps({
   panelType: {
@@ -41,7 +43,7 @@ const services = [
     shortName: '倾斜摄影入库',
     icon: Map,
     component: TiltPhotogrammetry,
-    functions: ['osgb网格化（同步入库）'],
+    functions: ['osgb网格化（同步入库）', '倾斜摄影网格查询'],
   },
   {
     id: 'grid-split',
@@ -82,6 +84,26 @@ const services = [
     functions: [
       '点缓冲区网格冲突检测',
       '航路平滑处理控件',
+    ],
+  },
+  {
+    id: 'airspace-grid-query',
+    name: '空域网格化入库/查询服务',
+    shortName: '空域网格化入库/查询',
+    icon: Database,
+    component: AirspaceGridQuery,
+    functions: [
+      '空域网格查询',
+    ],
+  },
+  {
+    id: 'grid-aggregation',
+    name: '立体导航网格聚合服务',
+    shortName: '网格聚合',
+    icon: Grid3X3,
+    component: GridAggregation,
+    functions: [
+      '多粒度混合格网建模',
     ],
   },
 ]
@@ -171,6 +193,15 @@ const activeComponent = computed(() => {
       return RangeGrid
     }
   }
+  if (activeServiceId.value === 'tilt-photogrammetry') {
+    return TiltPhotogrammetry
+  }
+  if (activeServiceId.value === 'airspace-grid-query') {
+    return AirspaceGridQuery
+  }
+  if (activeServiceId.value === 'grid-aggregation') {
+    return GridAggregation
+  }
   return activeService.value?.component
 })
 
@@ -195,6 +226,18 @@ function applyMapPointToActiveService(lon, lat, height) {
       || activeFunctionName.value === '不规则多面体网格化'
       || activeFunctionName.value === '立方体网格化')
   ) {
+    if (typeof activeComponentRef.value.setPointFromMap === 'function') {
+      activeComponentRef.value.setPointFromMap(lon, lat, height)
+    }
+  }
+
+  if (activeServiceId.value === 'airspace-grid-query') {
+    if (typeof activeComponentRef.value.setPointFromMap === 'function') {
+      activeComponentRef.value.setPointFromMap(lon, lat, height)
+    }
+  }
+
+  if (activeServiceId.value === 'grid-aggregation') {
     if (typeof activeComponentRef.value.setPointFromMap === 'function') {
       activeComponentRef.value.setPointFromMap(lon, lat, height)
     }

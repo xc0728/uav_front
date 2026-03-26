@@ -58,13 +58,19 @@ function flyToPoint(lon, lat, height = 0) {
 }
 
 function drawGridBoundary(gridInfo) {
-  if (!viewer || !gridInfo) return
+  if (!viewer || !gridInfo) {
+    console.log('[CesiumMap] drawGridBoundary: viewer 或 gridInfo 不存在')
+    return
+  }
+
+  console.log('[CesiumMap] drawGridBoundary gridInfo:', JSON.stringify(gridInfo).slice(0, 500))
 
   // 先清除之前的网格边界和中心点
   clearGridVisual()
 
   // 检查是否是多个网格（cells 数组）
   if (gridInfo.cells && Array.isArray(gridInfo.cells) && gridInfo.cells.length > 0) {
+    console.log('[CesiumMap] 检测到多个网格:', gridInfo.cells.length)
     // 绘制多个网格边界
     let minLon = Infinity, maxLon = -Infinity
     let minLat = Infinity, maxLat = -Infinity
@@ -82,19 +88,29 @@ function drawGridBoundary(gridInfo) {
       minHeight = Math.min(minHeight, bottom)
       maxHeight = Math.max(maxHeight, top)
 
+      // 使用格网携带的颜色，如果没有则使用默认颜色
+      const cellColor = cell.color || '#3b82f6'
+      const cellLevel = cell.level
+
+      // 前5个格网输出调试信息
+      if (index < 5) {
+        console.log(`[CesiumMap] 格网${index + 1}: color=${cellColor}, level=${cellLevel}, bounds=(W:${west.toFixed(6)}, S:${south.toFixed(6)}, E:${east.toFixed(6)}, N:${north.toFixed(6)})`)
+      }
+
       // 绘制每个网格边界
       const cellId = `grid-boundary-${index}`
       viewer.entities.add({
         id: cellId,
         rectangle: {
           coordinates: Cesium.Rectangle.fromDegrees(west, south, east, north),
-          material: Cesium.Color.fromCssColorString('#3b82f6').withAlpha(0.25),
+          material: Cesium.Color.fromCssColorString(cellColor).withAlpha(0.5),
           outline: true,
-          outlineColor: Cesium.Color.fromCssColorString('#3b82f6'),
+          outlineColor: Cesium.Color.fromCssColorString(cellColor),
           outlineWidth: 2,
           height: bottom,
           extrudedHeight: top,
         },
+        description: cellLevel !== undefined ? `层级: ${cellLevel}` : undefined,
       })
     })
 
