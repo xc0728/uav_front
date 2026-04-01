@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, defineProps } from 'vue'
-import { ChevronRight, ChevronLeft, ChevronDown, X, Grid3X3, Navigation, Map, Calculator, Box, Settings2, Database } from 'lucide-vue-next'
+import { ChevronRight, ChevronLeft, ChevronDown, X, Grid3X3, Navigation, Map, Calculator, Box, Boxes, Settings2, Database } from 'lucide-vue-next'
 import InteropFusion from './functions/1_GridInterop.vue'
 import TiltPhotogrammetry from './functions/2_Osgb_Grid.vue'
 import GridSplit from './functions/3_1PointGrid.vue'
@@ -10,7 +10,7 @@ import RangeGrid from './functions/3_4RangeGrid.vue'
 import PathPlanning from './functions/4_PathPlanning.vue'
 import SpatialRelation from './functions/5_SpatialRelation.vue'
 import AirspaceGridQuery from './functions/6_AirspaceGridQuery.vue'
-import GridAggregation from './functions/8_GridAggregation.vue'
+import GridAggregation from './functions/7_Aggregation.vue'
 
 const props = defineProps({
   panelType: {
@@ -43,7 +43,7 @@ const services = [
     shortName: '倾斜摄影入库',
     icon: Map,
     component: TiltPhotogrammetry,
-    functions: ['osgb网格化（同步入库）', '倾斜摄影网格查询'],
+    functions: ['osgb网格化（同步入库）', '倾斜摄影网格查询', 'osgb网格化聚合入库'],
   },
   {
     id: 'grid-split',
@@ -100,10 +100,11 @@ const services = [
     id: 'grid-aggregation',
     name: '立体导航网格聚合服务',
     shortName: '网格聚合',
-    icon: Grid3X3,
+    icon: Boxes,
     component: GridAggregation,
     functions: [
       '多粒度混合格网建模',
+      '倾斜摄影多源聚合网格查询',
     ],
   },
 ]

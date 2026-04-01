@@ -20,7 +20,9 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://192.168.3.26:9997',
+               //target: 'http://192.168.3.26:9997',/
+               //target: 'http://localhost:9990',/
+               target: 'http://10.20.83.62:9997',
         changeOrigin: true,
       }
     }

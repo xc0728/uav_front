@@ -24,6 +24,16 @@ const osgbLoading = ref(false)
 const osgbError = ref('')
 const osgbResult = ref(null)
 
+// ==================== OSGB 网格化聚合入库 ====================
+const aggregationForm = reactive({
+  osgbFolder: '/app/data/osgbData',
+  level: 9,
+  minLevel: 0,
+})
+const aggregationLoading = ref(false)
+const aggregationError = ref('')
+const aggregationResult = ref(null)
+
 // ==================== 倾斜摄影网格查询 ====================
 const triangleGridForm = reactive({
   level: 9,
@@ -39,6 +49,10 @@ function resetForm() {
   if (props.functionName === 'osgb网格化（同步入库）') {
     osgbError.value = ''
     osgbResult.value = null
+  }
+  if (props.functionName === 'osgb网格化聚合入库') {
+    aggregationError.value = ''
+    aggregationResult.value = null
   }
   if (props.functionName === '倾斜摄影网格查询') {
     triangleGridError.value = ''
@@ -82,6 +96,51 @@ async function submitOsgbGrid() {
     osgbError.value = err?.message || '请求失败，请稍后重试'
   } finally {
     osgbLoading.value = false
+  }
+}
+
+// ==================== OSGB 网格化聚合入库提交 ====================
+async function submitAggregation() {
+  aggregationError.value = ''
+  aggregationResult.value = null
+  aggregationLoading.value = true
+
+  try {
+    if (!aggregationForm.osgbFolder || !aggregationForm.osgbFolder.trim()) {
+      throw new Error('请先填写 OSGB 文件目录')
+    }
+    if (!aggregationForm.level || aggregationForm.level < 0) {
+      throw new Error('请输入有效的网格层级')
+    }
+
+    const payload = {
+      osgbFolder: String(aggregationForm.osgbFolder || '').trim(),
+      level: Number(aggregationForm.level),
+      minLevel: Number(aggregationForm.minLevel) || 0,
+    }
+
+    console.log('[osgb网格化聚合入库] 发送 payload:', payload)
+
+    const resp = await fetch('/api/multiSource/triangleGrid/osgbToGridAggregation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+
+    if (!resp.ok) {
+      const errText = await resp.text()
+      console.error('[osgb网格化聚合入库] 错误响应:', errText)
+      throw new Error(`请求失败，状态码 ${resp.status}: ${errText}`)
+    }
+
+    const data = await resp.json()
+    console.log('[osgb网格化聚合入库] 原始返回:', data)
+    aggregationResult.value = data
+  } catch (err) {
+    console.error('[osgb网格化聚合入库] 请求错误:', err)
+    aggregationError.value = err?.message || '请求失败，请稍后重试'
+  } finally {
+    aggregationLoading.value = false
   }
 }
 
@@ -255,6 +314,118 @@ function clearGrids() {
       </div>
     </template>
 
+    <!-- ==================== osgb网格化聚合入库 ==================== -->
+    <template v-if="functionName === 'osgb网格化聚合入库'">
+      <div class="tip">
+        将倾斜摄影OSGB数据转换为聚合网格并存入数据库，支持多层级聚合优化
+      </div>
+
+      <form class="form" @submit.prevent="submitAggregation">
+        <div class="form-row">
+          <label class="form-label" for="agg-folder">
+            <span class="required">*</span>OSGB目录
+          </label>
+          <input
+            id="agg-folder"
+            v-model="aggregationForm.osgbFolder"
+            type="text"
+            class="form-input"
+            placeholder="/app/data/osgbData"
+            required
+          >
+        </div>
+
+        <div class="form-row">
+          <label class="form-label" for="agg-level">
+            <span class="required">*</span>网格层级
+          </label>
+          <input
+            id="agg-level"
+            v-model.number="aggregationForm.level"
+            type="number"
+            step="1"
+            min="0"
+            class="form-input"
+            placeholder="请输入网格层级"
+            required
+          >
+        </div>
+
+        <div class="form-row">
+          <label class="form-label" for="agg-minLevel">最小层级</label>
+          <input
+            id="agg-minLevel"
+            v-model.number="aggregationForm.minLevel"
+            type="number"
+            step="1"
+            min="0"
+            class="form-input"
+            placeholder="默认为0"
+          >
+        </div>
+
+        <div class="form-actions-stack">
+          <div class="form-actions form-actions-primary">
+            <button
+              type="submit"
+              class="btn-primary btn-primary-block"
+              :disabled="aggregationLoading"
+            >
+              <Loader2 v-if="aggregationLoading" :size="14" class="spin" />
+              {{ aggregationLoading ? '聚合入库中...' : '开始聚合入库' }}
+            </button>
+          </div>
+        </div>
+      </form>
+
+      <div v-if="aggregationError" class="error">{{ aggregationError }}</div>
+
+      <!-- 聚合入库结果统计 -->
+      <div v-if="aggregationResult" class="result-stats">
+        <div class="stat-card">
+          <div class="stat-value" :class="{ 'success': aggregationResult.status === 'success', 'error': aggregationResult.status !== 'success' }">
+            {{ aggregationResult.status === 'success' ? '成功' : aggregationResult.status }}
+          </div>
+          <div class="stat-label">处理状态</div>
+        </div>
+        <div v-if="aggregationResult.data?.total_triangles_processed !== undefined" class="stat-card">
+          <div class="stat-value">{{ aggregationResult.data.total_triangles_processed }}</div>
+          <div class="stat-label">处理三角形数</div>
+        </div>
+        <div v-if="aggregationResult.data?.total_grid_count_before !== undefined" class="stat-card">
+          <div class="stat-value">{{ aggregationResult.data.total_grid_count_before }}</div>
+          <div class="stat-label">聚合前网格数</div>
+        </div>
+        <div v-if="aggregationResult.data?.total_grid_count_after !== undefined" class="stat-card">
+          <div class="stat-value">{{ aggregationResult.data.total_grid_count_after }}</div>
+          <div class="stat-label">聚合后网格数</div>
+        </div>
+        <div v-if="aggregationResult.data?.level !== undefined" class="stat-card">
+          <div class="stat-value">{{ aggregationResult.data.level }}</div>
+          <div class="stat-label">网格层级</div>
+        </div>
+        <div v-if="aggregationResult.data?.minLevel !== undefined" class="stat-card">
+          <div class="stat-value">{{ aggregationResult.data.minLevel }}</div>
+          <div class="stat-label">最小聚合层级</div>
+        </div>
+      </div>
+
+      <!-- 聚合效果说明 -->
+      <div v-if="aggregationResult?.data?.total_grid_count_before && aggregationResult?.data?.total_grid_count_after" class="aggregation-effect">
+        <div class="effect-title">聚合效果</div>
+        <div class="effect-detail">
+          网格数量从 <strong>{{ aggregationResult.data.total_grid_count_before }}</strong> 减少到
+          <strong>{{ aggregationResult.data.total_grid_count_after }}</strong>，
+          减少了 <strong>{{ aggregationResult.data.total_grid_count_before - aggregationResult.data.total_grid_count_after }}</strong> 个网格
+          （约 {{ Math.round((1 - aggregationResult.data.total_grid_count_after / aggregationResult.data.total_grid_count_before) * 100) }}%）
+        </div>
+      </div>
+
+      <div v-if="aggregationResult?.data?.message" class="result-message">
+        {{ aggregationResult.data.message }}
+      </div>
+    </template>
+
     <!-- ==================== 倾斜摄影网格查询 ==================== -->
     <template v-if="functionName === '倾斜摄影网格查询'">
       <div class="tip">
@@ -278,25 +449,29 @@ function clearGrids() {
           >
         </div>
 
-        <div class="form-actions">
-          <button
-            type="button"
-            class="btn-secondary"
-            @click="clearGrids"
-            :disabled="!triangleGridResult"
-          >
-            <Trash2 :size="14" />
-            清除显示
-          </button>
-          <button
-            type="submit"
-            class="btn-primary"
-            :disabled="triangleGridLoading"
-          >
-            <Loader2 v-if="triangleGridLoading" :size="14" class="spin" />
-            <Search v-else :size="14" />
-            {{ triangleGridLoading ? '查询中...' : '开始查询' }}
-          </button>
+        <div class="form-actions-stack">
+          <div class="form-actions form-actions-primary">
+            <button
+              type="submit"
+              class="btn-primary btn-primary-block"
+              :disabled="triangleGridLoading"
+            >
+              <Loader2 v-if="triangleGridLoading" :size="14" class="spin" />
+              <Search v-else :size="14" />
+              {{ triangleGridLoading ? '查询中...' : '开始查询' }}
+            </button>
+          </div>
+          <div class="form-actions form-actions-clear-grid">
+            <button
+              type="button"
+              class="btn-clear-generated-grid"
+              @click="clearGrids"
+              :disabled="!triangleGridResult"
+            >
+              <Trash2 :size="14" />
+              清除已生成网格
+            </button>
+          </div>
         </div>
       </form>
 
@@ -370,11 +545,67 @@ function clearGrids() {
   color: #475569;
 }
 
+.form-actions-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 6px;
+}
+
 .form-actions {
   display: flex;
-  justify-content: flex-end;
   gap: 10px;
-  margin-top: 6px;
+}
+
+.form-actions-primary {
+  width: 100%;
+}
+
+.form-actions-primary .btn-primary-block {
+  width: 100%;
+  justify-content: center;
+  padding: 10px 20px;
+  border-radius: 10px;
+}
+
+.form-actions-clear-grid {
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.btn-clear-generated-grid {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: auto;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(248, 113, 113, 0.65);
+  background: rgba(127, 29, 29, 0.35);
+  color: #fecaca;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-clear-generated-grid :deep(svg) {
+  flex-shrink: 0;
+}
+
+.btn-clear-generated-grid:hover:not(:disabled) {
+  background: rgba(153, 27, 27, 0.45);
+  border-color: #f87171;
+  color: #fff;
+}
+
+.btn-clear-generated-grid:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .btn-primary {
@@ -399,32 +630,6 @@ function clearGrids() {
 
 .btn-primary:disabled {
   opacity: 0.7;
-  cursor: default;
-}
-
-.btn-secondary {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 16px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
-  color: #94a3b8;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
-  color: #f1f5f9;
-}
-
-.btn-secondary:disabled {
-  opacity: 0.5;
   cursor: default;
 }
 
@@ -524,6 +729,49 @@ function clearGrids() {
   margin-top: 4px;
 }
 
+/* 聚合入库结果样式 - 使用 flex-wrap 支持多列显示 */
+.result-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.result-stats .stat-card {
+  flex: 1;
+  min-width: calc(33.33% - 8px);
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  text-align: center;
+}
+
+.result-stats .stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #60a5fa;
+  font-variant-numeric: tabular-nums;
+}
+
+.result-stats .stat-value.success {
+  color: #34d399;
+  font-size: 14px;
+  text-transform: uppercase;
+}
+
+.result-stats .stat-value.error {
+  color: #f87171;
+  font-size: 14px;
+  text-transform: uppercase;
+}
+
+.result-stats .stat-label {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 4px;
+}
+
 .no-data {
   margin-top: 20px;
   padding: 30px;
@@ -532,5 +780,44 @@ function clearGrids() {
   background: rgba(30, 41, 59, 0.5);
   border-radius: 10px;
   border: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+/* 聚合效果说明 */
+.aggregation-effect {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 8px;
+}
+
+.effect-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #6ee7b7;
+  margin-bottom: 8px;
+}
+
+.effect-detail {
+  font-size: 13px;
+  color: #a7f3d0;
+  line-height: 1.5;
+}
+
+.effect-detail strong {
+  color: #34d399;
+  font-weight: 600;
+}
+
+/* 结果消息 */
+.result-message {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 8px;
+  color: #60a5fa;
+  font-size: 13px;
+  line-height: 1.5;
 }
 </style>

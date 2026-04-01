@@ -76,6 +76,7 @@ async function submitAirspaceGridQuery() {
     }
 
     const data = await resp.json()
+    airspaceGridResult.value = data
     console.log('[空域网格查询] 原始返回:', data)
     console.log('[空域网格查询] data.data 类型:', typeof data.data, Array.isArray(data.data))
     if (data?.data) {
@@ -174,25 +175,29 @@ function clearGrids() {
           >
         </div>
 
-        <div class="form-actions">
-          <button
-            type="button"
-            class="btn-secondary"
-            @click="clearGrids"
-            :disabled="!airspaceGridResult"
-          >
-            <Trash2 :size="14" />
-            清除显示
-          </button>
-          <button
-            type="submit"
-            class="btn-primary"
-            :disabled="airspaceGridLoading"
-          >
-            <Loader2 v-if="airspaceGridLoading" :size="14" class="spin" />
-            <Search v-else :size="14" />
-            {{ airspaceGridLoading ? '查询中...' : '开始查询' }}
-          </button>
+        <div class="form-actions-stack">
+          <div class="form-actions form-actions-primary">
+            <button
+              type="submit"
+              class="btn-primary btn-primary-block"
+              :disabled="airspaceGridLoading"
+            >
+              <Loader2 v-if="airspaceGridLoading" :size="14" class="spin" />
+              <Search v-else :size="14" />
+              {{ airspaceGridLoading ? '查询中...' : '开始查询' }}
+            </button>
+          </div>
+          <div class="form-actions form-actions-clear-grid">
+            <button
+              type="button"
+              class="btn-clear-generated-grid"
+              @click="clearGrids"
+              :disabled="!airspaceGridResult"
+            >
+              <Trash2 :size="14" />
+              清除已生成网格
+            </button>
+          </div>
         </div>
       </form>
 
@@ -266,11 +271,67 @@ function clearGrids() {
   color: #475569;
 }
 
+.form-actions-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 6px;
+}
+
 .form-actions {
   display: flex;
-  justify-content: flex-end;
   gap: 10px;
-  margin-top: 6px;
+}
+
+.form-actions-primary {
+  width: 100%;
+}
+
+.form-actions-primary .btn-primary-block {
+  width: 100%;
+  justify-content: center;
+  padding: 10px 20px;
+  border-radius: 10px;
+}
+
+.form-actions-clear-grid {
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.btn-clear-generated-grid {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: auto;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(248, 113, 113, 0.65);
+  background: rgba(127, 29, 29, 0.35);
+  color: #fecaca;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn-clear-generated-grid :deep(svg) {
+  flex-shrink: 0;
+}
+
+.btn-clear-generated-grid:hover:not(:disabled) {
+  background: rgba(153, 27, 27, 0.45);
+  border-color: #f87171;
+  color: #fff;
+}
+
+.btn-clear-generated-grid:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .btn-primary {
@@ -295,32 +356,6 @@ function clearGrids() {
 
 .btn-primary:disabled {
   opacity: 0.7;
-  cursor: default;
-}
-
-.btn-secondary {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 16px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
-  color: #94a3b8;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
-  color: #f1f5f9;
-}
-
-.btn-secondary:disabled {
-  opacity: 0.5;
   cursor: default;
 }
 
