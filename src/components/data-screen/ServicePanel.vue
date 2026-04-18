@@ -243,6 +243,12 @@ function applyMapPointToActiveService(lon, lat, height) {
       activeComponentRef.value.setPointFromMap(lon, lat, height)
     }
   }
+
+  if (activeServiceId.value === 'path-planning' && activeFunctionName.value === 'A星航路规划') {
+    if (typeof activeComponentRef.value.setPointFromMap === 'function') {
+      activeComponentRef.value.setPointFromMap(lon, lat, height)
+    }
+  }
 }
 
 defineExpose({
