@@ -345,6 +345,7 @@ function handleGetViewBounds() {
           @show-grid="handleShowGrid"
           @show-line="handleShowLine"
           @show-polygon="handleShowPolygon"
+          @get-view-bounds="handleGetViewBounds"
         />
       </main>
     </template>

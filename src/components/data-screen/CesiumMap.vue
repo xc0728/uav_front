@@ -1748,19 +1748,41 @@ function getViewBounds() {
     viewer.scene
   )
 
-  if (!bottomLeftCartesian || !topRightCartesian) {
-    console.log('[CesiumMap] getViewBounds: 无法获取边界坐标')
+  let bounds = null
+
+  // 如果能够获取到地球表面的点
+  if (bottomLeftCartesian && topRightCartesian) {
+    const bottomLeftCart = Cesium.Cartographic.fromCartesian(bottomLeftCartesian)
+    const topRightCart = Cesium.Cartographic.fromCartesian(topRightCartesian)
+
+    bounds = {
+      west: Cesium.Math.toDegrees(bottomLeftCart.longitude),
+      south: Cesium.Math.toDegrees(bottomLeftCart.latitude),
+      east: Cesium.Math.toDegrees(topRightCart.longitude),
+      north: Cesium.Math.toDegrees(topRightCart.latitude),
+    }
+  } else {
+    // 备用方案：使用 camera.viewRectangle 获取相机的可视区域
+    const rect = camera.computeViewRectangle()
+    if (rect) {
+      bounds = {
+        west: Cesium.Math.toDegrees(rect.west),
+        south: Cesium.Math.toDegrees(rect.south),
+        east: Cesium.Math.toDegrees(rect.east),
+        north: Cesium.Math.toDegrees(rect.north),
+      }
+    }
+  }
+
+  if (!bounds) {
+    console.log('[CesiumMap] getViewBounds: 无法获取视图边界')
     return null
   }
 
-  const bottomLeftCart = Cesium.Cartographic.fromCartesian(bottomLeftCartesian)
-  const topRightCart = Cesium.Cartographic.fromCartesian(topRightCartesian)
-
-  const bounds = {
-    west: Cesium.Math.toDegrees(bottomLeftCart.longitude),
-    south: Cesium.Math.toDegrees(bottomLeftCart.latitude),
-    east: Cesium.Math.toDegrees(topRightCart.longitude),
-    north: Cesium.Math.toDegrees(topRightCart.latitude),
+  // 验证边界合理性
+  if (bounds.west >= bounds.east || bounds.south >= bounds.north) {
+    console.log('[CesiumMap] getViewBounds: 边界值不合法')
+    return null
   }
 
   console.log('[CesiumMap] 获取视图边界:', bounds)

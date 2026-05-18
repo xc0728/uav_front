@@ -13,7 +13,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['close', 'showPoint', 'showGrid'])
+const emit = defineEmits(['close', 'showPoint', 'showGrid', 'showLine'])
 
 // ==================== A* 航路规划 ====================
 // 路径点列表（起点 + 中间点 + 终点）
@@ -70,15 +70,75 @@ function resetForm() {
     astarForm.useGdConstraint = true
     closeStoreModal()
   }
+
+  if (props.functionName === '路径冲突检测（所有冲突）') {
+    conflictError.value = ''
+    conflictResult.value = null
+    conflictStats.value = null
+    conflictPoints.value = []
+    conflictForm.startTime = Math.floor(Date.now() / 1000)
+    conflictForm.level = 9
+    conflictForm.planeRadius = 0.75
+    conflictForm.speed = 15.0
+    conflictForm.workHeight = 100
+    conflictForm.useGdConstraint = true
+  }
+
+  if (props.functionName === '路径冲突检测（首个冲突）') {
+    conflictFirstError.value = ''
+    conflictFirstResult.value = null
+    conflictFirstPoints.value = []
+    conflictFirstForm.startTime = Math.floor(Date.now() / 1000)
+    conflictFirstForm.level = 9
+    conflictFirstForm.planeRadius = 0.75
+    conflictFirstForm.speed = 15.0
+    conflictFirstForm.workHeight = 100
+    conflictFirstForm.useGdConstraint = true
+  }
 }
 
 // 从地图添加点
 function setPointFromMap(lon, lat, height) {
-  if (props.functionName !== 'A星航路规划') return
+  // A星航路规划
+  if (props.functionName === 'A星航路规划') {
+    pathPoints.value.push(normalizePoint({ lon, lat, height }))
+    console.log('[A星航路规划] 添加点:', lon, lat, height)
+    return
+  }
 
-  pathPoints.value.push(normalizePoint({ lon, lat, height }))
+  // 路径冲突检测（所有冲突）
+  if (props.functionName === '路径冲突检测（所有冲突）') {
+    conflictPoints.value.push(normalizePoint({ lon, lat, height }))
+    console.log('[路径冲突检测] 添加点:', lon, lat, height)
 
-  console.log('[A星航路规划] 添加点:', lon, lat, height)
+    // 当有至少2个点时，显示路径连线
+    if (conflictPoints.value.length >= 2) {
+      const linePoints = conflictPoints.value.map(p => ({
+        lon: p.lon,
+        lat: p.lat,
+        height: p.height
+      }))
+      emit('showLine', linePoints)
+    }
+    return
+  }
+
+  // 路径冲突检测（首个冲突）
+  if (props.functionName === '路径冲突检测（首个冲突）') {
+    conflictFirstPoints.value.push(normalizePoint({ lon, lat, height }))
+    console.log('[路径冲突检测-首个] 添加点:', lon, lat, height)
+
+    // 当有至少2个点时，显示路径连线
+    if (conflictFirstPoints.value.length >= 2) {
+      const linePoints = conflictFirstPoints.value.map(p => ({
+        lon: p.lon,
+        lat: p.lat,
+        height: p.height
+      }))
+      emit('showLine', linePoints)
+    }
+    return
+  }
 }
 
 // 删除点
@@ -159,6 +219,401 @@ async function submitStoreRoute() {
     storeError.value = err?.message || '入库请求失败'
   } finally {
     storeLoading.value = false
+  }
+}
+
+// 路径冲突检测（所有冲突）- 表单数据
+const conflictForm = reactive({
+  startTime: Math.floor(Date.now() / 1000), // 默认当前时间戳
+  level: 9, // 默认网格层级 9
+  planeRadius: 0.75, // 默认无人机半径
+  speed: 15.0, // 默认飞行速度
+  workHeight: 100, // 默认工作面高度
+  useGdConstraint: true, // 默认启用实景三维障碍校验
+})
+
+// 冲突检测点列表
+const conflictPoints = ref([])
+
+// 冲突检测状态和结果
+const conflictLoading = ref(false)
+const conflictError = ref('')
+const conflictResult = ref(null)
+const conflictStats = ref(null)
+
+// 冲突类型对应的颜色
+const conflictColors = {
+  'hl': '#22c55e',     // 航路 - 绿色
+  'hlz': '#f97316',    // 航路作为障碍物 - 橙色
+  'fx': '#ef4444',     // 风险区域 - 红色
+  'gd': '#8b5cf6',     // 实景三维障碍 - 紫色
+  'dt': '#06b6d4',     // 无人机实时占用 - 青色
+  'dz': '#f43f5e',     // 电子围栏 - 玫红
+  'za': '#eab308',     // 障碍物 - 黄色
+  'dc': '#64748b',     // 电磁环境 - 灰色
+  'ad': '#ec4899',     // 空域类型 - 粉色
+  'dp': '#14b8a6',     // 实时占用 - 青色
+  'wdd': '#a855f7',    // 天气/天 - 紫色
+  'wdh': '#6366f1',    // 天气/小时 - 靛蓝
+  'default': '#ff0000' // 默认红色
+}
+
+// 删除冲突点
+function removeConflictPoint(index) {
+  conflictPoints.value.splice(index, 1)
+  // 更新路径连线
+  if (conflictPoints.value.length >= 2) {
+    const linePoints = conflictPoints.value.map(p => ({
+      lon: p.lon,
+      lat: p.lat,
+      height: p.height
+    }))
+    emit('showLine', linePoints)
+  } else {
+    // 少于2个点时清除连线
+    emit('showLine', [])
+  }
+}
+
+// 清空冲突点
+function clearConflictPoints() {
+  conflictPoints.value = []
+  // 清除路径连线
+  emit('showLine', [])
+}
+
+// 清除冲突检测结果
+function clearConflictResult() {
+  emit('showGrid', { cells: [] })
+  conflictResult.value = null
+  conflictStats.value = null
+}
+
+// 获取冲突类型的显示名称
+function getConflictTypeName(code) {
+  const names = {
+    'hl': '航路冲突',
+    'hlz': '航路障碍',
+    'fx': '风险区域',
+    'gd': '实景障碍',
+    'dt': '无人机占用',
+    'dz': '电子围栏',
+    'za': '障碍物',
+    'dc': '电磁干扰',
+    'ad': '空域限制',
+    'dp': '实时占用',
+    'wdd': '天气/天限制',
+    'wdh': '天气/小时限制',
+    'default': '未知冲突'
+  }
+  return names[code] || code || '未知冲突'
+}
+
+// 表单验证 - 冲突检测
+const canSubmitConflict = computed(() => {
+  if (conflictPoints.value.length < 2) return false
+  if (!Number.isFinite(Number(conflictForm.startTime))) return false
+  if (!Number.isFinite(Number(conflictForm.level))) return false
+  if (!Number.isFinite(Number(conflictForm.workHeight))) return false
+  return true
+})
+
+// 提交冲突检测
+async function submitConflictCheck() {
+  conflictError.value = ''
+  conflictResult.value = null
+  conflictStats.value = null
+
+  // 验证点数
+  if (conflictPoints.value.length < 2) {
+    conflictError.value = '请至少添加起点和终点（2个点）'
+    return
+  }
+
+  conflictLoading.value = true
+
+  try {
+    // 构建约束条件
+    const condition = {}
+    // 只有勾选了启用实景三维障碍校验，才传入 gd_9 参数
+    if (conflictForm.useGdConstraint) {
+      condition.gd_9 = ""
+    }
+
+    // 构建请求参数
+    const payload = {
+      startTime: Number(conflictForm.startTime),
+      points: conflictPoints.value.map(p => [p.lon, p.lat, p.height]),
+      level: Number(conflictForm.level),
+      planeRadius: Number(conflictForm.planeRadius),
+      speed: Number(conflictForm.speed),
+      workHeight: Number(conflictForm.workHeight),
+      condition: condition
+    }
+
+    console.log('[路径冲突检测] 发送 payload:', payload)
+
+    const resp = await fetch('/api/airRoute/lineConflict/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+
+    const data = await resp.json()
+    console.log('[路径冲突检测] 返回数据:', data)
+
+    // 根据状态码处理响应
+    if (resp.status === 200) {
+      // 无冲突
+      conflictResult.value = {
+        status: 'no_conflict',
+        reason: data.reason || '检测通过，无冲突',
+        grids: []
+      }
+      conflictStats.value = {
+        conflictCount: 0,
+        gridCount: 0,
+        status: 'success'
+      }
+
+      // 如果后端返回了路径网格数据，也进行可视化
+      if (data.grid && Array.isArray(data.grid) && data.grid.length > 0) {
+        const cells = data.grid.map(cell => ({
+          bounds: {
+            north: cell.maxlat,
+            south: cell.minlat,
+            east: cell.maxlon,
+            west: cell.minlon,
+            top: cell.top,
+            bottom: cell.bottom,
+          },
+          level: conflictForm.level,
+          color: '#22c55e' // 无冲突用绿色
+        }))
+        emit('showGrid', { cells })
+      }
+    } else if (resp.status === 400) {
+      // 有冲突
+      const grids = data.grid || []
+      conflictResult.value = {
+        status: 'has_conflict',
+        reason: '检测到冲突',
+        grids: grids
+      }
+
+      // 统计冲突信息
+      const conflictCount = grids.length
+      conflictStats.value = {
+        conflictCount: conflictCount,
+        gridCount: grids.length,
+        status: 'conflict_detected'
+      }
+
+      // 在地图上显示所有返回的网格
+      if (grids.length > 0) {
+        const cells = grids.map(cell => {
+          // 判断是否为冲突网格（有reason字段表示冲突）
+          const isConflict = cell.reason && cell.reason.trim() !== ''
+          // 冲突网格用红色，无冲突网格用绿色
+          let color = '#22c55e' // 默认绿色
+
+          if (isConflict) {
+            // 从 reason 字段提取冲突类型，使用对应颜色
+            const reasonLower = cell.reason.toLowerCase()
+            for (const [key, value] of Object.entries(conflictColors)) {
+              if (reasonLower.includes(key)) {
+                color = value
+                break
+              }
+            }
+            // 如果没有匹配到具体类型，使用默认红色
+            if (color === '#22c55e') {
+              color = conflictColors['default']
+            }
+          }
+
+          return {
+            bounds: {
+              north: cell.maxlat,
+              south: cell.minlat,
+              east: cell.maxlon,
+              west: cell.minlon,
+              top: cell.top,
+              bottom: cell.bottom,
+            },
+            level: conflictForm.level,
+            color: color,
+            isConflict: isConflict,
+            reason: cell.reason || ''
+          }
+        })
+        emit('showGrid', { cells })
+      }
+    } else {
+      throw new Error(`请求失败，状态码 ${resp.status}`)
+    }
+  } catch (err) {
+    console.error('[路径冲突检测] 请求错误:', err)
+    conflictError.value = err?.message || '请求失败，请稍后重试'
+  } finally {
+    conflictLoading.value = false
+  }
+}
+
+// 路径冲突检测（首个冲突）- 表单数据
+const conflictFirstForm = reactive({
+  startTime: Math.floor(Date.now() / 1000), // 默认当前时间戳
+  level: 9, // 默认网格层级 9
+  planeRadius: 0.75, // 默认无人机半径
+  speed: 15.0, // 默认飞行速度
+  workHeight: 100, // 默认工作面高度
+  useGdConstraint: true, // 默认启用实景三维障碍校验
+})
+
+// 首个冲突检测点列表
+const conflictFirstPoints = ref([])
+
+// 首个冲突检测状态和结果
+const conflictFirstLoading = ref(false)
+const conflictFirstError = ref('')
+const conflictFirstResult = ref(null)
+
+// 删除首个冲突点
+function removeConflictFirstPoint(index) {
+  conflictFirstPoints.value.splice(index, 1)
+  // 更新路径连线
+  if (conflictFirstPoints.value.length >= 2) {
+    const linePoints = conflictFirstPoints.value.map(p => ({
+      lon: p.lon,
+      lat: p.lat,
+      height: p.height
+    }))
+    emit('showLine', linePoints)
+  } else {
+    // 少于2个点时清除连线
+    emit('showLine', [])
+  }
+}
+
+// 清空首个冲突点
+function clearConflictFirstPoints() {
+  conflictFirstPoints.value = []
+  // 清除路径连线
+  emit('showLine', [])
+}
+
+// 清除首个冲突检测结果
+function clearConflictFirstResult() {
+  emit('showGrid', { cells: [] })
+  conflictFirstResult.value = null
+}
+
+// 表单验证 - 首个冲突检测
+const canSubmitConflictFirst = computed(() => {
+  if (conflictFirstPoints.value.length < 2) return false
+  if (!Number.isFinite(Number(conflictFirstForm.startTime))) return false
+  if (!Number.isFinite(Number(conflictFirstForm.level))) return false
+  if (!Number.isFinite(Number(conflictFirstForm.workHeight))) return false
+  return true
+})
+
+// 提交首个冲突检测
+async function submitConflictFirstCheck() {
+  conflictFirstError.value = ''
+  conflictFirstResult.value = null
+
+  // 验证点数
+  if (conflictFirstPoints.value.length < 2) {
+    conflictFirstError.value = '请至少添加起点和终点（2个点）'
+    return
+  }
+
+  conflictFirstLoading.value = true
+
+  try {
+    // 构建约束条件
+    const condition = {}
+    // 只有勾选了启用实景三维障碍校验，才传入 gd_9 参数
+    if (conflictFirstForm.useGdConstraint) {
+      condition.gd_9 = ""
+    }
+
+    // 构建请求参数
+    const payload = {
+      startTime: Number(conflictFirstForm.startTime),
+      points: conflictFirstPoints.value.map(p => [p.lon, p.lat, p.height]),
+      level: Number(conflictFirstForm.level),
+      planeRadius: Number(conflictFirstForm.planeRadius),
+      speed: Number(conflictFirstForm.speed),
+      workHeight: Number(conflictFirstForm.workHeight),
+      condition: condition
+    }
+
+    console.log('[路径冲突检测-首个] 发送 payload:', payload)
+
+    const resp = await fetch('/api/airRoute/lineConflict/checkFirst', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+
+    const data = await resp.json()
+    console.log('[路径冲突检测-首个] 返回数据:', data)
+
+    // 根据状态码处理响应
+    if (resp.status === 200) {
+      // 无冲突
+      conflictFirstResult.value = {
+        status: 'no_conflict',
+        reason: data.reason || '检测通过，无冲突',
+        grid: null
+      }
+    } else if (resp.status === 400) {
+      // 有冲突，返回单个冲突网格
+      const grid = data.grid
+      conflictFirstResult.value = {
+        status: 'has_conflict',
+        reason: data.reason || '检测到冲突',
+        grid: grid
+      }
+
+      // 在地图上显示冲突网格
+      if (grid) {
+        // 从 reason 字段提取冲突类型，使用对应颜色
+        let color = conflictColors['default']
+        if (data.reason) {
+          const reasonLower = data.reason.toLowerCase()
+          for (const [key, value] of Object.entries(conflictColors)) {
+            if (reasonLower.includes(key)) {
+              color = value
+              break
+            }
+          }
+        }
+
+        const cells = [{
+          bounds: {
+            north: grid.maxlat,
+            south: grid.minlat,
+            east: grid.maxlon,
+            west: grid.minlon,
+            top: grid.top,
+            bottom: grid.bottom,
+          },
+          level: conflictFirstForm.level,
+          color: color,
+          reason: data.reason || ''
+        }]
+        emit('showGrid', { cells })
+      }
+    } else {
+      throw new Error(`请求失败，状态码 ${resp.status}`)
+    }
+  } catch (err) {
+    console.error('[路径冲突检测-首个] 请求错误:', err)
+    conflictFirstError.value = err?.message || '请求失败，请稍后重试'
+  } finally {
+    conflictFirstLoading.value = false
   }
 }
 
@@ -527,6 +982,488 @@ async function submitAstarPath() {
           </div>
         </div>
       </Teleport>
+    </template>
+
+    <!-- 路径冲突检测（所有冲突） -->
+    <template v-if="functionName === '路径冲突检测（所有冲突）'">
+      <div class="tip">
+        <MapPin :size="14" />
+        <span>点击地图添加路径点（至少2个点：起点 + 终点，可添加多个途经点）</span>
+      </div>
+
+      <form class="form" @submit.prevent="submitConflictCheck">
+        <!-- 路径点列表 -->
+        <div class="points-section">
+          <div class="points-title">
+            <span>路径点列表</span>
+            <span class="points-count">({{ conflictPoints.length }}个)</span>
+            <button type="button" class="icon-btn-mini clear-btn" @click="clearConflictPoints" :disabled="conflictPoints.length === 0" title="清空所有点">
+              <Trash2 :size="11" />
+            </button>
+          </div>
+
+          <div v-if="conflictPoints.length === 0" class="empty-hint">
+            暂无路径点，请点击地图添加（至少2个点）
+          </div>
+
+          <div v-else class="points-list">
+            <div v-for="(point, idx) in conflictPoints" :key="idx" class="point-card">
+              <div class="point-card-header">
+                <div class="point-index-badge" :class="{
+                  'badge-start': idx === 0,
+                  'badge-end': idx === conflictPoints.length - 1 && conflictPoints.length > 1,
+                  'badge-waypoint': idx !== 0 && idx !== conflictPoints.length - 1
+                }">
+                  {{ idx === 0 ? '起点' : idx === conflictPoints.length - 1 ? '终点' : `途经${idx}` }}
+                </div>
+                <button type="button" class="icon-btn-mini" @click="removeConflictPoint(idx)" title="删除此点">
+                  <Trash2 :size="14" />
+                </button>
+              </div>
+              <div class="point-fields">
+                <div class="field">
+                  <label class="field-label">经度</label>
+                  <input
+                    v-model.number="conflictPoints[idx].lon"
+                    class="point-input-mini"
+                    type="number"
+                    step="any"
+                    placeholder="经度"
+                  >
+                </div>
+                <div class="field">
+                  <label class="field-label">纬度</label>
+                  <input
+                    v-model.number="conflictPoints[idx].lat"
+                    class="point-input-mini"
+                    type="number"
+                    step="any"
+                    placeholder="纬度"
+                  >
+                </div>
+                <div class="field">
+                  <label class="field-label">高度(m)</label>
+                  <input
+                    v-model.number="conflictPoints[idx].height"
+                    class="point-input-mini"
+                    type="number"
+                    step="any"
+                    placeholder="高度"
+                  >
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 基础参数 -->
+        <div class="form-row">
+          <label class="form-label" for="conflictStartTime">开始时间</label>
+          <input
+            id="conflictStartTime"
+            v-model.number="conflictForm.startTime"
+            type="number"
+            step="1"
+            class="form-input"
+            placeholder="北京时间秒级时间戳"
+          >
+        </div>
+
+        <div class="form-row">
+          <label class="form-label" for="conflictWorkHeight">工作面高度</label>
+          <input
+            id="conflictWorkHeight"
+            v-model.number="conflictForm.workHeight"
+            type="number"
+            step="any"
+            class="form-input"
+            placeholder="无人机作业基准高度"
+          >
+        </div>
+
+        <!-- 网格设置 -->
+        <div class="form-row">
+          <label class="form-label" for="conflictLevel">网格层级</label>
+          <select
+            id="conflictLevel"
+            v-model.number="conflictForm.level"
+            class="form-select"
+            required
+          >
+            <option :value="9">第 9 级</option>
+          </select>
+          <span class="form-hint">当前仅支持 9 级网格</span>
+        </div>
+
+        <div class="form-row">
+          <label class="form-label" for="conflictPlaneRadius">无人机半径</label>
+          <input
+            id="conflictPlaneRadius"
+            v-model.number="conflictForm.planeRadius"
+            type="number"
+            step="0.01"
+            class="form-input"
+            placeholder="无人机机身半径(米)"
+          >
+        </div>
+
+        <div class="form-row">
+          <label class="form-label" for="conflictSpeed">飞行速度</label>
+          <input
+            id="conflictSpeed"
+            v-model.number="conflictForm.speed"
+            type="number"
+            step="0.1"
+            class="form-input"
+            placeholder="飞行速度(米/秒)"
+          >
+        </div>
+
+        <!-- 约束条件 -->
+        <div class="constraint-section">
+          <div class="constraint-title">约束条件</div>
+          <div class="form-row">
+            <label class="checkbox-label">
+              <input
+                type="checkbox"
+                v-model="conflictForm.useGdConstraint"
+                class="checkbox-input"
+              >
+              <span class="checkbox-text">启用实景三维障碍校验</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- 提交按钮 -->
+        <div class="form-actions-stack">
+          <div class="form-actions form-actions-primary">
+            <button
+              type="submit"
+              class="btn-primary btn-primary-block"
+              :disabled="conflictLoading || !canSubmitConflict"
+            >
+              <Loader2 v-if="conflictLoading" :size="13" class="spin" />
+              <Search v-else :size="13" />
+              {{ conflictLoading ? '检测中...' : '开始冲突检测' }}
+            </button>
+          </div>
+          <div class="form-actions form-actions-clear-grid">
+            <button
+              type="button"
+              class="btn-clear-generated-grid"
+              @click="clearConflictResult"
+              :disabled="!conflictResult"
+            >
+              <Trash2 :size="14" />
+              清除检测结果
+            </button>
+          </div>
+        </div>
+      </form>
+
+      <div v-if="conflictError" class="error">{{ conflictError }}</div>
+
+      <!-- 检测结果 -->
+      <div v-if="conflictResult">
+        <!-- 无冲突结果 -->
+        <div v-if="conflictResult.status === 'no_conflict'" class="result-success">
+          <div class="result-icon">
+            <Check :size="24" />
+          </div>
+          <div class="result-title">检测通过</div>
+          <div class="result-message">{{ conflictResult.reason }}</div>
+        </div>
+
+        <!-- 有冲突结果 -->
+        <div v-if="conflictResult.status === 'has_conflict'">
+          <div class="conflict-warning">
+            <div class="conflict-warning-icon">!</div>
+            <div class="conflict-warning-text">
+              检测到 {{ conflictStats?.conflictCount || 0 }} 个冲突网格
+            </div>
+          </div>
+
+          <!-- 冲突统计 -->
+          <div v-if="conflictStats" class="result-stats">
+            <div class="stat-card">
+              <div class="stat-value error">{{ conflictStats.conflictCount }}</div>
+              <div class="stat-label">冲突网格数</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value error">冲突</div>
+              <div class="stat-label">检测状态</div>
+            </div>
+          </div>
+
+          <!-- 冲突列表 -->
+          <div v-if="conflictResult.grids && conflictResult.grids.length > 0" class="conflict-list">
+            <div class="conflict-list-title">冲突详情</div>
+            <div v-for="(grid, idx) in conflictResult.grids" :key="idx" class="conflict-item">
+              <div class="conflict-item-header">
+                <span class="conflict-index">#{{ idx + 1 }}</span>
+                <span class="conflict-type">{{ getConflictTypeName(grid.code) }}</span>
+              </div>
+              <div class="conflict-item-details">
+                <div class="conflict-detail">
+                  <span class="detail-label">编码:</span>
+                  <span class="detail-value">{{ grid.code || 'N/A' }}</span>
+                </div>
+                <div class="conflict-detail">
+                  <span class="detail-label">中心:</span>
+                  <span class="detail-value">
+                    {{ grid.center ? `${grid.center[0]?.toFixed(6)}, ${grid.center[1]?.toFixed(6)}, ${grid.center[2]?.toFixed(1)}` : 'N/A' }}
+                  </span>
+                </div>
+                <div class="conflict-detail">
+                  <span class="detail-label">范围:</span>
+                  <span class="detail-value">
+                    经度 {{ grid.minlon?.toFixed(6) }} ~ {{ grid.maxlon?.toFixed(6) }}<br>
+                    纬度 {{ grid.minlat?.toFixed(6) }} ~ {{ grid.maxlat?.toFixed(6) }}<br>
+                    高度 {{ grid.bottom?.toFixed(1) }} ~ {{ grid.top?.toFixed(1) }}m
+                  </span>
+                </div>
+                <div v-if="grid.reason" class="conflict-reason">
+                  <span class="detail-label">原因:</span>
+                  <span class="detail-value reason-text">{{ grid.reason }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- 路径冲突检测（首个冲突） -->
+    <template v-if="functionName === '路径冲突检测（首个冲突）'">
+      <div class="tip">
+        <MapPin :size="14" />
+        <span>点击地图添加路径点（至少2个点：起点 + 终点，可添加多个途经点）</span>
+      </div>
+
+      <form class="form" @submit.prevent="submitConflictFirstCheck">
+        <!-- 路径点列表 -->
+        <div class="points-section">
+          <div class="points-title">
+            <span>路径点列表</span>
+            <span class="points-count">({{ conflictFirstPoints.length }}个)</span>
+            <button type="button" class="icon-btn-mini clear-btn" @click="clearConflictFirstPoints" :disabled="conflictFirstPoints.length === 0" title="清空所有点">
+              <Trash2 :size="11" />
+            </button>
+          </div>
+
+          <div v-if="conflictFirstPoints.length === 0" class="empty-hint">
+            暂无路径点，请点击地图添加（至少2个点）
+          </div>
+
+          <div v-else class="points-list">
+            <div v-for="(point, idx) in conflictFirstPoints" :key="idx" class="point-card">
+              <div class="point-card-header">
+                <div class="point-index-badge" :class="{
+                  'badge-start': idx === 0,
+                  'badge-end': idx === conflictFirstPoints.length - 1 && conflictFirstPoints.length > 1,
+                  'badge-waypoint': idx !== 0 && idx !== conflictFirstPoints.length - 1
+                }">
+                  {{ idx === 0 ? '起点' : idx === conflictFirstPoints.length - 1 ? '终点' : `途经${idx}` }}
+                </div>
+                <button type="button" class="icon-btn-mini" @click="removeConflictFirstPoint(idx)" title="删除此点">
+                  <Trash2 :size="14" />
+                </button>
+              </div>
+              <div class="point-fields">
+                <div class="field">
+                  <label class="field-label">经度</label>
+                  <input
+                    v-model.number="conflictFirstPoints[idx].lon"
+                    class="point-input-mini"
+                    type="number"
+                    step="any"
+                    placeholder="经度"
+                  >
+                </div>
+                <div class="field">
+                  <label class="field-label">纬度</label>
+                  <input
+                    v-model.number="conflictFirstPoints[idx].lat"
+                    class="point-input-mini"
+                    type="number"
+                    step="any"
+                    placeholder="纬度"
+                  >
+                </div>
+                <div class="field">
+                  <label class="field-label">高度(m)</label>
+                  <input
+                    v-model.number="conflictFirstPoints[idx].height"
+                    class="point-input-mini"
+                    type="number"
+                    step="any"
+                    placeholder="高度"
+                  >
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 基础参数 -->
+        <div class="form-row">
+          <label class="form-label" for="conflictFirstStartTime">开始时间</label>
+          <input
+            id="conflictFirstStartTime"
+            v-model.number="conflictFirstForm.startTime"
+            type="number"
+            step="1"
+            class="form-input"
+            placeholder="北京时间秒级时间戳"
+          >
+        </div>
+
+        <div class="form-row">
+          <label class="form-label" for="conflictFirstWorkHeight">工作面高度</label>
+          <input
+            id="conflictFirstWorkHeight"
+            v-model.number="conflictFirstForm.workHeight"
+            type="number"
+            step="any"
+            class="form-input"
+            placeholder="无人机作业基准高度"
+          >
+        </div>
+
+        <!-- 网格设置 -->
+        <div class="form-row">
+          <label class="form-label" for="conflictFirstLevel">网格层级</label>
+          <select
+            id="conflictFirstLevel"
+            v-model.number="conflictFirstForm.level"
+            class="form-select"
+            required
+          >
+            <option :value="9">第 9 级</option>
+          </select>
+          <span class="form-hint">当前仅支持 9 级网格</span>
+        </div>
+
+        <div class="form-row">
+          <label class="form-label" for="conflictFirstPlaneRadius">无人机半径</label>
+          <input
+            id="conflictFirstPlaneRadius"
+            v-model.number="conflictFirstForm.planeRadius"
+            type="number"
+            step="0.01"
+            class="form-input"
+            placeholder="无人机机身半径(米)"
+          >
+        </div>
+
+        <div class="form-row">
+          <label class="form-label" for="conflictFirstSpeed">飞行速度</label>
+          <input
+            id="conflictFirstSpeed"
+            v-model.number="conflictFirstForm.speed"
+            type="number"
+            step="0.1"
+            class="form-input"
+            placeholder="飞行速度(米/秒)"
+          >
+        </div>
+
+        <!-- 约束条件 -->
+        <div class="constraint-section">
+          <div class="constraint-title">约束条件</div>
+          <div class="form-row">
+            <label class="checkbox-label">
+              <input
+                type="checkbox"
+                v-model="conflictFirstForm.useGdConstraint"
+                class="checkbox-input"
+              >
+              <span class="checkbox-text">启用实景三维障碍校验</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- 提交按钮 -->
+        <div class="form-actions-stack">
+          <div class="form-actions form-actions-primary">
+            <button
+              type="submit"
+              class="btn-primary btn-primary-block"
+              :disabled="conflictFirstLoading || !canSubmitConflictFirst"
+            >
+              <Loader2 v-if="conflictFirstLoading" :size="13" class="spin" />
+              <Search v-else :size="13" />
+              {{ conflictFirstLoading ? '检测中...' : '开始冲突检测' }}
+            </button>
+          </div>
+          <div class="form-actions form-actions-clear-grid">
+            <button
+              type="button"
+              class="btn-clear-generated-grid"
+              @click="clearConflictFirstResult"
+              :disabled="!conflictFirstResult"
+            >
+              <Trash2 :size="14" />
+              清除检测结果
+            </button>
+          </div>
+        </div>
+      </form>
+
+      <div v-if="conflictFirstError" class="error">{{ conflictFirstError }}</div>
+
+      <!-- 检测结果 -->
+      <div v-if="conflictFirstResult">
+        <!-- 无冲突结果 -->
+        <div v-if="conflictFirstResult.status === 'no_conflict'" class="result-success">
+          <div class="result-icon">
+            <Check :size="24" />
+          </div>
+          <div class="result-title">检测通过</div>
+          <div class="result-message">{{ conflictFirstResult.reason }}</div>
+        </div>
+
+        <!-- 有冲突结果 -->
+        <div v-if="conflictFirstResult.status === 'has_conflict'" class="conflict-warning">
+          <div class="conflict-warning-icon">!</div>
+          <div class="conflict-warning-text">检测到首个冲突</div>
+        </div>
+
+        <!-- 冲突网格详情 -->
+        <div v-if="conflictFirstResult.status === 'has_conflict' && conflictFirstResult.grid" class="conflict-list">
+          <div class="conflict-list-title">首个冲突网格</div>
+          <div class="conflict-item">
+            <div class="conflict-item-header">
+              <span class="conflict-index">#1</span>
+              <span class="conflict-type">{{ getConflictTypeName('gd') }}</span>
+            </div>
+            <div class="conflict-item-details">
+              <div class="conflict-detail">
+                <span class="detail-label">编码:</span>
+                <span class="detail-value">{{ conflictFirstResult.grid.code || 'N/A' }}</span>
+              </div>
+              <div class="conflict-detail">
+                <span class="detail-label">中心:</span>
+                <span class="detail-value">
+                  {{ conflictFirstResult.grid.center ? `${conflictFirstResult.grid.center[0]?.toFixed(6)}, ${conflictFirstResult.grid.center[1]?.toFixed(6)}, ${conflictFirstResult.grid.center[2]?.toFixed(1)}` : 'N/A' }}
+                </span>
+              </div>
+              <div class="conflict-detail">
+                <span class="detail-label">范围:</span>
+                <span class="detail-value">
+                  经度 {{ conflictFirstResult.grid.minlon?.toFixed(6) }} ~ {{ conflictFirstResult.grid.maxlon?.toFixed(6) }}<br>
+                  纬度 {{ conflictFirstResult.grid.minlat?.toFixed(6) }} ~ {{ conflictFirstResult.grid.maxlat?.toFixed(6) }}<br>
+                  高度 {{ conflictFirstResult.grid.bottom?.toFixed(1) }} ~ {{ conflictFirstResult.grid.top?.toFixed(1) }}m
+                </span>
+              </div>
+              <div v-if="conflictFirstResult.reason" class="conflict-reason">
+                <span class="detail-label">原因:</span>
+                <span class="detail-value reason-text">{{ conflictFirstResult.reason }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </template>
   </div>
 </template>
@@ -1191,5 +2128,149 @@ async function submitAstarPath() {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
+}
+
+/* 无冲突结果 */
+.result-success {
+  margin-top: 14px;
+  padding: 24px;
+  border-radius: 12px;
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  text-align: center;
+}
+
+.result-icon {
+  width: 48px;
+  height: 48px;
+  margin: 0 auto 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(34, 197, 94, 0.2);
+  border-radius: 50%;
+  color: #4ade80;
+}
+
+.result-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #4ade80;
+  margin-bottom: 8px;
+}
+
+.result-message {
+  font-size: 14px;
+  color: #86efac;
+}
+
+/* 冲突警告 */
+.conflict-warning {
+  margin-top: 14px;
+  padding: 16px;
+  border-radius: 10px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.conflict-warning-icon {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(239, 68, 68, 0.2);
+  border-radius: 50%;
+  color: #f87171;
+  font-size: 20px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.conflict-warning-text {
+  font-size: 15px;
+  font-weight: 500;
+  color: #fca5a5;
+}
+
+/* 冲突列表 */
+.conflict-list {
+  margin-top: 14px;
+  background: rgba(30, 41, 59, 0.5);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.conflict-list-title {
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.1);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.conflict-item {
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.conflict-item:last-child {
+  border-bottom: none;
+}
+
+.conflict-item-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.conflict-index {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.15);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.conflict-type {
+  font-size: 13px;
+  font-weight: 500;
+  color: #fca5a5;
+}
+
+.conflict-item-details {
+  padding-left: 4px;
+}
+
+.conflict-detail {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  margin-bottom: 4px;
+  line-height: 1.4;
+}
+
+.detail-label {
+  color: #64748b;
+  flex-shrink: 0;
+  min-width: 40px;
+}
+
+.detail-value {
+  color: #cbd5e1;
+  font-family: 'Monaco', 'Consolas', monospace;
+  word-break: break-all;
+}
+
+.reason-text {
+  color: #fca5a5;
+  font-family: inherit;
 }
 </style>

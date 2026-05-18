@@ -49,10 +49,10 @@ function requestViewBounds() {
 
 // 设置视图边界
 function setViewBounds(bounds) {
-  demGridForm.minLon = Number(bounds.west.toFixed(6))
-  demGridForm.maxLon = Number(bounds.east.toFixed(6))
-  demGridForm.minLat = Number(bounds.south.toFixed(6))
-  demGridForm.maxLat = Number(bounds.north.toFixed(6))
+  demGridForm.minLon = Number(bounds.west.toFixed(4))
+  demGridForm.maxLon = Number(bounds.east.toFixed(4))
+  demGridForm.minLat = Number(bounds.south.toFixed(4))
+  demGridForm.maxLat = Number(bounds.north.toFixed(4))
 }
 
 defineExpose({ setViewBounds })
@@ -371,7 +371,11 @@ function clearGrids() {
 }
 
 .form-input {
+  width: 100%;
+  min-width: 0;
   flex: 1;
+  height: 36px;
+  line-height: 1.2;
   padding: 8px 10px;
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -380,6 +384,7 @@ function clearGrids() {
   font-size: 13px;
   outline: none;
   transition: all 0.15s ease;
+  box-sizing: border-box;
 }
 
 .form-input:focus {

@@ -90,7 +90,7 @@ const services = [
   {
     id: 'airspace-grid-query',
     name: '空域网格化入库/查询服务',
-    shortName: '空域网格化入库/查询',
+    shortName: '空域网格',
     icon: Database,
     component: AirspaceGridQuery,
     functions: [
@@ -214,6 +214,9 @@ const activeComponent = computed(() => {
   if (activeServiceId.value === 'grid-aggregation') {
     return GridAggregation
   }
+  if (activeServiceId.value === 'dem-grid-query') {
+    return DemGrid
+  }
   return activeService.value?.component
 })
 
@@ -266,6 +269,18 @@ function applyMapPointToActiveService(lon, lat, height) {
       activeComponentRef.value.setPointFromMap(lon, lat, height)
     }
   }
+
+  if (activeServiceId.value === 'path-planning' && activeFunctionName.value === '路径冲突检测（所有冲突）') {
+    if (typeof activeComponentRef.value.setPointFromMap === 'function') {
+      activeComponentRef.value.setPointFromMap(lon, lat, height)
+    }
+  }
+
+  if (activeServiceId.value === 'path-planning' && activeFunctionName.value === '路径冲突检测（首个冲突）') {
+    if (typeof activeComponentRef.value.setPointFromMap === 'function') {
+      activeComponentRef.value.setPointFromMap(lon, lat, height)
+    }
+  }
 }
 
 // 处理地图框选的边界参数
@@ -302,7 +317,7 @@ function setViewBoundsToActiveService(bounds) {
 
   console.log('[ServicePanel] 设置视图边界:', bounds)
 
-  if (activeServiceId.value === 'dem-grid-query') {
+  if (activeServiceId.value === 'dem-grid-query' || activeServiceId.value === 'airspace-grid-query') {
     if (typeof activeComponentRef.value.setViewBounds === 'function') {
       activeComponentRef.value.setViewBounds(bounds)
     }
@@ -1042,13 +1057,16 @@ defineExpose({
 .calc-content :deep(.form-input),
 .calc-content :deep(.form-select) {
   width: 100%;
-  padding: 10px 14px;
+  height: 36px;
+  line-height: 1.2;
+  padding: 8px 14px;
   background: rgba(15, 23, 42, 0.8);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   color: #f1f5f9;
   font-size: 14px;
   transition: all 0.2s ease;
+  box-sizing: border-box;
 }
 
 .calc-content :deep(.form-input:focus),

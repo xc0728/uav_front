@@ -1,6 +1,6 @@
 <script setup>
 import { reactive, ref } from 'vue'
-import { Loader2, Trash2, Search } from 'lucide-vue-next'
+import { Loader2, Trash2, Search, MapPin, Square } from 'lucide-vue-next'
 
 const props = defineProps({
   serviceName: {
@@ -13,23 +13,29 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['close', 'showPoint', 'showGrid'])
+const emit = defineEmits(['close', 'showPoint', 'showGrid', 'get-view-bounds'])
 
 const airspaceGridForm = reactive({
-  level: 7,
-  airspaceId: 'airspace_osgb',
+  level: 12,
+  minLon: null,
+  maxLon: null,
+  minLat: null,
+  maxLat: null,
+  top: 120,
+  bottom: 0,
 })
 
-const airspaceGridLoading = ref(false)
-const airspaceGridError = ref('')
-const airspaceGridResult = ref(null)
+const loading = ref(false)
+const error = ref('')
+const result = ref(null)
 const queryStats = ref(null)
 const gridsData = ref([])
 let totalCount = 0
 
 function resetForm() {
-  airspaceGridError.value = ''
-  airspaceGridResult.value = null
+  loading.value = false
+  error.value = ''
+  result.value = null
   queryStats.value = null
   gridsData.value = []
 }
@@ -38,32 +44,65 @@ function setPointFromMap(lon, lat, height) {
   // 空域网格查询暂不支持地图点选
 }
 
-defineExpose({ resetForm, setPointFromMap })
+// 获取视图边界
+function requestViewBounds() {
+  emit('get-view-bounds')
+}
+
+// 设置视图边界
+function setViewBounds(bounds) {
+  airspaceGridForm.minLon = Number(bounds.west.toFixed(4))
+  airspaceGridForm.maxLon = Number(bounds.east.toFixed(4))
+  airspaceGridForm.minLat = Number(bounds.south.toFixed(4))
+  airspaceGridForm.maxLat = Number(bounds.north.toFixed(4))
+}
+
+defineExpose({ resetForm, setPointFromMap, setViewBounds })
 
 async function submitAirspaceGridQuery() {
-  airspaceGridError.value = ''
-  airspaceGridResult.value = null
+  error.value = ''
+  result.value = null
   queryStats.value = null
 
+  // 验证层级
   if (!airspaceGridForm.level || airspaceGridForm.level < 0) {
-    airspaceGridError.value = '请输入有效的层级'
+    error.value = '请输入有效的层级'
     return
   }
 
-  airspaceGridLoading.value = true
+  // 验证边界参数
+  if (airspaceGridForm.minLon === null || airspaceGridForm.maxLon === null ||
+      airspaceGridForm.minLat === null || airspaceGridForm.maxLat === null) {
+    error.value = '请先在地图上框选查询区域，或手动输入边界参数'
+    return
+  }
+
+  const minLon = Number(airspaceGridForm.minLon)
+  const maxLon = Number(airspaceGridForm.maxLon)
+  const minLat = Number(airspaceGridForm.minLat)
+  const maxLat = Number(airspaceGridForm.maxLat)
+
+  if (minLon >= maxLon || minLat >= maxLat) {
+    error.value = '边界参数不合法：minLon < maxLon, minLat < maxLat'
+    return
+  }
+
+  loading.value = true
 
   try {
     const payload = {
       level: Number(airspaceGridForm.level),
-    }
-
-    if (airspaceGridForm.airspaceId && airspaceGridForm.airspaceId.trim()) {
-      payload.airspaceId = airspaceGridForm.airspaceId.trim()
+      minLon: minLon,
+      maxLon: maxLon,
+      minLat: minLat,
+      maxLat: maxLat,
+      top: Number(airspaceGridForm.top) || 120,
+      bottom: Number(airspaceGridForm.bottom) || 0,
     }
 
     console.log('[空域网格查询] 发送 payload:', payload)
 
-    const resp = await fetch('/api/multiSource/airSpace/queryAirspaceGrid', {
+    const resp = await fetch('/api/multiSource/airSpace/queryAirSpaceGridByBounds', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -76,23 +115,27 @@ async function submitAirspaceGridQuery() {
     }
 
     const data = await resp.json()
-    airspaceGridResult.value = data
+    result.value = data
     console.log('[空域网格查询] 原始返回:', data)
-    console.log('[空域网格查询] data.data 类型:', typeof data.data, Array.isArray(data.data))
-    if (data?.data) {
-      if (Array.isArray(data.data)) {
-        console.log('[空域网格查询] data.data 是数组，长度:', data.data.length)
-        console.log('[空域网格查询] 第一个元素:', JSON.stringify(data.data[0]))
-        gridsData.value = data.data
-        totalCount = gridsData.value.length
-      } else if (typeof data.data === 'object') {
-        console.log('[空域网格查询] data.data 是对象，keys:', Object.keys(data.data))
-        console.log('[空域网格查询] data.data 第一个子元素:', JSON.stringify(Object.values(data.data)[0]))
-        gridsData.value = data.data.grids || data.data.cells || data.data.features || data.data.items || []
-        totalCount = gridsData.value.length
-      }
+
+    // 解析返回数据
+    let rawGrids = null
+    if (data?.data?.grids && data.data.grids.length > 0) {
+      rawGrids = data.data.grids
+    } else if (data?.data?.cells && data.data.cells.length > 0) {
+      rawGrids = data.data.cells
+    } else if (data?.data?.features && data.data.features.length > 0) {
+      rawGrids = data.data.features
+    } else if (Array.isArray(data?.data)) {
+      rawGrids = data.data
+    }
+
+    if (!rawGrids || rawGrids.length === 0) {
+      error.value = '未查询到空域网格数据'
+      totalCount = 0
     } else {
-      console.log('[空域网格查询] data.data 为空或不存在')
+      gridsData.value = rawGrids
+      totalCount = rawGrids.length
     }
 
     queryStats.value = {
@@ -102,14 +145,8 @@ async function submitAirspaceGridQuery() {
 
     // 如果返回了格网数据，通知地图组件显示
     if (gridsData.value.length > 0) {
-      // 转换数据格式以匹配 CesiumMap 期望的格式
-      // CesiumMap 期望: { cells: [{ bounds: { north, south, east, west, top, bottom } }, ...] }
       const cells = gridsData.value.map(cell => {
-        // 如果已经是正确格式（bounds），直接返回
         if (cell.bounds) return cell
-
-        // 后端返回的字段：center, minlat, maxlat, minlon, maxlon, top, bottom
-        // 需要转换为 bounds 格式：north, south, east, west, top, bottom
         return {
           bounds: {
             north: cell.maxlat,
@@ -118,7 +155,9 @@ async function submitAirspaceGridQuery() {
             west: cell.minlon,
             top: cell.top !== undefined ? cell.top : (cell.center ? cell.center[2] : 0),
             bottom: cell.bottom !== undefined ? cell.bottom : 0,
-          }
+          },
+          code: String(cell.code || ''),
+          center: cell.center,
         }
       })
 
@@ -127,16 +166,17 @@ async function submitAirspaceGridQuery() {
     }
   } catch (err) {
     console.error('[空域网格查询] 请求错误:', err)
-    airspaceGridError.value = err?.message || '请求失败，请稍后重试'
+    error.value = err?.message || '请求失败，请稍后重试'
   } finally {
-    airspaceGridLoading.value = false
+    loading.value = false
   }
 }
 
 function clearGrids() {
   emit('showGrid', { cells: [] })
-  airspaceGridResult.value = null
+  result.value = null
   queryStats.value = null
+  gridsData.value = []
 }
 </script>
 
@@ -144,10 +184,11 @@ function clearGrids() {
   <div class="calc-content">
     <template v-if="functionName === '空域网格查询'">
       <div class="tip">
-        根据层级查询空域网格信息，返回该层级下的所有格网数据
+        根据区域范围查询空域网格数据，返回指定层级和高程范围内的格网信息。支持通过地图框选或手动输入边界参数进行查询。
       </div>
 
       <form class="form" @submit.prevent="submitAirspaceGridQuery">
+        <!-- 层级 -->
         <div class="form-row">
           <label class="form-label" for="agq-level">
             <span class="required">*</span>层级
@@ -164,15 +205,96 @@ function clearGrids() {
           >
         </div>
 
-        <div class="form-row">
-          <label class="form-label" for="agq-airspaceId">空域ID</label>
-          <input
-            id="agq-airspaceId"
-            v-model="airspaceGridForm.airspaceId"
-            type="text"
-            class="form-input"
-            placeholder="选填，用于筛选特定空域"
-          >
+        <!-- 边界参数 -->
+        <div class="bounds-section">
+          <div class="bounds-title">
+            <MapPin :size="14" />
+            查询边界参数
+          </div>
+          <div class="bounds-grid">
+            <div class="bounds-row">
+              <div class="form-row">
+                <label class="form-label" for="agq-minlon">最小经度</label>
+                <input
+                  id="agq-minlon"
+                  v-model.number="airspaceGridForm.minLon"
+                  type="number"
+                  step="0.0001"
+                  class="form-input input-lon"
+                  placeholder="西边界"
+                >
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="agq-maxlon">最大经度</label>
+                <input
+                  id="agq-maxlon"
+                  v-model.number="airspaceGridForm.maxLon"
+                  type="number"
+                  step="0.0001"
+                  class="form-input input-lon"
+                  placeholder="东边界"
+                >
+              </div>
+            </div>
+            <div class="bounds-row">
+              <div class="form-row">
+                <label class="form-label" for="agq-minlat">最小纬度</label>
+                <input
+                  id="agq-minlat"
+                  v-model.number="airspaceGridForm.minLat"
+                  type="number"
+                  step="0.0001"
+                  class="form-input input-lat"
+                  placeholder="南边界"
+                >
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="agq-maxlat">最大纬度</label>
+                <input
+                  id="agq-maxlat"
+                  v-model.number="airspaceGridForm.maxLat"
+                  type="number"
+                  step="0.0001"
+                  class="form-input input-lat"
+                  placeholder="北边界"
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 高程参数 -->
+        <div class="bounds-section">
+          <div class="bounds-title">
+            <MapPin :size="14" />
+            高程参数
+          </div>
+          <div class="bounds-grid">
+            <div class="bounds-row">
+              <div class="form-row">
+                <label class="form-label" for="agq-bottom">底部高程</label>
+                <input
+                  id="agq-bottom"
+                  v-model.number="airspaceGridForm.bottom"
+                  type="number"
+                  step="1"
+                  class="form-input input-elev"
+                  placeholder="底部高程"
+                >
+              </div>
+              <div class="form-row">
+                <label class="form-label" for="agq-top">顶部高程</label>
+                <input
+                  id="agq-top"
+                  v-model.number="airspaceGridForm.top"
+                  type="number"
+                  step="1"
+                  class="form-input input-elev"
+                  placeholder="顶部高程"
+                >
+              </div>
+            </div>
+          </div>
         </div>
 
         <div class="form-actions-stack">
@@ -180,11 +302,22 @@ function clearGrids() {
             <button
               type="submit"
               class="btn-primary btn-primary-block"
-              :disabled="airspaceGridLoading"
+              :disabled="loading"
             >
-              <Loader2 v-if="airspaceGridLoading" :size="14" class="spin" />
+              <Loader2 v-if="loading" :size="14" class="spin" />
               <Search v-else :size="14" />
-              {{ airspaceGridLoading ? '查询中...' : '开始查询' }}
+              {{ loading ? '查询中...' : '开始查询' }}
+            </button>
+          </div>
+          <div class="form-actions form-actions-selection">
+            <button
+              type="button"
+              class="btn-box-select"
+              @click="requestViewBounds"
+              :disabled="loading"
+            >
+              <Square :size="14" />
+              获取视图边界
             </button>
           </div>
           <div class="form-actions form-actions-clear-grid">
@@ -192,7 +325,7 @@ function clearGrids() {
               type="button"
               class="btn-clear-generated-grid"
               @click="clearGrids"
-              :disabled="!airspaceGridResult"
+              :disabled="!result"
             >
               <Trash2 :size="14" />
               清除已生成网格
@@ -201,7 +334,7 @@ function clearGrids() {
         </div>
       </form>
 
-      <div v-if="airspaceGridError" class="error">{{ airspaceGridError }}</div>
+      <div v-if="error" class="error">{{ error }}</div>
 
       <!-- 查询结果统计 -->
       <div v-if="queryStats" class="result-stats">
@@ -218,7 +351,7 @@ function clearGrids() {
       </div>
 
       <!-- 无数据提示 -->
-      <div v-if="airspaceGridResult?.data && gridsData.length === 0" class="no-data">
+      <div v-if="result?.data && gridsData.length === 0" class="no-data">
         <span>未查询到网格数据</span>
       </div>
     </template>
@@ -226,21 +359,66 @@ function clearGrids() {
 </template>
 
 <style scoped>
+.tip {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  background: rgba(59, 130, 246, 0.08);
+  border-radius: 8px;
+  border: 1px solid rgba(59, 130, 246, 0.18);
+  line-height: 1.5;
+}
+
 .form {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
+}
+
+.bounds-section {
+  padding: 14px;
+  background: rgba(30, 41, 59, 0.5);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.bounds-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #60a5fa;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(96, 165, 250, 0.2);
+}
+
+.bounds-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bounds-row {
+  display: flex;
+  gap: 10px;
+}
+
+.bounds-row .form-row {
+  flex: 1;
 }
 
 .form-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .form-label {
-  width: 80px;
-  font-size: 13px;
+  width: 70px;
+  font-size: 12px;
   color: #94a3b8;
   flex-shrink: 0;
 }
@@ -251,15 +429,20 @@ function clearGrids() {
 }
 
 .form-input {
+  width: 100%;
+  min-width: 0;
   flex: 1;
-  padding: 10px 12px;
-  border-radius: 8px;
+  height: 36px;
+  line-height: 1.2;
+  padding: 8px 10px;
+  border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(0, 0, 0, 0.2);
   color: #f1f5f9;
-  font-size: 14px;
+  font-size: 13px;
   outline: none;
   transition: all 0.15s ease;
+  box-sizing: border-box;
 }
 
 .form-input:focus {
@@ -269,6 +452,13 @@ function clearGrids() {
 
 .form-input::placeholder {
   color: #475569;
+}
+
+.form-input.input-lon,
+.form-input.input-lat,
+.form-input.input-elev {
+  height: 36px;
+  line-height: 1.2;
 }
 
 .form-actions-stack {
@@ -294,12 +484,18 @@ function clearGrids() {
   border-radius: 10px;
 }
 
+.form-actions-selection {
+  width: 100%;
+  justify-content: center;
+}
+
 .form-actions-clear-grid {
   width: 100%;
   justify-content: flex-end;
 }
 
-.btn-clear-generated-grid {
+.form-actions-selection .btn-box-select {
+  flex: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -308,28 +504,69 @@ function clearGrids() {
   max-width: 100%;
   box-sizing: border-box;
   padding: 10px 14px;
-  border-radius: 12px;
-  border: 1px solid rgba(248, 113, 113, 0.65);
-  background: rgba(127, 29, 29, 0.35);
-  color: #fecaca;
-  font-size: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(168, 85, 247, 0.65);
+  background: rgba(88, 28, 135, 0.35);
+  color: #e9d5ff;
+  font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
   white-space: nowrap;
 }
 
-.btn-clear-generated-grid :deep(svg) {
+.form-actions-selection .btn-box-select :deep(svg) {
   flex-shrink: 0;
 }
 
-.btn-clear-generated-grid:hover:not(:disabled) {
+.form-actions-selection .btn-box-select:hover:not(:disabled) {
+  background: rgba(107, 33, 168, 0.45);
+  border-color: #a855f7;
+  color: #fff;
+}
+
+.form-actions-selection .btn-box-select:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.form-actions-clear-grid {
+  width: 100%;
+  justify-content: center;
+}
+
+.form-actions-clear-grid .btn-clear-generated-grid {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: auto;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(248, 113, 113, 0.65);
+  background: rgba(127, 29, 29, 0.35);
+  color: #fecaca;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+
+.form-actions-clear-grid .btn-clear-generated-grid :deep(svg) {
+  flex-shrink: 0;
+}
+
+.form-actions-clear-grid .btn-clear-generated-grid:hover:not(:disabled) {
   background: rgba(153, 27, 27, 0.45);
   border-color: #f87171;
   color: #fff;
 }
 
-.btn-clear-generated-grid:disabled {
+.form-actions-clear-grid .btn-clear-generated-grid:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -416,10 +653,6 @@ function clearGrids() {
   font-size: 12px;
   color: #64748b;
   margin-top: 4px;
-}
-
-.result-section {
-  margin-top: 20px;
 }
 
 .no-data {
