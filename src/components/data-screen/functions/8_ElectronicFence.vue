@@ -1,6 +1,5 @@
 <script setup>
 import { reactive, ref, computed } from 'vue'
-import { Loader2, Trash2, Plus, Circle, Eye, EyeOff, Save, ArrowLeft, Minus } from 'lucide-vue-next'
 
 const props = defineProps({
   mapReady: {
@@ -21,37 +20,28 @@ const emit = defineEmits([
   'draw-fence'
 ])
 
-// 围栏类型
 const FENCE_TYPE_SPHERE = 'sphere'
 const FENCE_TYPE_LINE = 'line'
 
-// 当前绘制模式
 const currentMode = ref(null)
 
-// 球形围栏表单
 const sphereForm = reactive({
   name: '',
   radius: 100
 })
 
-// 线状围栏表单
 const lineForm = reactive({
   name: '',
   halfWidth: 15,
   halfHeight: 15
 })
 
-// 围栏列表
 const fenceList = ref([])
-
-// 是否正在绘制中
 const isDrawing = ref(false)
 
-// 围栏样式颜色
-const sphereColor = '#fbbf24'
+const sphereColor = '#f59e0b'
 const lineColor = '#22d3ee'
 
-// 表单验证
 const canDrawSphere = computed(() => {
   return sphereForm.radius > 0
 })
@@ -60,7 +50,6 @@ const canDrawLine = computed(() => {
   return lineForm.halfWidth > 0 && lineForm.halfHeight > 0
 })
 
-// 开始绘制球形围栏
 function startDrawSphere() {
   currentMode.value = FENCE_TYPE_SPHERE
   isDrawing.value = true
@@ -70,7 +59,6 @@ function startDrawSphere() {
   })
 }
 
-// 开始绘制线状围栏
 function startDrawLine() {
   currentMode.value = FENCE_TYPE_LINE
   isDrawing.value = true
@@ -81,29 +69,24 @@ function startDrawLine() {
   })
 }
 
-// 返回列表视图
 function backToList() {
   currentMode.value = null
   isDrawing.value = false
   emit('clear-fence')
 }
 
-// 取消绘制
 function cancelDraw() {
   backToList()
 }
 
-// 确认绘制完成
 function confirmDraw() {
   if (currentMode.value === FENCE_TYPE_SPHERE) {
-    // 球形围栏需要从地图获取点数据
     emit('complete-sphere-fence', {
       type: FENCE_TYPE_SPHERE,
       params: { radius: sphereForm.radius },
       name: sphereForm.name || `围栏${fenceList.value.length + 1}`
     })
   } else if (currentMode.value === FENCE_TYPE_LINE) {
-    // 线状围栏需要从地图获取点数据
     emit('complete-line-fence', {
       type: FENCE_TYPE_LINE,
       params: { halfWidth: lineForm.halfWidth, halfHeight: lineForm.halfHeight },
@@ -112,7 +95,6 @@ function confirmDraw() {
   }
 }
 
-// 切换围栏启用状态
 function toggleFence(id) {
   const fence = fenceList.value.find(f => f.id === id)
   if (fence) {
@@ -121,13 +103,11 @@ function toggleFence(id) {
   }
 }
 
-// 删除围栏
 function deleteFence(id) {
   fenceList.value = fenceList.value.filter(f => f.id !== id)
   emit('delete-fence', id)
 }
 
-// 保存围栏到后端（按钮功能，API未实现）
 function saveFences() {
   if (fenceList.value.length === 0) {
     alert('暂无围栏可保存')
@@ -138,34 +118,29 @@ function saveFences() {
   alert('围栏数据已准备好，等待后端API实现')
 }
 
-// 清除所有围栏
 function clearAllFences() {
   fenceList.value = []
   emit('clear-fence')
 }
 
-// 获取围栏类型的显示标签
 function getFenceTypeLabel(type) {
   if (type === FENCE_TYPE_SPHERE) return '球形'
   if (type === FENCE_TYPE_LINE) return '线状'
   return ''
 }
 
-// 获取围栏类型的图标
 function getFenceTypeIcon(type) {
-  if (type === FENCE_TYPE_SPHERE) return Circle
-  if (type === FENCE_TYPE_LINE) return Minus
-  return Circle
+  if (type === FENCE_TYPE_SPHERE) return '●'
+  if (type === FENCE_TYPE_LINE) return '—'
+  return '●'
 }
 
-// 获取围栏类型的颜色
 function getFenceTypeColor(type) {
   if (type === FENCE_TYPE_SPHERE) return sphereColor
   if (type === FENCE_TYPE_LINE) return lineColor
   return sphereColor
 }
 
-// 确认围栏绘制完成（由CesiumMap调用）
 function confirmFenceDraw(data) {
   let fence
   if (data.type === FENCE_TYPE_SPHERE) {
@@ -201,7 +176,6 @@ function confirmFenceDraw(data) {
   }
 }
 
-// 暴露方法给父组件
 function addFence(fence) {
   fenceList.value.push(fence)
   backToList()
@@ -216,54 +190,16 @@ defineExpose({
 
 <template>
   <div class="electronic-fence-panel">
-    <!-- 面板标题 -->
     <div class="panel-title">
-      <span class="title-icon">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-        </svg>
-      </span>
       <span>电子围栏</span>
     </div>
 
-    <!-- 绘制功能暂时禁用 -->
-    <!-- 绘制模式切换 -->
-    <!-- <div class="draw-mode-section">
-      <div class="section-label">绘制模式</div>
-      <div class="draw-mode-buttons">
-        <button
-          class="mode-btn sphere-btn"
-          :class="{ active: currentMode === FENCE_TYPE_SPHERE }"
-          @click="startDrawSphere"
-        >
-          <Circle :size="16" />
-          <span>球形围栏</span>
-        </button>
-        <button
-          class="mode-btn line-btn"
-          :class="{ active: currentMode === FENCE_TYPE_LINE }"
-          @click="startDrawLine"
-        >
-          <Minus :size="16" />
-          <span>线状围栏</span>
-        </button>
-      </div>
-    </div> -->
-
-    <!-- 绘制参数表单（点击绘制模式后显示） -->
     <div v-if="currentMode" class="draw-form-section">
-      <!-- 返回按钮 -->
-      <button class="back-btn" @click="backToList">
-        <ArrowLeft :size="14" />
-        <span>返回列表</span>
-      </button>
+      <div class="form-header">
+        <span class="form-title">{{ currentMode === 'sphere' ? '球形围栏参数' : '线状围栏参数' }}</span>
+      </div>
 
-      <!-- 球形围栏参数 -->
-      <div v-if="currentMode === FENCE_TYPE_SPHERE" class="fence-form sphere-form">
-        <div class="form-header">
-          <Circle :size="16" :style="{ color: sphereColor }" />
-          <span class="form-title">球形围栏参数</span>
-        </div>
+      <div v-if="currentMode === FENCE_TYPE_SPHERE" class="fence-form">
         <div class="form-row">
           <label class="form-label">围栏名称</label>
           <input
@@ -286,17 +222,12 @@ defineExpose({
         <div v-if="!canDrawSphere" class="form-tip error">
           半径必须大于0
         </div>
-        <div class="form-tip info">
+        <div class="form-tip">
           请在地图上点击选择球心位置
         </div>
       </div>
 
-      <!-- 线状围栏参数 -->
-      <div v-if="currentMode === FENCE_TYPE_LINE" class="fence-form line-form">
-        <div class="form-header">
-          <Minus :size="16" :style="{ color: lineColor }" />
-          <span class="form-title">线状围栏参数</span>
-        </div>
+      <div v-if="currentMode === FENCE_TYPE_LINE" class="fence-form">
         <div class="form-row">
           <label class="form-label">围栏名称</label>
           <input
@@ -329,19 +260,17 @@ defineExpose({
         <div v-if="!canDrawLine" class="form-tip error">
           半宽和半高必须大于0
         </div>
-        <div class="form-tip info">
-          请在地图上点击添加多个点组成线段，完成后点击"完成绘制"
+        <div class="form-tip">
+          请在地图上点击添加多个点组成线段
         </div>
       </div>
 
-      <!-- 绘制控制按钮 -->
       <div class="draw-controls">
         <button
           class="control-btn confirm-btn"
           @click="confirmDraw"
           :disabled="currentMode === FENCE_TYPE_SPHERE ? !canDrawSphere : !canDrawLine"
         >
-          <Plus :size="14" />
           完成绘制
         </button>
         <button class="control-btn cancel-btn" @click="cancelDraw">
@@ -350,18 +279,17 @@ defineExpose({
       </div>
     </div>
 
-    <!-- 已绘制围栏列表（默认显示） -->
     <div v-else class="fence-list-section">
       <div class="section-header">
         <span class="section-label">已绘制围栏 ({{ fenceList.length }})</span>
         <div class="section-actions">
           <button
-            class="action-btn clear-btn"
+            class="action-btn"
             @click="clearAllFences"
             :disabled="fenceList.length === 0"
             title="清除所有围栏"
           >
-            <Trash2 :size="14" />
+            清空
           </button>
           <button
             class="action-btn save-btn"
@@ -369,13 +297,13 @@ defineExpose({
             :disabled="fenceList.length === 0"
             title="保存围栏"
           >
-            <Save :size="14" />
+            保存
           </button>
         </div>
       </div>
 
       <div v-if="fenceList.length === 0" class="empty-list">
-        暂无围栏，点击上方按钮开始绘制
+        暂无围栏
       </div>
 
       <div v-else class="fence-items">
@@ -386,11 +314,12 @@ defineExpose({
           :class="{ disabled: !fence.enabled }"
         >
           <div class="fence-item-header">
-            <component
-              :is="getFenceTypeIcon(fence.type)"
-              :size="14"
+            <span
+              class="fence-icon"
               :style="{ color: getFenceTypeColor(fence.type) }"
-            />
+            >
+              {{ getFenceTypeIcon(fence.type) }}
+            </span>
             <span class="fence-name">{{ fence.name }}</span>
             <span
               class="fence-type-tag"
@@ -412,15 +341,14 @@ defineExpose({
               @click="toggleFence(fence.id)"
               :title="fence.enabled ? '禁用围栏' : '启用围栏'"
             >
-              <Eye v-if="fence.enabled" :size="14" />
-              <EyeOff v-else :size="14" />
+              {{ fence.enabled ? '隐藏' : '显示' }}
             </button>
             <button
               class="item-action-btn delete"
               @click="deleteFence(fence.id)"
               title="删除围栏"
             >
-              <Trash2 :size="14" />
+              删除
             </button>
           </div>
         </div>
@@ -433,350 +361,205 @@ defineExpose({
 .electronic-fence-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   height: 100%;
   overflow-y: auto;
-  padding-right: 4px;
+  padding: 10px;
+  background: transparent;
 }
 
-/* 面板标题 */
 .panel-title {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 8px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  font-size: 15px;
-  font-weight: 600;
-  color: #f1f5f9;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+  font-size: 14px;
+  font-weight: bold;
+  color: #2d3748;
+  background: transparent;
 }
 
 .title-icon {
-  color: #f59e0b;
-  display: flex;
-  align-items: center;
+  color: #2b6cb0;
+  font-size: 16px;
 }
 
-/* 区块标题 */
 .section-label {
   font-size: 12px;
-  color: #94a3b8;
-  margin-bottom: 8px;
+  color: #4a5568;
 }
 
-/* 绘制模式 */
-.draw-mode-section {
-  padding: 10px;
-  background: rgba(30, 41, 59, 0.5);
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.draw-mode-buttons {
-  display: flex;
-  gap: 10px;
-}
-
-.mode-btn {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 10px 14px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
-  color: #94a3b8;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.mode-btn:hover {
-  border-color: rgba(255, 255, 255, 0.2);
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.mode-btn.active {
-  color: #fff;
-}
-
-.mode-btn.sphere-btn.active {
-  border-color: rgba(251, 191, 36, 0.6);
-  background: rgba(251, 191, 36, 0.2);
-  box-shadow: 0 0 12px rgba(251, 191, 36, 0.3);
-}
-
-.mode-btn.line-btn.active {
-  border-color: rgba(34, 211, 238, 0.6);
-  background: rgba(34, 211, 238, 0.2);
-  box-shadow: 0 0 12px rgba(34, 211, 238, 0.3);
-}
-
-/* 绘制表单区域 */
 .draw-form-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 12px;
-  background: rgba(30, 41, 59, 0.6);
-  border-radius: 12px;
-  border: 1px solid rgba(59, 130, 246, 0.2);
-  animation: slideIn 0.25s ease;
-}
-
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* 返回按钮 */
-.back-btn {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
-  color: #94a3b8;
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  align-self: flex-start;
-}
-
-.back-btn:hover {
-  background: rgba(59, 130, 246, 0.15);
-  border-color: rgba(59, 130, 246, 0.3);
-  color: #60a5fa;
-}
-
-/* 围栏表单 */
-.fence-form {
-  padding: 14px;
-  background: rgba(30, 41, 59, 0.4);
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.fence-form.sphere-form {
-  border-color: rgba(251, 191, 36, 0.25);
-}
-
-.fence-form.line-form {
-  border-color: rgba(34, 211, 238, 0.25);
+  gap: 10px;
+  padding: 10px;
+  background: transparent;
+  border: 1px solid rgba(226, 232, 240, 0.4);
 }
 
 .form-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
   padding-bottom: 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid #e2e8f0;
 }
 
 .form-title {
-  font-size: 14px;
-  font-weight: 500;
-  color: #e2e8f0;
+  font-size: 13px;
+  font-weight: bold;
+  color: #2d3748;
+}
+
+.fence-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .form-row {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-bottom: 12px;
-}
-
-.form-row:last-of-type {
-  margin-bottom: 0;
+  gap: 4px;
 }
 
 .form-label {
   font-size: 12px;
-  color: #94a3b8;
+  color: #4a5568;
 }
 
 .form-input {
-  padding: 9px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.3);
-  color: #f1f5f9;
-  font-size: 13px;
-  transition: all 0.15s ease;
+  padding: 6px 8px;
+  border: 1px solid #cbd5e0;
+  background: rgba(255, 255, 255, 0.3);
+  color: #2d3748;
+  font-size: 12px;
 }
 
 .form-input:focus {
   outline: none;
-  border-color: #3b82f6;
-  background: rgba(59, 130, 246, 0.1);
+  border-color: #3182ce;
 }
 
 .form-tip {
-  padding: 8px 10px;
-  border-radius: 6px;
-  font-size: 12px;
-  margin-top: 10px;
-}
-
-.form-tip.info {
-  background: rgba(59, 130, 246, 0.15);
-  color: #60a5fa;
-  border: 1px solid rgba(59, 130, 246, 0.3);
+  padding: 6px 8px;
+  background: rgba(235, 248, 255, 0.3);
+  border: 1px solid rgba(144, 205, 244, 0.3);
+  color: #2b6cb0;
+  font-size: 11px;
 }
 
 .form-tip.error {
-  background: rgba(239, 68, 68, 0.15);
-  color: #fca5a5;
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: rgba(255, 245, 245, 0.3);
+  border-color: rgba(254, 178, 178, 0.3);
+  color: #c53030;
 }
 
-/* 绘制控制按钮 */
 .draw-controls {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   margin-top: 4px;
 }
 
 .control-btn {
   flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 10px 16px;
-  border-radius: 8px;
-  border: none;
-  font-size: 13px;
-  font-weight: 500;
+  padding: 8px;
+  font-size: 12px;
   cursor: pointer;
-  transition: all 0.2s ease;
 }
 
 .confirm-btn {
-  background: linear-gradient(135deg, #3b82f6, #0ea5e9);
+  background: #3182ce;
+  border: 1px solid #2b6cb0;
   color: #fff;
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
 }
 
 .confirm-btn:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4);
+  background: #2b6cb0;
 }
 
 .confirm-btn:disabled {
-  opacity: 0.5;
+  background: #a0aec0;
+  border-color: #718096;
   cursor: not-allowed;
 }
 
 .cancel-btn {
-  background: rgba(255, 255, 255, 0.08);
-  color: #94a3b8;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(247, 250, 252, 0.3);
+  border: 1px solid rgba(203, 213, 224, 0.4);
+  color: #4a5568;
 }
 
 .cancel-btn:hover {
-  background: rgba(239, 68, 68, 0.15);
-  border-color: rgba(239, 68, 68, 0.3);
-  color: #fca5a5;
+  background: rgba(237, 242, 247, 0.3);
 }
 
-/* 围栏列表 */
 .fence-list-section {
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 0;
 }
 
 .section-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .section-actions {
   display: flex;
-  gap: 6px;
+  gap: 4px;
 }
 
 .action-btn {
-  width: 30px;
-  height: 30px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
-  color: #94a3b8;
+  padding: 4px 10px;
+  background: rgba(237, 242, 247, 0.3);
+  border: 1px solid rgba(203, 213, 224, 0.4);
+  color: #4a5568;
+  font-size: 11px;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s ease;
 }
 
 .action-btn:hover:not(:disabled) {
-  border-color: rgba(59, 130, 246, 0.4);
-  background: rgba(59, 130, 246, 0.15);
-  color: #60a5fa;
-}
-
-.action-btn.save-btn:hover:not(:disabled) {
-  border-color: rgba(34, 197, 94, 0.4);
-  background: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
-}
-
-.action-btn.clear-btn:hover:not(:disabled) {
-  border-color: rgba(239, 68, 68, 0.4);
-  background: rgba(239, 68, 68, 0.15);
-  color: #fca5a5;
+  background: rgba(226, 232, 240, 0.3);
 }
 
 .action-btn:disabled {
-  opacity: 0.4;
+  color: #a0aec0;
   cursor: not-allowed;
 }
 
+.action-btn.save-btn {
+  background: rgba(198, 246, 213, 0.3);
+  border-color: rgba(154, 230, 180, 0.4);
+  color: #276749;
+}
+
+.action-btn.save-btn:hover:not(:disabled) {
+  background: rgba(154, 230, 180, 0.3);
+}
+
 .empty-list {
-  padding: 24px;
+  padding: 20px;
   text-align: center;
-  color: #64748b;
-  font-size: 13px;
-  background: rgba(30, 41, 59, 0.3);
-  border-radius: 10px;
-  border: 1px dashed rgba(255, 255, 255, 0.1);
+  color: #a0aec0;
+  font-size: 12px;
+  background: transparent;
+  border: 1px dashed rgba(203, 213, 224, 0.4);
 }
 
 .fence-items {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   overflow-y: auto;
   flex: 1;
 }
 
 .fence-item {
-  padding: 12px;
-  background: rgba(30, 41, 59, 0.5);
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: all 0.2s ease;
-}
-
-.fence-item:hover {
-  border-color: rgba(251, 191, 36, 0.3);
-  background: rgba(30, 41, 59, 0.7);
+  padding: 10px;
+  background: rgba(247, 250, 252, 0.3);
+  border: 1px solid rgba(226, 232, 240, 0.4);
 }
 
 .fence-item.disabled {
@@ -790,25 +573,26 @@ defineExpose({
   margin-bottom: 6px;
 }
 
-.fence-name {
+.fence-icon {
   font-size: 14px;
+}
+
+.fence-name {
+  font-size: 13px;
+  color: #2d3748;
   font-weight: 500;
-  color: #f1f5f9;
   flex: 1;
 }
 
 .fence-type-tag {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: rgba(251, 191, 36, 0.2);
-  color: #fbbf24;
+  font-size: 10px;
+  padding: 2px 6px;
 }
 
 .fence-item-info {
-  font-size: 12px;
-  color: #64748b;
-  margin-bottom: 8px;
+  font-size: 11px;
+  color: #718096;
+  margin-bottom: 6px;
 }
 
 .fence-item-actions {
@@ -818,28 +602,24 @@ defineExpose({
 }
 
 .item-action-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
-  color: #94a3b8;
+  padding: 3px 8px;
+  background: rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(203, 213, 224, 0.4);
+  color: #4a5568;
+  font-size: 11px;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s ease;
 }
 
 .item-action-btn:hover {
-  border-color: rgba(59, 130, 246, 0.4);
-  background: rgba(59, 130, 246, 0.15);
-  color: #60a5fa;
+  background: rgba(237, 242, 247, 0.3);
+}
+
+.item-action-btn.delete {
+  color: #c53030;
+  border-color: #feb2b2;
 }
 
 .item-action-btn.delete:hover {
-  border-color: rgba(239, 68, 68, 0.4);
-  background: rgba(239, 68, 68, 0.15);
-  color: #fca5a5;
+  background: rgba(255, 245, 245, 0.3);
 }
 </style>

@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { ref, onMounted, watch } from 'vue'
 import { ChevronLeft, Plane, AlertTriangle, FileCheck, Route, RefreshCw, Loader2, Shield, X } from 'lucide-vue-next'
 
@@ -1884,7 +1884,7 @@ defineExpose({
   width: 16px;
   height: 16px;
   cursor: pointer;
-  accent-color: #3b82f6;
+  accent-color: #5b9fd4;
 }
 
 .checkbox-label {
@@ -2347,7 +2347,7 @@ defineExpose({
 
 .form-item input:focus,
 .form-item select:focus {
-  border-color: #3b82f6;
+  border-color: #7db8e0;
   box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
 }
 

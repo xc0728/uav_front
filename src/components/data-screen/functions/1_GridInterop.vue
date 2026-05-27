@@ -1,6 +1,5 @@
-<script setup>
+﻿<script setup>
 import { reactive, ref } from 'vue'
-import { Loader2, Trash2 } from 'lucide-vue-next'
 
 const props = defineProps({
   serviceName: {
@@ -31,6 +30,54 @@ const pointToGridLoading = ref(false)
 const pointToGridError = ref('')
 const pointToGridResult = ref(null)
 
+// 高度快选选项（0-120m整十数）
+const heightOptions = [
+  { value: 0, label: '0m' },
+  { value: 10, label: '10m' },
+  { value: 20, label: '20m' },
+  { value: 30, label: '30m' },
+  { value: 40, label: '40m' },
+  { value: 50, label: '50m' },
+  { value: 60, label: '60m' },
+  { value: 70, label: '70m' },
+  { value: 80, label: '80m' },
+  { value: 90, label: '90m' },
+  { value: 100, label: '100m' },
+  { value: 110, label: '110m' },
+  { value: 120, label: '120m' },
+]
+
+// 层级下拉选项（4-14级）
+const levelOptions = [
+  { value: 4, label: '层级 4' },
+  { value: 5, label: '层级 5' },
+  { value: 6, label: '层级 6' },
+  { value: 7, label: '层级 7' },
+  { value: 8, label: '层级 8' },
+  { value: 9, label: '层级 9' },
+  { value: 10, label: '层级 10' },
+  { value: 11, label: '层级 11' },
+  { value: 12, label: '层级 12' },
+  { value: 13, label: '层级 13' },
+  { value: 14, label: '层级 14' },
+]
+
+// 高度快选
+function onHeightQuickSelect(event) {
+  const value = Number(event.target.value)
+  if (!isNaN(value)) {
+    pointToGridForm.height = value
+  }
+}
+
+// 层级下拉选择
+function onLevelSelect(event) {
+  const value = Number(event.target.value)
+  if (!isNaN(value)) {
+    pointToGridForm.level = value
+  }
+}
+
 // 网格编码转网格中心
 const gridCenterForm = reactive({
   gridCode: '30122030411',
@@ -55,6 +102,29 @@ const parentGridForm = reactive({
 const parentGridLoading = ref(false)
 const parentGridError = ref('')
 const parentGridResult = ref(null)
+
+// 父网格层级下拉选项（4-14级）
+const parentLevelOptions = [
+  { value: 4, label: '层级 4' },
+  { value: 5, label: '层级 5' },
+  { value: 6, label: '层级 6' },
+  { value: 7, label: '层级 7' },
+  { value: 8, label: '层级 8' },
+  { value: 9, label: '层级 9' },
+  { value: 10, label: '层级 10' },
+  { value: 11, label: '层级 11' },
+  { value: 12, label: '层级 12' },
+  { value: 13, label: '层级 13' },
+  { value: 14, label: '层级 14' },
+]
+
+// 父网格层级选择
+function onParentLevelSelect(event) {
+  const value = Number(event.target.value)
+  if (!isNaN(value)) {
+    parentGridForm.level = value
+  }
+}
 
 // 局部网格编码转全局网格编码
 const localToGlobalForm = reactive({
@@ -324,511 +394,599 @@ async function submitGridInfo() {
 </script>
 
 <template>
-  <div class="calc-content">
+  <div class="dem-grid-query">
     <!-- 经纬度高转网格编码 -->
     <template v-if="functionName === '经纬度高转网格编码'">
-      <form class="form" @submit.prevent="submitPointToGrid">
-        <div class="form-row">
-          <label class="form-label" for="ptg-lon">经度</label>
+      <div class="form-group">
+        <div class="group-title">经度</div>
+        <input
+          v-model.number="pointToGridForm.longitude"
+          type="number"
+          step="0.0000000001"
+          class="full-input"
+          placeholder="请输入经度"
+        >
+      </div>
+      <div class="form-group">
+        <div class="group-title">纬度</div>
+        <input
+          v-model.number="pointToGridForm.latitude"
+          type="number"
+          step="0.0000000001"
+          class="full-input"
+          placeholder="请输入纬度"
+        >
+      </div>
+      <div class="form-group">
+        <div class="group-title">高度(m)</div>
+        <div class="height-input-row">
           <input
-            id="ptg-lon"
-            v-model.number="pointToGridForm.longitude"
-            type="number"
-            step="0.0000000001"
-            class="form-input"
-            required
-          >
-        </div>
-        <div class="form-row">
-          <label class="form-label" for="ptg-lat">纬度</label>
-          <input
-            id="ptg-lat"
-            v-model.number="pointToGridForm.latitude"
-            type="number"
-            step="0.0000000001"
-            class="form-input"
-            required
-          >
-        </div>
-        <div class="form-row">
-          <label class="form-label" for="ptg-height">高度(m)</label>
-          <input
-            id="ptg-height"
             v-model.number="pointToGridForm.height"
             type="number"
             step="0.01"
-            class="form-input"
-            required
+            class="height-input"
+            placeholder="请输入高度"
           >
-        </div>
-        <div class="form-row">
-          <label class="form-label" for="ptg-level">层级</label>
-          <input
-            id="ptg-level"
-            v-model.number="pointToGridForm.level"
-            type="number"
-            step="1"
-            min="0"
-            class="form-input"
-            required
+          <select
+            class="height-select"
+            :value="pointToGridForm.height"
+            @change="onHeightQuickSelect"
           >
+            <option
+              v-for="opt in heightOptions"
+              :key="opt.value"
+              :value="opt.value"
+            >{{ opt.label }}</option>
+          </select>
         </div>
-        <div class="form-actions">
-          <button
-            type="submit"
-            class="btn-primary"
-            :disabled="pointToGridLoading"
-          >
-            <Loader2 v-if="pointToGridLoading" :size="14" class="spin" />
-            {{ pointToGridLoading ? '计算中...' : '开始计算' }}
-          </button>
-        </div>
-      </form>
-      <div v-if="pointToGridError" class="error">{{ pointToGridError }}</div>
-      <div v-if="pointToGridResult" class="result">
+      </div>
+      <div class="form-group">
+        <div class="group-title">层级</div>
+        <select
+          class="level-select full-input"
+          :value="pointToGridForm.level"
+          @change="onLevelSelect"
+        >
+          <option
+            v-for="opt in levelOptions"
+            :key="opt.value"
+            :value="opt.value"
+          >{{ opt.label }}</option>
+        </select>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn-query" @click="submitPointToGrid" :disabled="pointToGridLoading">
+          {{ pointToGridLoading ? '计算中...' : '开始计算' }}
+        </button>
+      </div>
+
+      <div v-if="pointToGridError" class="error-box">{{ pointToGridError }}</div>
+
+      <div v-if="pointToGridResult" class="result-box">
         <div class="result-row">
-          <span class="result-k">网格编码</span>
+          <span class="result-label">网格编码</span>
           <span class="result-v code">{{ pointToGridResult.code }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">状态</span>
-          <span class="result-v">{{ pointToGridResult.status }}</span>
+          <span class="result-label">状态</span>
+          <span class="result-status" :class="pointToGridResult.status">
+            {{ pointToGridResult.status === 'success' ? '成功' : pointToGridResult.status }}
+          </span>
         </div>
       </div>
     </template>
 
     <!-- 网格编码转网格中心 -->
     <template v-else-if="functionName === '网格编码转网格中心'">
-      <form class="form" @submit.prevent="submitGridCenter">
-        <div class="form-row">
-          <label class="form-label" for="gc-code">网格编码</label>
-          <input
-            id="gc-code"
-            v-model="gridCenterForm.gridCode"
-            type="text"
-            class="form-input"
-            required
-          >
-        </div>
-        <div class="form-actions">
-          <button
-            type="submit"
-            class="btn-primary"
-            :disabled="gridCenterLoading"
-          >
-            <Loader2 v-if="gridCenterLoading" :size="14" class="spin" />
-            {{ gridCenterLoading ? '计算中...' : '开始计算' }}
-          </button>
-        </div>
-      </form>
-      <div v-if="gridCenterError" class="error">{{ gridCenterError }}</div>
-      <div v-if="gridCenterResult" class="result">
+      <div class="form-group">
+        <div class="group-title">网格编码</div>
+        <input
+          v-model="gridCenterForm.gridCode"
+          type="text"
+          class="full-input"
+          placeholder="请输入网格编码"
+        >
+      </div>
+
+      <div class="btn-row">
+        <button class="btn-query" @click="submitGridCenter" :disabled="gridCenterLoading">
+          {{ gridCenterLoading ? '计算中...' : '开始计算' }}
+        </button>
+      </div>
+
+      <div v-if="gridCenterError" class="error-box">{{ gridCenterError }}</div>
+
+      <div v-if="gridCenterResult" class="result-box">
         <div class="result-row">
-          <span class="result-k">网格编码</span>
+          <span class="result-label">网格编码</span>
           <span class="result-v code">{{ gridCenterResult.data?.gridCode }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">经度</span>
-          <span class="result-v">{{ gridCenterResult.data?.longitude }}</span>
+          <span class="result-label">经度</span>
+          <span class="result-num">{{ gridCenterResult.data?.longitude }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">纬度</span>
-          <span class="result-v">{{ gridCenterResult.data?.latitude }}</span>
+          <span class="result-label">纬度</span>
+          <span class="result-num">{{ gridCenterResult.data?.latitude }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">高度(m)</span>
-          <span class="result-v">{{ gridCenterResult.data?.height }}</span>
+          <span class="result-label">高度(m)</span>
+          <span class="result-num">{{ gridCenterResult.data?.height }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">层级</span>
-          <span class="result-v">{{ gridCenterResult.data?.level }}</span>
+          <span class="result-label">层级</span>
+          <span class="result-num">{{ gridCenterResult.data?.level }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">状态</span>
-          <span class="result-v">{{ gridCenterResult.status }}</span>
+          <span class="result-label">状态</span>
+          <span class="result-status" :class="gridCenterResult.status">
+            {{ gridCenterResult.status === 'success' ? '成功' : gridCenterResult.status }}
+          </span>
         </div>
       </div>
     </template>
 
     <!-- 网格编码计算子网格 -->
     <template v-else-if="functionName === '网格编码计算子网格'">
-      <form class="form" @submit.prevent="submitChildGrid">
-        <div class="form-row">
-          <label class="form-label" for="cg-code">网格编码</label>
-          <input
-            id="cg-code"
-            v-model="childGridForm.gridCode"
-            type="text"
-            class="form-input"
-            required
-          >
-        </div>
-        <div class="form-actions">
-          <button
-            type="submit"
-            class="btn-primary"
-            :disabled="childGridLoading"
-          >
-            <Loader2 v-if="childGridLoading" :size="14" class="spin" />
-            {{ childGridLoading ? '计算中...' : '开始计算' }}
-          </button>
-        </div>
-      </form>
-      <div v-if="childGridError" class="error">{{ childGridError }}</div>
-      <div v-if="childGridResult" class="result">
+      <div class="form-group">
+        <div class="group-title">网格编码</div>
+        <input
+          v-model="childGridForm.gridCode"
+          type="text"
+          class="full-input"
+          placeholder="请输入网格编码"
+        >
+      </div>
+
+      <div class="btn-row">
+        <button class="btn-query" @click="submitChildGrid" :disabled="childGridLoading">
+          {{ childGridLoading ? '计算中...' : '开始计算' }}
+        </button>
+      </div>
+
+      <div v-if="childGridError" class="error-box">{{ childGridError }}</div>
+
+      <div v-if="childGridResult" class="result-box">
         <div class="result-row">
-          <span class="result-k">父网格编码</span>
+          <span class="result-label">父网格编码</span>
           <span class="result-v code">{{ childGridResult.data?.gridCode }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">状态</span>
-          <span class="result-v">{{ childGridResult.status }}</span>
+          <span class="result-label">状态</span>
+          <span class="result-status" :class="childGridResult.status">
+            {{ childGridResult.status === 'success' ? '成功' : childGridResult.status }}
+          </span>
         </div>
         <div class="result-row">
-          <span class="result-k">子网格数量</span>
-          <span class="result-v">{{ childGridResult.data?.childcode?.length ?? 0 }}</span>
+          <span class="result-label">子网格数量</span>
+          <span class="result-num">{{ childGridResult.data?.childcode?.length ?? 0 }}</span>
         </div>
-        <div v-if="childGridResult.data?.childcode?.length" class="result-row child-codes-row">
-          <span class="result-k">子网格编码</span>
-          <span class="result-v">
+        <div v-if="childGridResult.data?.childcode?.length" class="result-row">
+          <span class="result-label">子网格编码</span>
+          <div class="result-v">
             <span
               v-for="code in childGridResult.data.childcode"
               :key="code"
               class="chip"
             >{{ code }}</span>
-          </span>
+          </div>
         </div>
       </div>
     </template>
 
     <!-- 网格编码求指定层级父网格 -->
     <template v-else-if="functionName === '网格编码求指定层级父网格'">
-      <form class="form" @submit.prevent="submitParentGrid">
-        <div class="form-row">
-          <label class="form-label" for="pg-code">网格编码</label>
-          <input
-            id="pg-code"
-            v-model="parentGridForm.gridCode"
-            type="text"
-            class="form-input"
-            required
-          >
-        </div>
-        <div class="form-row">
-          <label class="form-label" for="pg-level">层级</label>
-          <input
-            id="pg-level"
-            v-model.number="parentGridForm.level"
-            type="number"
-            step="1"
-            min="0"
-            class="form-input"
-            required
-          >
-        </div>
-        <div class="form-actions">
-          <button
-            type="submit"
-            class="btn-primary"
-            :disabled="parentGridLoading"
-          >
-            <Loader2 v-if="parentGridLoading" :size="14" class="spin" />
-            {{ parentGridLoading ? '计算中...' : '开始计算' }}
-          </button>
-        </div>
-      </form>
-      <div v-if="parentGridError" class="error">{{ parentGridError }}</div>
-      <div v-if="parentGridResult" class="result">
+      <div class="form-group">
+        <div class="group-title">网格编码</div>
+        <input
+          v-model="parentGridForm.gridCode"
+          type="text"
+          class="full-input"
+          placeholder="请输入网格编码"
+        >
+      </div>
+      <div class="form-group">
+        <div class="group-title">层级</div>
+        <select
+          class="level-select full-input"
+          :value="parentGridForm.level"
+          @change="onParentLevelSelect"
+        >
+          <option
+            v-for="opt in parentLevelOptions"
+            :key="opt.value"
+            :value="opt.value"
+          >{{ opt.label }}</option>
+        </select>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn-query" @click="submitParentGrid" :disabled="parentGridLoading">
+          {{ parentGridLoading ? '计算中...' : '开始计算' }}
+        </button>
+      </div>
+
+      <div v-if="parentGridError" class="error-box">{{ parentGridError }}</div>
+
+      <div v-if="parentGridResult" class="result-box">
         <div class="result-row">
-          <span class="result-k">原始网格编码</span>
+          <span class="result-label">原始网格编码</span>
           <span class="result-v code">{{ parentGridResult.data?.gridCode }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">指定层级</span>
-          <span class="result-v">{{ parentGridResult.data?.level }}</span>
+          <span class="result-label">指定层级</span>
+          <span class="result-num">{{ parentGridResult.data?.level }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">父网格编码</span>
+          <span class="result-label">父网格编码</span>
           <span class="result-v code">{{ parentGridResult.data?.parentCode }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">状态</span>
-          <span class="result-v">{{ parentGridResult.status }}</span>
+          <span class="result-label">状态</span>
+          <span class="result-status" :class="parentGridResult.status">
+            {{ parentGridResult.status === 'success' ? '成功' : parentGridResult.status }}
+          </span>
         </div>
       </div>
     </template>
 
     <!-- 局部网格编码转全局网格编码 -->
     <template v-else-if="functionName === '局部网格编码转全局网格编码'">
-      <form class="form" @submit.prevent="submitLocalToGlobal">
-        <div class="form-row">
-          <label class="form-label" for="ltg-local">局部编码</label>
-          <input
-            id="ltg-local"
-            v-model="localToGlobalForm.localCode"
-            type="text"
-            class="form-input"
-            required
-          >
-        </div>
-        <div class="form-actions">
-          <button
-            type="submit"
-            class="btn-primary"
-            :disabled="localToGlobalLoading"
-          >
-            <Loader2 v-if="localToGlobalLoading" :size="14" class="spin" />
-            {{ localToGlobalLoading ? '计算中...' : '开始计算' }}
-          </button>
-        </div>
-      </form>
-      <div v-if="localToGlobalError" class="error">{{ localToGlobalError }}</div>
-      <div v-if="localToGlobalResult" class="result">
+      <div class="form-group">
+        <div class="group-title">局部编码</div>
+        <input
+          v-model="localToGlobalForm.localCode"
+          type="text"
+          class="full-input"
+          placeholder="请输入局部编码"
+        >
+      </div>
+
+      <div class="btn-row">
+        <button class="btn-query" @click="submitLocalToGlobal" :disabled="localToGlobalLoading">
+          {{ localToGlobalLoading ? '计算中...' : '开始计算' }}
+        </button>
+      </div>
+
+      <div v-if="localToGlobalError" class="error-box">{{ localToGlobalError }}</div>
+
+      <div v-if="localToGlobalResult" class="result-box">
         <div class="result-row">
-          <span class="result-k">局部网格编码</span>
+          <span class="result-label">局部网格编码</span>
           <span class="result-v code">{{ localToGlobalResult.data?.localCode }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">全局网格编码</span>
+          <span class="result-label">全局网格编码</span>
           <span class="result-v code">{{ localToGlobalResult.data?.globalCode }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">状态</span>
-          <span class="result-v">{{ localToGlobalResult.status }}</span>
+          <span class="result-label">状态</span>
+          <span class="result-status" :class="localToGlobalResult.status">
+            {{ localToGlobalResult.status === 'success' ? '成功' : localToGlobalResult.status }}
+          </span>
         </div>
       </div>
     </template>
 
     <!-- 网格编码获取网格信息 -->
     <template v-else-if="functionName === '网格编码获取网格信息'">
-      <form class="form" @submit.prevent="submitGridInfo">
-        <div class="form-row">
-          <label class="form-label" for="gi-code">网格编码</label>
-          <input
-            id="gi-code"
-            v-model="gridInfoForm.gridCode"
-            type="text"
-            class="form-input"
-            required
-          >
-        </div>
-        <div class="form-actions">
-          <button
-            type="submit"
-            class="btn-primary"
-            :disabled="gridInfoLoading"
-          >
-            <Loader2 v-if="gridInfoLoading" :size="14" class="spin" />
-            {{ gridInfoLoading ? '计算中...' : '开始计算' }}
-          </button>
-        </div>
-      </form>
-      <div v-if="gridInfoError" class="error">{{ gridInfoError }}</div>
-      <div v-if="gridInfoResult" class="result result-grid-info">
+      <div class="form-group">
+        <div class="group-title">网格编码</div>
+        <input
+          v-model="gridInfoForm.gridCode"
+          type="text"
+          class="full-input"
+          placeholder="请输入网格编码"
+        >
+      </div>
+
+      <div class="btn-row">
+        <button class="btn-query" @click="submitGridInfo" :disabled="gridInfoLoading">
+          {{ gridInfoLoading ? '计算中...' : '开始计算' }}
+        </button>
+        <button class="btn-clear" @click="clearGrids" :disabled="!gridInfoResult">
+          <span>清除格网</span>
+        </button>
+      </div>
+
+      <div v-if="gridInfoError" class="error-box">{{ gridInfoError }}</div>
+
+      <div v-if="gridInfoResult" class="result-box">
         <div class="result-row">
-          <span class="result-k">网格编码</span>
+          <span class="result-label">网格编码</span>
           <span class="result-v code">{{ gridInfoResult.data?.code }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">层级</span>
-          <span class="result-v">{{ gridInfoResult.data?.level }}</span>
+          <span class="result-label">层级</span>
+          <span class="result-num">{{ gridInfoResult.data?.level }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">层号</span>
-          <span class="result-v">{{ gridInfoResult.data?.layer }}</span>
+          <span class="result-label">层号</span>
+          <span class="result-num">{{ gridInfoResult.data?.layer }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">行号</span>
-          <span class="result-v">{{ gridInfoResult.data?.row }}</span>
+          <span class="result-label">行号</span>
+          <span class="result-num">{{ gridInfoResult.data?.row }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">列号</span>
-          <span class="result-v">{{ gridInfoResult.data?.column }}</span>
+          <span class="result-label">列号</span>
+          <span class="result-num">{{ gridInfoResult.data?.column }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">八分体编号</span>
-          <span class="result-v">{{ gridInfoResult.data?.octNum }}</span>
+          <span class="result-label">八分体编号</span>
+          <span class="result-num">{{ gridInfoResult.data?.octNum }}</span>
         </div>
+
         <div class="result-section-title">中心点</div>
         <div class="result-row">
-          <span class="result-k">经度</span>
-          <span class="result-v">{{ gridInfoResult.data?.center?.longitude }}</span>
+          <span class="result-label">经度</span>
+          <span class="result-num">{{ gridInfoResult.data?.center?.longitude }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">纬度</span>
-          <span class="result-v">{{ gridInfoResult.data?.center?.latitude }}</span>
+          <span class="result-label">纬度</span>
+          <span class="result-num">{{ gridInfoResult.data?.center?.latitude }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">高程</span>
-          <span class="result-v">{{ gridInfoResult.data?.center?.height }}</span>
+          <span class="result-label">高程</span>
+          <span class="result-num">{{ gridInfoResult.data?.center?.height }}</span>
         </div>
+
         <div class="result-section-title">边界</div>
         <div class="result-row">
-          <span class="result-k">北界</span>
-          <span class="result-v">{{ gridInfoResult.data?.north }}</span>
+          <span class="result-label">北界</span>
+          <span class="result-num">{{ gridInfoResult.data?.north }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">南界</span>
-          <span class="result-v">{{ gridInfoResult.data?.south }}</span>
+          <span class="result-label">南界</span>
+          <span class="result-num">{{ gridInfoResult.data?.south }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">东界</span>
-          <span class="result-v">{{ gridInfoResult.data?.east }}</span>
+          <span class="result-label">东界</span>
+          <span class="result-num">{{ gridInfoResult.data?.east }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">西界</span>
-          <span class="result-v">{{ gridInfoResult.data?.west }}</span>
+          <span class="result-label">西界</span>
+          <span class="result-num">{{ gridInfoResult.data?.west }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">上边界</span>
-          <span class="result-v">{{ gridInfoResult.data?.top }}</span>
+          <span class="result-label">上边界</span>
+          <span class="result-num">{{ gridInfoResult.data?.top }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">下边界</span>
-          <span class="result-v">{{ gridInfoResult.data?.bottom }}</span>
+          <span class="result-label">下边界</span>
+          <span class="result-num">{{ gridInfoResult.data?.bottom }}</span>
         </div>
+
         <div class="result-row">
-          <span class="result-k">状态</span>
-          <span class="result-v">{{ gridInfoResult.status }}</span>
+          <span class="result-label">状态</span>
+          <span class="result-status" :class="gridInfoResult.status">
+            {{ gridInfoResult.status === 'success' ? '成功' : gridInfoResult.status }}
+          </span>
         </div>
       </div>
     </template>
-
-    <!-- 清除格网按钮 - 仅在网格编码获取网格信息时显示底部按钮 -->
-    <div v-if="functionName === '网格编码获取网格信息'" class="form-actions" style="margin-top: 16px;">
-      <button type="button" class="btn-danger" @click="clearGrids">
-        <Trash2 :size="14" />
-        清除已生成格网
-      </button>
-    </div>
   </div>
 </template>
 
 <style scoped>
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+.dem-grid-query {
+  padding: 0;
+  width: 100%;
+  box-sizing: border-box;
+  position: relative;
 }
 
-.form-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+/* 表单组 */
+.form-group {
+  margin-bottom: 12px;
 }
 
-.form-label {
-  width: 72px;
-  font-size: 13px;
-  color: #94a3b8;
-  flex-shrink: 0;
+.group-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 8px;
 }
 
-.form-input {
-  flex: 1;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.2);
-  color: #f1f5f9;
+.full-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
   font-size: 14px;
-  outline: none;
-  transition: all 0.15s ease;
+  box-sizing: border-box;
 }
 
-.form-input:focus {
-  border-color: #3b82f6;
-  background: rgba(99, 102, 241, 0.1);
+.full-input::placeholder {
+  color: #999;
 }
 
-.form-actions {
+/* 高度输入行（输入框 + 快选下拉） */
+.height-input-row {
   display: flex;
-  justify-content: flex-end;
-  margin-top: 6px;
+  gap: 8px;
 }
 
-.btn-primary {
+.height-input {
+  flex: 1;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.height-input::placeholder {
+  color: #999;
+}
+
+.height-select {
+  width: 90px;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 14px;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.height-select:focus {
+  outline: none;
+  border-color: #5b9fd4;
+  box-shadow: 0 0 0 2px rgba(91, 159, 212, 0.2);
+}
+
+/* 层级下拉选择 */
+.level-select {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 14px;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.level-select:focus {
+  outline: none;
+  border-color: #5b9fd4;
+  box-shadow: 0 0 0 2px rgba(91, 159, 212, 0.2);
+}
+
+/* 按钮行 */
+.btn-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.btn-query {
+  flex: 1;
+  height: 38px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 10px 22px;
+  justify-content: center;
   border-radius: 8px;
+  background: linear-gradient(135deg, #7db8e0, #5b9fd4);
   border: none;
-  background: linear-gradient(135deg, #3b82f6, #0ea5e9);
   color: #fff;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
 }
 
-.btn-primary:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
+.btn-query:hover:not(:disabled) {
+  background: linear-gradient(135deg, #6aa8d4, #4a8fc4);
 }
 
-.btn-primary:disabled {
-  opacity: 0.7;
-  cursor: default;
+.btn-query:disabled {
+  background: #e2e8f0;
+  color: #94a3b8;
+  cursor: not-allowed;
 }
 
-.spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.error {
-  margin-top: 14px;
-  padding: 10px 12px;
+.btn-clear {
+  width: 88px;
+  white-space: nowrap;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 8px;
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  background: rgba(239, 68, 68, 0.1);
-  font-size: 13px;
-  color: #fca5a5;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  font-size: 15px;
+  cursor: pointer;
 }
 
-.result {
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+.btn-clear:hover:not(:disabled) {
+  background: #e8e8e8;
+}
+
+.btn-clear:disabled {
+  color: #999;
+  cursor: not-allowed;
+}
+
+/* 错误提示 */
+.error-box {
+  padding: 10px 12px;
+  border: 1px solid #fca5a5;
+  border-radius: 8px;
+  background: #fef2f2;
+  font-size: 14px;
+  color: #dc2626;
+  margin-bottom: 10px;
+}
+
+/* 结果区 */
+.result-box {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #ddd;
+  background: #f9f9f9;
+  border-radius: 8px;
 }
 
 .result-row {
-  display: grid;
-  grid-template-columns: 80px 1fr;
-  gap: 10px;
-  font-size: 15px;
-}
-
-.child-codes-row .result-v {
   display: flex;
-  flex-wrap: wrap;
-  align-content: flex-start;
-  gap: 6px;
+  justify-content: space-between;
+  align-items: flex-start;
 }
 
-.result-k {
+.result-label {
+  font-size: 14px;
   color: #64748b;
+  flex-shrink: 0;
+}
+
+.result-num {
+  font-size: 14px;
+  font-weight: 600;
+  color: #334155;
+  text-align: right;
 }
 
 .result-v {
-  color: #e2e8f0;
-  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+  color: #475569;
+  text-align: right;
   word-break: break-all;
-  overflow-x: auto;
 }
 
 .result-v.code {
   font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
-  color: #93c5fd;
+  color: #5b9fd4;
+  font-size: 13px;
+}
+
+.result-status {
   font-size: 14px;
+  font-weight: 600;
+}
+
+.result-status.success {
+  color: #060;
+}
+
+.result-status:not(.success) {
+  color: #c00;
 }
 
 .result-section-title {
@@ -836,57 +994,20 @@ async function submitGridInfo() {
   font-weight: 600;
   color: #3b82f6;
   padding: 8px 0 4px;
-  margin-top: 6px;
+  margin-top: 4px;
   border-bottom: 1px solid rgba(59, 130, 246, 0.2);
 }
 
+/* 子网格编码标签 */
 .chip {
   display: inline-block;
-  margin: 2px 4px 2px 0;
-  padding: 4px 10px;
+  margin: 2px;
+  padding: 4px 8px;
   border-radius: 4px;
-  border: 1px solid rgba(147, 197, 253, 0.3);
-  background: rgba(59, 130, 246, 0.1);
-  font-size: 13px;
-  font-family: 'SF Mono', 'Monaco', monospace;
-  color: #93c5fd;
-}
-
-.child-codes-row .result-v::-webkit-scrollbar {
-  width: 4px;
-}
-
-.child-codes-row .result-v::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.child-codes-row .result-v::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 2px;
-}
-
-.btn-danger {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  color: #e2e8f0;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
   font-size: 12px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.btn-danger:hover:not(:disabled) {
-  border-color: rgba(239, 68, 68, 0.4);
-  background: rgba(239, 68, 68, 0.14);
-  color: #fecaca;
-}
-
-.btn-danger:disabled {
-  opacity: 0.6;
-  cursor: default;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  color: #3b82f6;
 }
 </style>

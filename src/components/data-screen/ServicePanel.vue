@@ -508,12 +508,14 @@ defineExpose({
   pointer-events: auto;
 }
 
-/* ==================== 左侧控制面板 ==================== */
+/* ==================== 左侧控制面板 - 奶白清新 ==================== */
 .control-panel {
   width: 360px;
   max-width: 360px;
   height: 100%;
-  background: rgba(15, 23, 42, 0.95);
+  background: rgba(253, 251, 247, 0.97);
+  border-right: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.06);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -530,8 +532,8 @@ defineExpose({
   align-items: center;
   justify-content: space-between;
   padding: 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(30, 41, 59, 0.8) 0%, transparent 100%);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  background: linear-gradient(180deg, #faf8f4 0%, rgba(253, 251, 247, 0) 100%);
   flex-shrink: 0;
 }
 
@@ -542,7 +544,7 @@ defineExpose({
 }
 
 .header-icon {
-  color: #60a5fa;
+  color: #5b9fd4;
 }
 
 /* 返回按钮 */
@@ -550,9 +552,9 @@ defineExpose({
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(59, 130, 246, 0.15);
-  color: #60a5fa;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #5b9fd4;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -561,8 +563,8 @@ defineExpose({
 }
 
 .back-btn:hover {
-  background: rgba(59, 130, 246, 0.25);
-  border-color: #3b82f6;
+  background: #eef6fc;
+  border-color: #7db8e0;
 }
 
 /* 服务信息标题 */
@@ -574,7 +576,7 @@ defineExpose({
 .header-function-name {
   font-size: 17px;
   font-weight: 600;
-  color: #f1f5f9;
+  color: #334155;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -584,7 +586,7 @@ defineExpose({
 .panel-title {
   font-size: 18px;
   font-weight: 600;
-  color: #f1f5f9;
+  color: #334155;
 }
 
 .header-actions {
@@ -596,9 +598,9 @@ defineExpose({
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
-  color: #94a3b8;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #64748b;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -607,9 +609,9 @@ defineExpose({
 }
 
 .icon-btn:hover {
-  background: rgba(59, 130, 246, 0.2);
-  border-color: #3b82f6;
-  color: #60a5fa;
+  background: #eef6fc;
+  border-color: #7db8e0;
+  color: #5b9fd4;
 }
 
 .icon-btn.close-btn:hover {
@@ -633,7 +635,7 @@ defineExpose({
 }
 
 .panel-content::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.12);
   border-radius: 2px;
 }
 
@@ -655,9 +657,9 @@ defineExpose({
   gap: 12px;
   padding: 14px 16px;
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.02);
-  color: #cbd5e1;
+  border: 1px solid #ebe6df;
+  background: #ffffff;
+  color: #475569;
   font-size: 16px;
   text-align: left;
   cursor: pointer;
@@ -665,9 +667,10 @@ defineExpose({
 }
 
 .service-btn:hover {
-  background: rgba(59, 130, 246, 0.15);
-  border-color: rgba(59, 130, 246, 0.4);
-  color: #f1f5f9;
+  background: #faf8f4;
+  border-color: #d4c9b8;
+  color: #334155;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
 .service-icon {
@@ -676,9 +679,9 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(59, 130, 246, 0.2);
+  background: #eef6fc;
   border-radius: 10px;
-  color: #60a5fa;
+  color: #5b9fd4;
   flex-shrink: 0;
 }
 
@@ -694,7 +697,7 @@ defineExpose({
 
 .service-arrow.active {
   transform: rotate(90deg);
-  color: #60a5fa;
+  color: #5b9fd4;
 }
 
 /* 下拉菜单 */
@@ -703,9 +706,9 @@ defineExpose({
   margin-top: 8px;
   padding: 8px;
   border-radius: 12px;
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  background: rgba(30, 41, 59, 0.98);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  border: 1px solid #ebe6df;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
   z-index: 100;
 }
 
@@ -718,7 +721,7 @@ defineExpose({
   border-radius: 8px;
   border: none;
   background: transparent;
-  color: #94a3b8;
+  color: #64748b;
   font-size: 15px;
   text-align: left;
   cursor: pointer;
@@ -726,14 +729,14 @@ defineExpose({
 }
 
 .service-dropdown-item:hover {
-  background: rgba(59, 130, 246, 0.25);
-  color: #e2e8f0;
+  background: #f5f3f0;
+  color: #334155;
 }
 
 .service-dropdown-item .dot {
   width: 5px;
   height: 5px;
-  background: #3b82f6;
+  background: #5b9fd4;
   border-radius: 50%;
   flex-shrink: 0;
 }
@@ -762,7 +765,7 @@ defineExpose({
   font-size: 18px;
   font-family: "SimHei", "Microsoft YaHei", sans-serif;
   font-weight: bold;
-  color: #ffffff;
+  color: #475569;
   flex-shrink: 0;
 }
 
@@ -773,7 +776,7 @@ defineExpose({
 }
 
 .collapsed-calc-title-wrap:hover .collapsed-calc-char {
-  color: #60a5fa;
+  color: #5b9fd4;
 }
 
 /* 折叠时的图标列表 */
@@ -791,9 +794,9 @@ defineExpose({
   width: 40px;
   height: 32px;
   border-radius: 8px;
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  background: rgba(59, 130, 246, 0.15);
-  color: #60a5fa;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #5b9fd4;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -803,15 +806,15 @@ defineExpose({
 }
 
 .collapsed-expand-btn:hover {
-  background: rgba(59, 130, 246, 0.25);
-  border-color: #3b82f6;
+  background: #eef6fc;
+  border-color: #7db8e0;
 }
 
 .collapsed-function-name {
   writing-mode: vertical-lr;
   text-orientation: upright;
   font-size: 14px;
-  color: #e2e8f0;
+  color: #64748b;
   padding: 8px 4px;
   cursor: pointer;
   letter-spacing: 2px;
@@ -822,20 +825,20 @@ defineExpose({
 }
 
 .collapsed-function-name:hover {
-  color: #60a5fa;
+  color: #5b9fd4;
 }
 
 .calc-collapsed-icon {
-  background: rgba(59, 130, 246, 0.2);
-  color: #60a5fa;
+  background: #eef6fc;
+  color: #5b9fd4;
 }
 
 .collapsed-item {
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid #ebe6df;
+  background: #ffffff;
   color: #64748b;
   cursor: pointer;
   display: flex;
@@ -845,9 +848,9 @@ defineExpose({
 }
 
 .collapsed-item:hover {
-  background: rgba(59, 130, 246, 0.2);
-  border-color: rgba(59, 130, 246, 0.4);
-  color: #60a5fa;
+  background: #eef6fc;
+  border-color: #7db8e0;
+  color: #5b9fd4;
 }
 
 /* ==================== 展开/收起按钮 ==================== */
@@ -861,14 +864,14 @@ defineExpose({
   gap: 8px;
   padding: 12px 16px;
   border-radius: 12px;
-  border: 1px solid rgba(59, 130, 246, 0.4);
-  background: rgba(15, 23, 42, 0.95);
-  color: #60a5fa;
+  border: 1px solid #ebe6df;
+  background: rgba(253, 251, 247, 0.98);
+  color: #5b9fd4;
   font-size: 16px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
 }
 
 .expand-control-btn {
@@ -881,18 +884,18 @@ defineExpose({
 
 .expand-control-btn:hover,
 .expand-calc-btn:hover {
-  background: rgba(59, 130, 246, 0.2);
-  border-color: #3b82f6;
+  background: #ffffff;
+  border-color: #7db8e0;
 }
 
-/* ==================== 右侧计算面板 ==================== */
+/* ==================== 右侧计算面板（备用） ==================== */
 .calc-panel {
   width: 400px;
   max-width: 400px;
   height: 100%;
-  background: rgba(15, 23, 42, 0.95);
+  background: rgba(253, 251, 247, 0.97);
   border-radius: 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -903,8 +906,8 @@ defineExpose({
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(180deg, rgba(30, 41, 59, 0.9) 0%, transparent 100%);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  background: linear-gradient(180deg, #faf8f4 0%, transparent 100%);
   flex-shrink: 0;
 }
 
@@ -925,10 +928,10 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #3b82f6, #0ea5e9);
+  background: linear-gradient(135deg, #7db8e0, #5b9fd4);
   border-radius: 12px;
   color: #fff;
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+  box-shadow: 0 4px 12px rgba(91, 159, 212, 0.25);
 }
 
 .calc-header-text {
@@ -940,7 +943,7 @@ defineExpose({
 .calc-function-name {
   font-size: 17px;
   font-weight: 600;
-  color: #f1f5f9;
+  color: #334155;
 }
 
 .calc-service-name {
@@ -953,9 +956,9 @@ defineExpose({
   width: 34px;
   height: 34px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
-  color: #94a3b8;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #64748b;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -964,9 +967,9 @@ defineExpose({
 }
 
 .calc-minimize:hover {
-  border-color: #60a5fa;
-  background: rgba(59, 130, 246, 0.2);
-  color: #60a5fa;
+  border-color: #7db8e0;
+  background: #eef6fc;
+  color: #5b9fd4;
 }
 
 .calc-close:hover {
@@ -979,7 +982,7 @@ defineExpose({
 .calc-view {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 10px;
 }
 
 .calc-view::-webkit-scrollbar {
@@ -991,14 +994,14 @@ defineExpose({
 }
 
 .calc-view::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.2);
   border-radius: 2px;
 }
 
 .calc-view,
 .calc-content {
   flex: 1;
-  padding: 20px;
+  padding: 10px;
   overflow-x: hidden;
   overflow-y: auto;
 }
@@ -1012,7 +1015,7 @@ defineExpose({
 }
 
 .calc-content::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.12);
   border-radius: 2px;
 }
 
@@ -1020,18 +1023,18 @@ defineExpose({
 .calc-content :deep(.form-section) {
   margin-bottom: 20px;
   padding: 16px;
-  background: rgba(30, 41, 59, 0.5);
+  background: #ffffff;
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid #ebe6df;
 }
 
 .calc-content :deep(.form-section-title) {
   font-size: 15px;
   font-weight: 600;
-  color: #60a5fa;
+  color: #4a7eb0;
   margin-bottom: 14px;
   padding-bottom: 10px;
-  border-bottom: 1px solid rgba(96, 165, 250, 0.2);
+  border-bottom: 1px solid #e8e4df;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1051,7 +1054,7 @@ defineExpose({
 .calc-content :deep(.form-label) {
   font-size: 15px;
   font-weight: 500;
-  color: #94a3b8;
+  color: #64748b;
 }
 
 .calc-content :deep(.form-input),
@@ -1060,10 +1063,10 @@ defineExpose({
   height: 36px;
   line-height: 1.2;
   padding: 8px 14px;
-  background: rgba(15, 23, 42, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
   border-radius: 8px;
-  color: #f1f5f9;
+  color: #334155;
   font-size: 14px;
   transition: all 0.2s ease;
   box-sizing: border-box;
@@ -1072,20 +1075,20 @@ defineExpose({
 .calc-content :deep(.form-input:focus),
 .calc-content :deep(.form-select:focus) {
   outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
 }
 
 .calc-content :deep(.form-input::placeholder) {
-  color: #475569;
+  color: #94a3b8;
 }
 
 .calc-content :deep(.tip) {
   padding: 12px 14px;
-  background: rgba(59, 130, 246, 0.1);
-  border: 1px solid rgba(59, 130, 246, 0.2);
+  background: #eef6fc;
+  border: 1px solid #bfdbfe;
   border-radius: 8px;
-  color: #60a5fa;
+  color: #2563eb;
   font-size: 15px;
   line-height: 1.5;
   margin-bottom: 16px;
@@ -1107,20 +1110,26 @@ defineExpose({
 
 .calc-content :deep(.btn-primary) {
   width: 100%;
-  background: linear-gradient(135deg, #3b82f6 0%, #0ea5e9 100%);
-  color: #fff;
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+  background: linear-gradient(135deg, #7db8e0, #5b9fd4);
+  border: none;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(91, 159, 212, 0.25);
 }
 
 .calc-content :deep(.btn-primary:hover) {
   transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4);
+  background: linear-gradient(135deg, #6aa8d4, #4a8fc4);
+  box-shadow: 0 4px 12px rgba(91, 159, 212, 0.3);
 }
 
 .calc-content :deep(.btn-primary:disabled) {
-  opacity: 0.5;
+  opacity: 0.55;
   cursor: not-allowed;
   transform: none;
+  background: #e2e8f0;
+  border: none;
+  color: #94a3b8;
+  box-shadow: none;
 }
 
 .calc-content :deep(.btn-danger) {
@@ -1135,14 +1144,14 @@ defineExpose({
 }
 
 .calc-content :deep(.btn-secondary) {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #cbd5e1;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  color: #475569;
 }
 
 .calc-content :deep(.btn-secondary:hover) {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
+  background: #f8fafc;
+  border-color: #cbd5e1;
 }
 
 /* 加载状态 */
@@ -1153,7 +1162,7 @@ defineExpose({
   justify-content: center;
   gap: 12px;
   padding: 40px;
-  color: #60a5fa;
+  color: #5b9fd4;
 }
 
 .calc-content :deep(.loading-spinner) {
@@ -1224,8 +1233,8 @@ defineExpose({
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  background: rgba(30, 41, 59, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: #ffffff;
+  border: 1px solid #ebe6df;
   border-radius: 8px;
 }
 
@@ -1234,12 +1243,12 @@ defineExpose({
   flex-direction: column;
   gap: 2px;
   font-size: 15px;
-  color: #cbd5e1;
+  color: #475569;
 }
 
 .calc-content :deep(.point-index) {
   font-weight: 600;
-  color: #60a5fa;
+  color: #5b9fd4;
 }
 
 .calc-content :deep(.point-coord) {

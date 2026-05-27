@@ -1,6 +1,5 @@
 <script setup>
 import { reactive, ref } from 'vue'
-import { Loader2, Trash2, Search } from 'lucide-vue-next'
 
 const props = defineProps({
   serviceName: {
@@ -38,6 +37,65 @@ const aggregationResult = ref(null)
 const triangleGridForm = reactive({
   level: 9,
 })
+
+// 网格层级快选选项
+const levelOptions = [
+  { value: 9, label: '层级 9' },
+]
+
+// osgb网格化（同步入库）的层级选项
+const osgbLevelOptions = [
+  { value: 9, label: '层级 9' },
+  { value: 14, label: '层级 14' },
+]
+
+// osgb网格化聚合入库的层级选项
+const aggregationLevelOptions = [
+  { value: 9, label: '层级 9' },
+  { value: 14, label: '层级 14' },
+]
+
+// 最小层级选项（0-5级）
+const minLevelOptions = [
+  { value: 0, label: '层级 0' },
+  { value: 1, label: '层级 1' },
+  { value: 2, label: '层级 2' },
+  { value: 3, label: '层级 3' },
+  { value: 4, label: '层级 4' },
+  { value: 5, label: '层级 5' },
+]
+
+// 倾斜摄影网格查询层级选择
+function onLevelQuickSelect(event) {
+  const value = Number(event.target.value)
+  if (!isNaN(value)) {
+    triangleGridForm.level = value
+  }
+}
+
+// osgb网格化层级选择
+function onOsgbLevelSelect(event) {
+  const value = Number(event.target.value)
+  if (!isNaN(value)) {
+    osgbForm.level = value
+  }
+}
+
+// osgb网格化聚合入库层级选择
+function onAggregationLevelSelect(event) {
+  const value = Number(event.target.value)
+  if (!isNaN(value)) {
+    aggregationForm.level = value
+  }
+}
+
+// osgb网格化聚合入库最小层级选择
+function onAggregationMinLevelSelect(event) {
+  const value = Number(event.target.value)
+  if (!isNaN(value)) {
+    aggregationForm.minLevel = value
+  }
+}
 
 const triangleGridLoading = ref(false)
 const triangleGridError = ref('')
@@ -195,7 +253,6 @@ async function submitTriangleGridQuery() {
       }
     } else {
       console.log('[倾斜摄影网格查询] data.data 为空或不存在，尝试从其他字段解析')
-      // 尝试从整个响应中提取数据
       if (Array.isArray(data.grids)) {
         gridsData.value = data.grids
         parsedCount = gridsData.value.length
@@ -224,8 +281,6 @@ async function submitTriangleGridQuery() {
         console.log('[倾斜摄影网格查询] 处理单个 cell:', JSON.stringify(cell).slice(0, 200))
         if (cell.bounds) return cell
 
-        // 后端返回的字段可能是：center, minlat, maxlat, minlon, maxlon, top, bottom
-        // 需要转换为 bounds 格式：north, south, east, west, top, bottom
         return {
           bounds: {
             north: cell.maxlat,
@@ -259,154 +314,139 @@ function clearGrids() {
 </script>
 
 <template>
-  <div class="calc-content">
+  <div class="tilt-photogrammetry">
     <!-- ==================== OSGB 网格化（同步入库） ==================== -->
     <template v-if="functionName === 'osgb网格化（同步入库）'">
-      <form class="form" @submit.prevent="submitOsgbGrid">
-        <div class="form-row">
-          <label class="form-label" for="osgb-folder">OSGB目录</label>
-          <input
-            id="osgb-folder"
-            v-model="osgbForm.osgbFolder"
-            type="text"
-            class="form-input"
-            required
-          >
-        </div>
-        <div class="form-row">
-          <label class="form-label" for="osgb-level">层级</label>
-          <input
-            id="osgb-level"
-            v-model.number="osgbForm.level"
-            type="number"
-            min="0"
-            max="21"
-            step="1"
-            class="form-input"
-            required
-          >
-        </div>
-        <div class="form-actions">
-          <button
-            type="submit"
-            class="btn-primary"
-            :disabled="osgbLoading"
-          >
-            <Loader2 v-if="osgbLoading" :size="14" class="spin" />
-            {{ osgbLoading ? '网格化中...' : '开始网格化' }}
-          </button>
-        </div>
-      </form>
-      <div v-if="osgbError" class="error">{{ osgbError }}</div>
-      <div v-if="osgbResult" class="result">
+      <!-- OSGB目录 -->
+      <div class="form-group">
+        <div class="group-title">OSGB目录</div>
+        <input
+          v-model="osgbForm.osgbFolder"
+          type="text"
+          class="full-input"
+          placeholder="/app/data/osgbData"
+        >
+      </div>
+
+      <!-- 层级 -->
+      <div class="form-group">
+        <div class="group-title">网格层级</div>
+        <select
+          class="level-select full-input"
+          :value="osgbForm.level"
+          @change="onOsgbLevelSelect"
+        >
+          <option
+            v-for="opt in osgbLevelOptions"
+            :key="opt.value"
+            :value="opt.value"
+          >{{ opt.label }}</option>
+        </select>
+      </div>
+
+      <!-- 操作按钮 -->
+      <div class="btn-row">
+        <button class="btn-query" @click="submitOsgbGrid" :disabled="osgbLoading">
+          <span>{{ osgbLoading ? '网格化中...' : '开始网格化' }}</span>
+        </button>
+      </div>
+
+      <!-- 错误提示 -->
+      <div v-if="osgbError" class="error-box">{{ osgbError }}</div>
+
+      <!-- 查询结果 -->
+      <div v-if="osgbResult" class="result-box">
         <div class="result-row">
-          <span class="result-k">处理状态</span>
-          <span class="result-v">{{ osgbResult.status }}</span>
+          <span class="result-label">处理状态</span>
+          <span class="result-status" :class="osgbResult.status">
+            {{ osgbResult.status === 'success' ? '成功' : osgbResult.status }}
+          </span>
         </div>
         <div v-if="osgbResult.data?.total_triangles_processed !== undefined" class="result-row">
-          <span class="result-k">三角形数</span>
-          <span class="result-v">{{ osgbResult.data.total_triangles_processed }}</span>
+          <span class="result-label">三角形数</span>
+          <span class="result-num">{{ osgbResult.data.total_triangles_processed }}</span>
         </div>
         <div v-if="osgbResult.data?.total_grid_count !== undefined" class="result-row">
-          <span class="result-k">网格总数</span>
-          <span class="result-v">{{ osgbResult.data.total_grid_count }}</span>
+          <span class="result-label">网格总数</span>
+          <span class="result-num">{{ osgbResult.data.total_grid_count }}</span>
         </div>
       </div>
     </template>
 
     <!-- ==================== osgb网格化聚合入库 ==================== -->
     <template v-if="functionName === 'osgb网格化聚合入库'">
-      <div class="tip">
-        将倾斜摄影OSGB数据转换为聚合网格并存入数据库，支持多层级聚合优化
+      <!-- OSGB目录 -->
+      <div class="form-group">
+        <div class="group-title">OSGB目录</div>
+        <input
+          v-model="aggregationForm.osgbFolder"
+          type="text"
+          class="full-input"
+          placeholder="/app/data/osgbData"
+        >
       </div>
 
-      <form class="form" @submit.prevent="submitAggregation">
-        <div class="form-row">
-          <label class="form-label" for="agg-folder">
-            <span class="required">*</span>OSGB目录
-          </label>
-          <input
-            id="agg-folder"
-            v-model="aggregationForm.osgbFolder"
-            type="text"
-            class="form-input"
-            placeholder="/app/data/osgbData"
-            required
-          >
-        </div>
+      <!-- 网格层级 -->
+      <div class="form-group">
+        <div class="group-title">网格层级</div>
+        <select
+          class="level-select full-input"
+          :value="aggregationForm.level"
+          @change="onAggregationLevelSelect"
+        >
+          <option
+            v-for="opt in aggregationLevelOptions"
+            :key="opt.value"
+            :value="opt.value"
+          >{{ opt.label }}</option>
+        </select>
+      </div>
 
-        <div class="form-row">
-          <label class="form-label" for="agg-level">
-            <span class="required">*</span>网格层级
-          </label>
-          <input
-            id="agg-level"
-            v-model.number="aggregationForm.level"
-            type="number"
-            step="1"
-            min="0"
-            class="form-input"
-            placeholder="请输入网格层级"
-            required
-          >
-        </div>
+      <!-- 最小层级 -->
+      <div class="form-group">
+        <div class="group-title">最小层级</div>
+        <select
+          class="level-select full-input"
+          :value="aggregationForm.minLevel"
+          @change="onAggregationMinLevelSelect"
+        >
+          <option
+            v-for="opt in minLevelOptions"
+            :key="opt.value"
+            :value="opt.value"
+          >{{ opt.label }}</option>
+        </select>
+      </div>
 
-        <div class="form-row">
-          <label class="form-label" for="agg-minLevel">最小层级</label>
-          <input
-            id="agg-minLevel"
-            v-model.number="aggregationForm.minLevel"
-            type="number"
-            step="1"
-            min="0"
-            class="form-input"
-            placeholder="默认为0"
-          >
-        </div>
+      <!-- 操作按钮 -->
+      <div class="btn-row">
+        <button class="btn-query" @click="submitAggregation" :disabled="aggregationLoading">
+          <span>{{ aggregationLoading ? '聚合入库中...' : '开始聚合入库' }}</span>
+        </button>
+      </div>
 
-        <div class="form-actions-stack">
-          <div class="form-actions form-actions-primary">
-            <button
-              type="submit"
-              class="btn-primary btn-primary-block"
-              :disabled="aggregationLoading"
-            >
-              <Loader2 v-if="aggregationLoading" :size="14" class="spin" />
-              {{ aggregationLoading ? '聚合入库中...' : '开始聚合入库' }}
-            </button>
-          </div>
-        </div>
-      </form>
-
-      <div v-if="aggregationError" class="error">{{ aggregationError }}</div>
+      <!-- 错误提示 -->
+      <div v-if="aggregationError" class="error-box">{{ aggregationError }}</div>
 
       <!-- 聚合入库结果统计 -->
-      <div v-if="aggregationResult" class="result-stats">
-        <div class="stat-card">
-          <div class="stat-value" :class="{ 'success': aggregationResult.status === 'success', 'error': aggregationResult.status !== 'success' }">
+      <div v-if="aggregationResult" class="result-box">
+        <div class="result-row">
+          <span class="result-label">处理状态</span>
+          <span class="result-status" :class="aggregationResult.status">
             {{ aggregationResult.status === 'success' ? '成功' : aggregationResult.status }}
-          </div>
-          <div class="stat-label">处理状态</div>
+          </span>
         </div>
-        <div v-if="aggregationResult.data?.total_triangles_processed !== undefined" class="stat-card">
-          <div class="stat-value">{{ aggregationResult.data.total_triangles_processed }}</div>
-          <div class="stat-label">处理三角形数</div>
+        <div v-if="aggregationResult.data?.total_triangles_processed !== undefined" class="result-row">
+          <span class="result-label">三角形数</span>
+          <span class="result-num">{{ aggregationResult.data.total_triangles_processed }}</span>
         </div>
-        <div v-if="aggregationResult.data?.total_grid_count_before !== undefined" class="stat-card">
-          <div class="stat-value">{{ aggregationResult.data.total_grid_count_before }}</div>
-          <div class="stat-label">聚合前网格数</div>
+        <div v-if="aggregationResult.data?.total_grid_count_before !== undefined" class="result-row">
+          <span class="result-label">聚合前网格</span>
+          <span class="result-num">{{ aggregationResult.data.total_grid_count_before }}</span>
         </div>
-        <div v-if="aggregationResult.data?.total_grid_count_after !== undefined" class="stat-card">
-          <div class="stat-value">{{ aggregationResult.data.total_grid_count_after }}</div>
-          <div class="stat-label">聚合后网格数</div>
-        </div>
-        <div v-if="aggregationResult.data?.level !== undefined" class="stat-card">
-          <div class="stat-value">{{ aggregationResult.data.level }}</div>
-          <div class="stat-label">网格层级</div>
-        </div>
-        <div v-if="aggregationResult.data?.minLevel !== undefined" class="stat-card">
-          <div class="stat-value">{{ aggregationResult.data.minLevel }}</div>
-          <div class="stat-label">最小聚合层级</div>
+        <div v-if="aggregationResult.data?.total_grid_count_after !== undefined" class="result-row">
+          <span class="result-label">聚合后网格</span>
+          <span class="result-num">{{ aggregationResult.data.total_grid_count_after }}</span>
         </div>
       </div>
 
@@ -414,410 +454,265 @@ function clearGrids() {
       <div v-if="aggregationResult?.data?.total_grid_count_before && aggregationResult?.data?.total_grid_count_after" class="aggregation-effect">
         <div class="effect-title">聚合效果</div>
         <div class="effect-detail">
-          网格数量从 <strong>{{ aggregationResult.data.total_grid_count_before }}</strong> 减少到
+          网格从 <strong>{{ aggregationResult.data.total_grid_count_before }}</strong> 减少到
           <strong>{{ aggregationResult.data.total_grid_count_after }}</strong>，
-          减少了 <strong>{{ aggregationResult.data.total_grid_count_before - aggregationResult.data.total_grid_count_after }}</strong> 个网格
+          减少 <strong>{{ aggregationResult.data.total_grid_count_before - aggregationResult.data.total_grid_count_after }}</strong> 个
           （约 {{ Math.round((1 - aggregationResult.data.total_grid_count_after / aggregationResult.data.total_grid_count_before) * 100) }}%）
         </div>
-      </div>
-
-      <div v-if="aggregationResult?.data?.message" class="result-message">
-        {{ aggregationResult.data.message }}
       </div>
     </template>
 
     <!-- ==================== 倾斜摄影网格查询 ==================== -->
     <template v-if="functionName === '倾斜摄影网格查询'">
-      <div class="tip">
-        根据层级查询倾斜摄影网格信息，返回该层级下的所有格网数据
+      <!-- 层级 -->
+      <div class="form-group">
+        <div class="group-title">网格层级</div>
+        <select
+          class="level-select full-input"
+          :value="triangleGridForm.level"
+          @change="onLevelQuickSelect"
+        >
+          <option
+            v-for="opt in levelOptions"
+            :key="opt.value"
+            :value="opt.value"
+          >{{ opt.label }}</option>
+        </select>
       </div>
 
-      <form class="form" @submit.prevent="submitTriangleGridQuery">
-        <div class="form-row">
-          <label class="form-label" for="tgq-level">
-            <span class="required">*</span>层级
-          </label>
-          <input
-            id="tgq-level"
-            v-model.number="triangleGridForm.level"
-            type="number"
-            step="1"
-            min="0"
-            class="form-input"
-            placeholder="请输入层级"
-            required
-          >
-        </div>
+      <!-- 操作按钮 -->
+      <div class="btn-row">
+        <button class="btn-query" @click="submitTriangleGridQuery" :disabled="triangleGridLoading">
+          <span>{{ triangleGridLoading ? '查询中...' : '开始查询' }}</span>
+        </button>
+        <button class="btn-clear" @click="clearGrids" :disabled="!triangleGridResult">
+          <span>清除结果</span>
+        </button>
+      </div>
 
-        <div class="form-actions-stack">
-          <div class="form-actions form-actions-primary">
-            <button
-              type="submit"
-              class="btn-primary btn-primary-block"
-              :disabled="triangleGridLoading"
-            >
-              <Loader2 v-if="triangleGridLoading" :size="14" class="spin" />
-              <Search v-else :size="14" />
-              {{ triangleGridLoading ? '查询中...' : '开始查询' }}
-            </button>
-          </div>
-          <div class="form-actions form-actions-clear-grid">
-            <button
-              type="button"
-              class="btn-clear-generated-grid"
-              @click="clearGrids"
-              :disabled="!triangleGridResult"
-            >
-              <Trash2 :size="14" />
-              清除已生成网格
-            </button>
-          </div>
-        </div>
-      </form>
-
-      <div v-if="triangleGridError" class="error">{{ triangleGridError }}</div>
+      <!-- 错误提示 -->
+      <div v-if="triangleGridError" class="error-box">{{ triangleGridError }}</div>
 
       <!-- 查询结果统计 -->
-      <div v-if="queryStats" class="result-stats">
-        <div class="stat-card">
-          <div class="stat-value">{{ queryStats.total }}</div>
-          <div class="stat-label">网格数量</div>
+      <div v-if="queryStats" class="result-box">
+        <div class="result-row">
+          <span class="result-label">网格数量</span>
+          <span class="result-num">{{ queryStats.total }}</span>
         </div>
-        <div class="stat-card">
-          <div class="stat-value" :class="{ 'success': queryStats.status === 'success', 'error': queryStats.status !== 'success' }">
-            {{ queryStats.status }}
-          </div>
-          <div class="stat-label">查询状态</div>
+        <div class="result-row">
+          <span class="result-label">查询状态</span>
+          <span class="result-status" :class="queryStats.status">
+            {{ queryStats.status === 'success' ? '成功' : queryStats.status }}
+          </span>
         </div>
       </div>
 
       <!-- 无数据提示 -->
-      <div v-if="triangleGridResult?.data && gridsData.length === 0" class="no-data">
-        <span>未查询到网格数据</span>
+      <div v-if="triangleGridResult?.data && gridsData.length === 0" class="empty-box">
+        未查询到网格数据
       </div>
     </template>
   </div>
 </template>
 
 <style scoped>
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.form-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.form-label {
-  width: 80px;
-  font-size: 13px;
-  color: #94a3b8;
-  flex-shrink: 0;
-}
-
-.required {
-  color: #ef4444;
-  margin-right: 2px;
-}
-
-.form-input {
-  flex: 1;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.2);
-  color: #f1f5f9;
-  font-size: 14px;
-  outline: none;
-  transition: all 0.15s ease;
-}
-
-.form-input:focus {
-  border-color: #3b82f6;
-  background: rgba(99, 102, 241, 0.1);
-}
-
-.form-input::placeholder {
-  color: #475569;
-}
-
-.form-actions-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 6px;
-}
-
-.form-actions {
-  display: flex;
-  gap: 10px;
-}
-
-.form-actions-primary {
+.tilt-photogrammetry {
+  padding: 0;
   width: 100%;
-}
-
-.form-actions-primary .btn-primary-block {
-  width: 100%;
-  justify-content: center;
-  padding: 10px 20px;
-  border-radius: 10px;
-}
-
-.form-actions-clear-grid {
-  width: 100%;
-  justify-content: flex-end;
-}
-
-.btn-clear-generated-grid {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: auto;
-  max-width: 100%;
   box-sizing: border-box;
-  padding: 10px 14px;
-  border-radius: 12px;
-  border: 1px solid rgba(248, 113, 113, 0.65);
-  background: rgba(127, 29, 29, 0.35);
-  color: #fecaca;
-  font-size: 12px;
+  position: relative;
+}
+
+/* 表单组 */
+.form-group {
+  margin-bottom: 12px;
+}
+
+.group-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 8px;
+}
+
+.full-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.full-input::placeholder {
+  color: #999;
+}
+
+/* 按钮行 */
+.btn-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.btn-query {
+  flex: 1;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #7db8e0, #5b9fd4);
+  border: none;
+  color: #fff;
+  font-size: 15px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-  white-space: nowrap;
 }
 
-.btn-clear-generated-grid :deep(svg) {
-  flex-shrink: 0;
+.btn-query:hover:not(:disabled) {
+  background: linear-gradient(135deg, #6aa8d4, #4a8fc4);
 }
 
-.btn-clear-generated-grid:hover:not(:disabled) {
-  background: rgba(153, 27, 27, 0.45);
-  border-color: #f87171;
-  color: #fff;
-}
-
-.btn-clear-generated-grid:disabled {
-  opacity: 0.45;
+.btn-query:disabled {
+  background: #e2e8f0;
+  color: #94a3b8;
   cursor: not-allowed;
 }
 
-.btn-primary {
+.btn-clear {
+  width: 88px;
+  white-space: nowrap;
+  height: 38px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 10px 22px;
+  justify-content: center;
   border-radius: 8px;
-  border: none;
-  background: linear-gradient(135deg, #3b82f6, #0ea5e9);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 500;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  font-size: 15px;
   cursor: pointer;
-  transition: all 0.15s ease;
 }
 
-.btn-primary:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
+.btn-clear:hover:not(:disabled) {
+  background: #e8e8e8;
 }
 
-.btn-primary:disabled {
-  opacity: 0.7;
-  cursor: default;
+.btn-clear:disabled {
+  color: #999;
+  cursor: not-allowed;
 }
 
-.spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.error {
-  margin-top: 14px;
+/* 错误提示 */
+.error-box {
   padding: 10px 12px;
+  border: 1px solid #fca5a5;
   border-radius: 8px;
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  background: rgba(239, 68, 68, 0.1);
-  font-size: 13px;
-  color: #fca5a5;
+  background: #fef2f2;
+  font-size: 14px;
+  color: #dc2626;
+  margin-bottom: 10px;
 }
 
-.result {
-  margin-top: 18px;
-  padding-top: 14px;
-  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+/* 结果区 */
+.result-box {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #ddd;
+  background: #f9f9f9;
+  border-radius: 8px;
 }
 
 .result-row {
-  display: grid;
-  grid-template-columns: 80px 1fr;
-  gap: 10px;
-  font-size: 15px;
-}
-
-.result-k {
-  color: #64748b;
-}
-
-.result-v {
-  color: #e2e8f0;
-  font-variant-numeric: tabular-nums;
-  word-break: break-all;
-}
-
-.tip {
-  padding: 12px 14px;
-  background: rgba(59, 130, 246, 0.1);
-  border: 1px solid rgba(59, 130, 246, 0.2);
-  border-radius: 8px;
-  color: #60a5fa;
-  font-size: 15px;
-  line-height: 1.5;
-  margin-bottom: 16px;
-}
-
-.result-stats {
   display: flex;
-  gap: 12px;
-  margin-top: 16px;
+  justify-content: space-between;
+  align-items: center;
 }
 
-.stat-card {
-  flex: 1;
-  padding: 14px 16px;
-  border-radius: 10px;
-  background: rgba(30, 41, 59, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  text-align: center;
-}
-
-.stat-value {
-  font-size: 24px;
-  font-weight: 700;
-  color: #60a5fa;
-  font-variant-numeric: tabular-nums;
-}
-
-.stat-value.success {
-  color: #34d399;
+.result-label {
   font-size: 14px;
-  text-transform: uppercase;
-}
-
-.stat-value.error {
-  color: #f87171;
-  font-size: 14px;
-  text-transform: uppercase;
-}
-
-.stat-label {
-  font-size: 12px;
   color: #64748b;
-  margin-top: 4px;
 }
 
-/* 聚合入库结果样式 - 使用 flex-wrap 支持多列显示 */
-.result-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 16px;
+.result-num {
+  font-size: 16px;
+  font-weight: 600;
+  color: #334155;
 }
 
-.result-stats .stat-card {
-  flex: 1;
-  min-width: calc(33.33% - 8px);
-  padding: 12px 14px;
-  border-radius: 10px;
-  background: rgba(30, 41, 59, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  text-align: center;
-}
-
-.result-stats .stat-value {
-  font-size: 22px;
-  font-weight: 700;
-  color: #60a5fa;
-  font-variant-numeric: tabular-nums;
-}
-
-.result-stats .stat-value.success {
-  color: #34d399;
+.result-status {
   font-size: 14px;
-  text-transform: uppercase;
+  font-weight: 600;
 }
 
-.result-stats .stat-value.error {
-  color: #f87171;
-  font-size: 14px;
-  text-transform: uppercase;
+.result-status.success {
+  color: #060;
 }
 
-.result-stats .stat-label {
-  font-size: 12px;
-  color: #64748b;
-  margin-top: 4px;
-}
-
-.no-data {
-  margin-top: 20px;
-  padding: 30px;
-  text-align: center;
-  color: #64748b;
-  background: rgba(30, 41, 59, 0.5);
-  border-radius: 10px;
-  border: 1px dashed rgba(255, 255, 255, 0.1);
+.result-status:not(.success) {
+  color: #c00;
 }
 
 /* 聚合效果说明 */
 .aggregation-effect {
-  margin-top: 14px;
-  padding: 12px 14px;
-  background: rgba(16, 185, 129, 0.1);
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid #bbf7d0;
   border-radius: 8px;
+  background: #f0fdf4;
 }
 
 .effect-title {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
-  color: #6ee7b7;
-  margin-bottom: 8px;
+  color: #166534;
+  margin-bottom: 6px;
 }
 
 .effect-detail {
   font-size: 13px;
-  color: #a7f3d0;
+  color: #334155;
   line-height: 1.5;
 }
 
 .effect-detail strong {
-  color: #34d399;
+  color: #166534;
   font-weight: 600;
 }
 
-/* 结果消息 */
-.result-message {
-  margin-top: 14px;
-  padding: 12px 14px;
-  background: rgba(59, 130, 246, 0.1);
-  border: 1px solid rgba(59, 130, 246, 0.2);
+/* 空状态 */
+.empty-box {
+  padding: 16px;
+  text-align: center;
+  color: #64748b;
+  font-size: 14px;
+  border: 1px dashed #d4c9b8;
   border-radius: 8px;
-  color: #60a5fa;
-  font-size: 13px;
-  line-height: 1.5;
+}
+
+/* 层级下拉选择 */
+.level-select {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 14px;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.level-select:focus {
+  outline: none;
+  border-color: #5b9fd4;
+  box-shadow: 0 0 0 2px rgba(91, 159, 212, 0.2);
 }
 </style>

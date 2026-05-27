@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { Loader2, Trash2, Plus } from 'lucide-vue-next'
 
@@ -90,6 +90,12 @@ watch(
   },
   { deep: true },
 )
+
+// ===== 层级选项 =====
+const levelOptions = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+
+// ===== 高度快选选项 =====
+const heightOptions = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]
 
 // ===== 多边形网格化（带洞）=====
 const polygonWithHolesForm = reactive({
@@ -568,171 +574,190 @@ watch(
 
 <template>
   <!-- 多边形网格化 -->
-  <div v-if="functionName === '多边形网格化'" class="calc-content">
+  <div v-if="functionName === '多边形网格化'" class="polygon-grid-query">
 
-    <form class="form" @submit.prevent="submitPolygonGrid">
-      <div class="form-row">
-        <label class="form-label" for="poly-level">层级</label>
-        <input
-          id="poly-level"
-          v-model.number="polygonForm.level"
-          type="number"
-          step="1"
-          min="0"
-          class="form-input"
-          required
-        >
-      </div>
-      <div class="form-row">
-        <label class="form-label" for="poly-bottom">底面高(m)</label>
-        <input
-          id="poly-bottom"
-          v-model.number="polygonForm.bottom"
-          type="number"
-          step="1"
-          min="0"
-          class="form-input"
-          placeholder="底面高度"
-          required
-        >
-      </div>
-      <div class="form-row">
-        <label class="form-label" for="poly-top">顶面高(m)</label>
-        <input
-          id="poly-top"
-          v-model.number="polygonForm.top"
-          type="number"
-          step="1"
-          min="0"
-          class="form-input"
-          placeholder="顶面高度"
-          required
-        >
+    <form @submit.prevent="submitPolygonGrid">
+      <!-- 参数表单 -->
+      <div class="form-group">
+        <div class="group-title">网格参数</div>
+        <div class="param-line">
+          <span class="param-label">层级</span>
+          <select
+            v-model.number="polygonForm.level"
+            class="param-select"
+            aria-label="层级快选"
+          >
+            <option v-for="level in levelOptions" :key="level" :value="level">{{ level }}级</option>
+          </select>
+        </div>
+        <div class="param-line">
+          <span class="param-label">底面高(m)</span>
+          <input
+            v-model.number="polygonForm.bottom"
+            type="number"
+            step="1"
+            min="0"
+            class="param-input"
+            placeholder="底面高度"
+            required
+          >
+          <select
+            class="param-select-sm"
+            @change="e => { if(e.target.value !== '') polygonForm.bottom = Number(e.target.value); e.target.selectedIndex = 0; }"
+            aria-label="底面高快选"
+          >
+            <option value="">快选</option>
+            <option v-for="h in heightOptions" :key="h" :value="h">{{ h }}</option>
+          </select>
+        </div>
+        <div class="param-line">
+          <span class="param-label">顶面高(m)</span>
+          <input
+            v-model.number="polygonForm.top"
+            type="number"
+            step="1"
+            min="0"
+            class="param-input"
+            placeholder="顶面高度"
+            required
+          >
+          <select
+            class="param-select-sm"
+            @change="e => { if(e.target.value !== '') polygonForm.top = Number(e.target.value); e.target.selectedIndex = 0; }"
+            aria-label="顶面高快选"
+          >
+            <option value="">快选</option>
+            <option v-for="h in heightOptions" :key="h" :value="h">{{ h }}</option>
+          </select>
+        </div>
       </div>
 
-      <div class="tip">
-        点击地图添加节点；需至少 3 个点组成闭合多边形；底部高度需小于顶部高度。
-      </div>
-
-      <div class="points-head">
-        <div class="points-title">多边形节点（{{ points.length }}）</div>
-        <div class="points-actions">
-          <button type="button" class="btn-danger" @click="clearAll" :disabled="loading">
-            <Trash2 :size="14" />
+      <!-- 节点列表 -->
+      <div class="form-group">
+        <div class="group-title-row">
+          <span class="group-title">多边形节点</span>
+          <span class="group-sub">({{ points.length }})</span>
+          <button type="button" class="btn-link-clear" @click="clearAll" :disabled="loading">
             清空
           </button>
         </div>
-      </div>
 
-      <div class="points-table">
-        <div v-if="points.length === 0" class="points-empty">请点击地图添加点（至少 3 个）</div>
+        <div v-if="points.length === 0" class="empty-hint">
+          请点击地图添加点（至少 3 个）
+        </div>
 
-        <div v-for="(p, idx) in points" :key="idx" class="point-row">
-          <div class="point-header">
-            <div class="idx">{{ idx + 1 }}</div>
-            <button type="button" class="icon-btn" title="删除该点" @click="removePoint(idx)" :disabled="loading">
-              <Trash2 :size="14" />
-            </button>
-          </div>
-          <div class="point-fields">
-            <div class="field">
-              <label class="field-label">经度</label>
-              <input v-model.number="p.lon" class="point-input" type="number" step="0.0000000001" required>
+        <div v-else class="points-list">
+          <div v-for="(p, idx) in points" :key="idx" class="point-card">
+            <div class="point-card-header">
+              <span class="point-index">{{ idx + 1 }}</span>
+              <button type="button" class="btn-point-delete" @click="removePoint(idx)" title="删除该点" :disabled="loading">
+                <Trash2 :size="14" />
+              </button>
             </div>
-            <div class="field">
-              <label class="field-label">纬度</label>
-              <input v-model.number="p.lat" class="point-input" type="number" step="0.0000000001" required>
-            </div>
-            <div class="field">
-              <label class="field-label">高度(m)</label>
-              <input v-model.number="p.height" class="point-input" type="number" step="0.01" required>
+            <div class="point-fields">
+              <div class="field">
+                <span class="field-label">经度</span>
+                <input v-model.number="p.lon" class="field-input" type="number" step="any">
+              </div>
+              <div class="field">
+                <span class="field-label">纬度</span>
+                <input v-model.number="p.lat" class="field-input" type="number" step="any">
+              </div>
+              <div class="field">
+                <span class="field-label">高度(m)</span>
+                <input v-model.number="p.height" class="field-input" type="number" step="any">
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="form-actions">
-        <button
-          type="submit"
-          class="btn-primary"
-          :disabled="loading || !canSubmit"
-        >
-          <Loader2 v-if="loading" :size="14" class="spin" />
+      <!-- 操作按钮 -->
+      <div class="btn-row">
+        <button type="submit" class="btn-query" :disabled="loading || !canSubmit">
+          <Loader2 v-if="loading" :size="16" class="spin" />
           {{ loading ? '计算中...' : '开始计算' }}
         </button>
-      </div>
-      <div class="form-actions" style="margin-top: 12px;">
-        <button type="button" class="btn-danger" @click="clearGrids">
-          <Trash2 :size="14" />
-          清除已生成格网
+        <button type="button" class="btn-clear" @click="clearGrids">
+          <span>清除网格</span>
         </button>
       </div>
     </form>
 
-    <div v-if="error" class="error">{{ error }}</div>
+    <div v-if="error" class="error-box">{{ error }}</div>
 
-    <div v-if="result" class="result">
+    <div v-if="result" class="result-box">
       <div class="result-row">
-        <span class="result-k">网格数量</span>
-        <span class="result-v">{{ result.data?.count }}</span>
+        <span class="result-label">网格数量</span>
+        <span class="result-num">{{ result.data?.count }}</span>
       </div>
       <div class="result-row">
-        <span class="result-k">状态</span>
-        <span class="result-v">{{ result.status }}</span>
-      </div>
-      <div v-if="result.data?.cells?.length" class="result-hint">
-        已在地图上绘制返回网格边界
+        <span class="result-label">状态</span>
+        <span class="result-status success">{{ result.status }}</span>
       </div>
     </div>
   </div>
 
   <!-- 多边形网格化（带洞） -->
-  <div v-else-if="functionName === '多边形网格化（带洞）'" class="calc-content">
+  <div v-else-if="functionName === '多边形网格化（带洞）'" class="polygon-grid-query">
 
-    <form class="form" @submit.prevent="submitPolygonGridWithHoles">
-      <div class="form-row">
-        <label class="form-label" for="polyh-level">层级</label>
-        <input
-          id="polyh-level"
-          v-model.number="polygonWithHolesForm.level"
-          type="number"
-          step="1"
-          min="0"
-          class="form-input"
-          required
-        >
-      </div>
-      <div class="form-row">
-        <label class="form-label" for="polyh-bottom">底面高(m)</label>
-        <input
-          id="polyh-bottom"
-          v-model.number="polygonWithHolesForm.bottom"
-          type="number"
-          step="1"
-          min="0"
-          class="form-input"
-          placeholder="底面高度"
-          required
-        >
-      </div>
-      <div class="form-row">
-        <label class="form-label" for="polyh-top">顶面高(m)</label>
-        <input
-          id="polyh-top"
-          v-model.number="polygonWithHolesForm.top"
-          type="number"
-          step="1"
-          min="0"
-          class="form-input"
-          placeholder="顶面高度"
-          required
-        >
+    <form @submit.prevent="submitPolygonGridWithHoles">
+      <!-- 参数表单 -->
+      <div class="form-group">
+        <div class="group-title">网格参数</div>
+        <div class="param-line">
+          <span class="param-label">层级</span>
+          <select
+            v-model.number="polygonWithHolesForm.level"
+            class="param-select"
+            aria-label="层级快选"
+          >
+            <option v-for="level in levelOptions" :key="level" :value="level">{{ level }}级</option>
+          </select>
+        </div>
+        <div class="param-line">
+          <span class="param-label">底面高(m)</span>
+          <input
+            v-model.number="polygonWithHolesForm.bottom"
+            type="number"
+            step="1"
+            min="0"
+            class="param-input"
+            placeholder="底面高度"
+            required
+          >
+          <select
+            class="param-select-sm"
+            @change="e => { if(e.target.value !== '') polygonWithHolesForm.bottom = Number(e.target.value); e.target.selectedIndex = 0; }"
+            aria-label="底面高快选"
+          >
+            <option value="">快选</option>
+            <option v-for="h in heightOptions" :key="h" :value="h">{{ h }}</option>
+          </select>
+        </div>
+        <div class="param-line">
+          <span class="param-label">顶面高(m)</span>
+          <input
+            v-model.number="polygonWithHolesForm.top"
+            type="number"
+            step="1"
+            min="0"
+            class="param-input"
+            placeholder="顶面高度"
+            required
+          >
+          <select
+            class="param-select-sm"
+            @change="e => { if(e.target.value !== '') polygonWithHolesForm.top = Number(e.target.value); e.target.selectedIndex = 0; }"
+            aria-label="顶面高快选"
+          >
+            <option value="">快选</option>
+            <option v-for="h in heightOptions" :key="h" :value="h">{{ h }}</option>
+          </select>
+        </div>
       </div>
 
-      <div class="tip tip-blue">
-        点击地图添加外边界点；绘制完外边界后可切换到"绘制洞"模式添加洞；需至少 3 个点组成闭合多边形。
-      </div>
-
+      <!-- 绘制模式切换 -->
       <div class="mode-switch">
         <div class="mode-btn-group">
           <button
@@ -757,7 +782,7 @@ watch(
           </button>
           <button
             type="button"
-            class="mode-btn btn-equal btn-danger"
+            class="mode-btn btn-equal"
             @click="clearAllHoles"
             :disabled="loadingHoles"
           >
@@ -776,254 +801,257 @@ watch(
         </button>
       </div>
 
-      <div v-if="outerPolygon.length > 0" class="current-hole-points">
-        <div class="holes-title">外边界点 ({{ outerPolygon.length }})</div>
-        <div v-for="(p, idx) in outerPolygon" :key="'outer-' + idx" class="point-row-mini">
-          <span class="point-index">{{ idx + 1 }}</span>
-          <div class="point-edit">
-            <input
-              v-model.number="outerPolygon[idx].lon"
-              class="point-input-mini"
-              type="number"
-              step="any"
-              placeholder="经度"
-              @input="emitPolygonsWithHoles"
-            >
-            <input
-              v-model.number="outerPolygon[idx].lat"
-              class="point-input-mini"
-              type="number"
-              step="any"
-              placeholder="纬度"
-              @input="emitPolygonsWithHoles"
-            >
-          </div>
-          <button type="button" class="icon-btn-mini" @click="removeOuterPoint(idx)" :disabled="loadingHoles">
-            <Trash2 :size="10" />
-          </button>
+      <!-- 外边界点 -->
+      <div v-if="outerPolygon.length > 0" class="form-group">
+        <div class="group-title-row">
+          <span class="group-title">外边界点</span>
+          <span class="group-sub">({{ outerPolygon.length }})</span>
         </div>
-      </div>
-
-      <div v-if="holes.length > 0" class="holes-list">
-        <div class="holes-title">已完成的洞 ({{ holes.length }})</div>
-        <div v-for="(hole, holeIdx) in holes" :key="holeIdx" class="hole-item-mini">
-          <span>洞 {{ holeIdx + 1 }}: {{ hole.length }} 点</span>
-          <button type="button" class="icon-btn-small" @click="removeHole(holeIdx)" :disabled="loadingHoles">
-            <Trash2 :size="12" />
-          </button>
-        </div>
-        <div v-for="(hole, holeIdx) in holes" :key="'hole-points-' + holeIdx" class="hole-points-mini">
-          <div class="hole-points-title">洞 {{ holeIdx + 1 }} 坐标：</div>
-          <div v-for="(p, idx) in hole" :key="'hole-' + holeIdx + '-' + idx" class="point-row-mini">
-            <span class="point-index">{{ idx + 1 }}</span>
-            <div class="point-edit">
+        <div class="points-list-mini">
+          <div v-for="(p, idx) in outerPolygon" :key="'outer-' + idx" class="point-mini-row">
+            <span class="point-mini-index">{{ idx + 1 }}</span>
+            <div class="point-mini-edit">
               <input
-                v-model.number="holes[holeIdx][idx].lon"
-                class="point-input-mini"
+                v-model.number="outerPolygon[idx].lon"
+                class="point-mini-input"
                 type="number"
                 step="any"
                 placeholder="经度"
                 @input="emitPolygonsWithHoles"
               >
               <input
-                v-model.number="holes[holeIdx][idx].lat"
-                class="point-input-mini"
+                v-model.number="outerPolygon[idx].lat"
+                class="point-mini-input"
                 type="number"
                 step="any"
                 placeholder="纬度"
                 @input="emitPolygonsWithHoles"
               >
             </div>
-            <button type="button" class="icon-btn-mini" @click="removeHolePoint(holeIdx, idx)" :disabled="loadingHoles">
+            <button type="button" class="btn-point-delete-mini" @click="removeOuterPoint(idx)" :disabled="loadingHoles">
               <Trash2 :size="10" />
             </button>
           </div>
         </div>
       </div>
 
-      <div v-if="drawingMode === 'hole' && currentHolePoints.length > 0" class="current-hole-points">
-        <div class="holes-title">当前洞 ({{ currentHolePoints.length }} 点)</div>
-        <div v-for="(p, idx) in currentHolePoints" :key="'current-' + idx" class="point-row-mini">
-          <span class="point-index">{{ idx + 1 }}</span>
-          <div class="point-edit">
-            <input
-              v-model.number="currentHolePoints[idx].lon"
-              class="point-input-mini"
-              type="number"
-              step="any"
-              placeholder="经度"
-              @input="emitPolygonsWithHoles"
-            >
-            <input
-              v-model.number="currentHolePoints[idx].lat"
-              class="point-input-mini"
-              type="number"
-              step="any"
-              placeholder="纬度"
-              @input="emitPolygonsWithHoles"
-            >
+      <!-- 已完成的洞 -->
+      <div v-if="holes.length > 0" class="holes-list">
+        <div class="holes-title">已完成的洞 ({{ holes.length }})</div>
+        <div v-for="(hole, holeIdx) in holes" :key="holeIdx" class="hole-item">
+          <div class="hole-item-header">
+            <span>洞 {{ holeIdx + 1 }}: {{ hole.length }} 点</span>
+            <button type="button" class="btn-point-delete-mini" @click="removeHole(holeIdx)" :disabled="loadingHoles">
+              <Trash2 :size="10" />
+            </button>
           </div>
-          <button type="button" class="icon-btn-mini" @click="removeCurrentHolePoint(idx)" :disabled="loadingHoles">
-            <Trash2 :size="10" />
-          </button>
+          <div class="points-list-mini">
+            <div v-for="(p, idx) in hole" :key="'hole-' + holeIdx + '-' + idx" class="point-mini-row">
+              <span class="point-mini-index">{{ idx + 1 }}</span>
+              <div class="point-mini-edit">
+                <input
+                  v-model.number="holes[holeIdx][idx].lon"
+                  class="point-mini-input"
+                  type="number"
+                  step="any"
+                  placeholder="经度"
+                  @input="emitPolygonsWithHoles"
+                >
+                <input
+                  v-model.number="holes[holeIdx][idx].lat"
+                  class="point-mini-input"
+                  type="number"
+                  step="any"
+                  placeholder="纬度"
+                  @input="emitPolygonsWithHoles"
+                >
+              </div>
+              <button type="button" class="btn-point-delete-mini" @click="removeHolePoint(holeIdx, idx)" :disabled="loadingHoles">
+                <Trash2 :size="10" />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div v-if="currentHolePoints.length >= 3" class="tip tip-warning">
+      <!-- 当前绘制的洞 -->
+      <div v-if="drawingMode === 'hole' && currentHolePoints.length > 0" class="current-hole">
+        <div class="holes-title">当前洞 ({{ currentHolePoints.length }} 点)</div>
+        <div class="points-list-mini">
+          <div v-for="(p, idx) in currentHolePoints" :key="'current-' + idx" class="point-mini-row">
+            <span class="point-mini-index">{{ idx + 1 }}</span>
+            <div class="point-mini-edit">
+              <input
+                v-model.number="currentHolePoints[idx].lon"
+                class="point-mini-input"
+                type="number"
+                step="any"
+                placeholder="经度"
+                @input="emitPolygonsWithHoles"
+              >
+              <input
+                v-model.number="currentHolePoints[idx].lat"
+                class="point-mini-input"
+                type="number"
+                step="any"
+                placeholder="纬度"
+                @input="emitPolygonsWithHoles"
+              >
+            </div>
+            <button type="button" class="btn-point-delete-mini" @click="removeCurrentHolePoint(idx)" :disabled="loadingHoles">
+              <Trash2 :size="10" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="currentHolePoints.length >= 3" class="param-error-tip">
         请点击"完成当前洞"后再进行计算
       </div>
-      <div class="form-actions">
-        <button
-          type="submit"
-          class="btn-primary"
-          :disabled="loadingHoles || !canSubmitHoles"
-        >
-          <Loader2 v-if="loadingHoles" :size="14" class="spin" />
+
+      <!-- 操作按钮 -->
+      <div class="btn-row">
+        <button type="submit" class="btn-query" :disabled="loadingHoles || !canSubmitHoles">
+          <Loader2 v-if="loadingHoles" :size="16" class="spin" />
           {{ loadingHoles ? '计算中...' : '开始计算' }}
         </button>
-      </div>
-      <div class="form-actions" style="margin-top: 12px;">
-        <button type="button" class="btn-secondary" @click="loadDemoData" :disabled="loadingDemo">
-          <Loader2 v-if="loadingDemo" :size="14" class="spin" />
-          {{ loadingDemo ? '加载中...' : '加载演示数据' }}
-        </button>
-      </div>
-      <div class="form-actions" style="margin-top: 12px;">
-        <button type="button" class="btn-danger" @click="clearGrids">
-          <Trash2 :size="14" />
-          清除已生成格网
+        <button type="button" class="btn-clear" @click="clearGrids">
+          <span>清除网格</span>
         </button>
       </div>
     </form>
 
-    <div v-if="errorHoles" class="error">{{ errorHoles }}</div>
+    <div v-if="errorHoles" class="error-box">{{ errorHoles }}</div>
 
-    <div v-if="resultHoles" class="result">
+    <div v-if="resultHoles" class="result-box">
       <div class="result-row">
-        <span class="result-k">网格数量</span>
-        <span class="result-v">{{ resultHoles.data?.count }}</span>
+        <span class="result-label">网格数量</span>
+        <span class="result-num">{{ resultHoles.data?.count }}</span>
       </div>
       <div class="result-row">
-        <span class="result-k">状态</span>
-        <span class="result-v">{{ resultHoles.status }}</span>
-      </div>
-      <div v-if="resultHoles.data?.cells?.length" class="result-hint">
-        已在地图上绘制返回网格边界
+        <span class="result-label">状态</span>
+        <span class="result-status success">{{ resultHoles.status }}</span>
       </div>
     </div>
   </div>
 
   <!-- 多边形表面网格化 -->
-  <div v-else-if="functionName === '多边形表面网格化'" class="calc-content">
+  <div v-else-if="functionName === '多边形表面网格化'" class="polygon-grid-query">
 
-    <form class="form" @submit.prevent="submitSurfaceGrid">
-      <div class="form-row">
-        <label class="form-label" for="surface-level">层级</label>
-        <input
-          id="surface-level"
-          v-model.number="surfaceGridForm.level"
-          type="number"
-          step="1"
-          min="0"
-          class="form-input"
-          required
-        >
-      </div>
-      <div class="form-row">
-        <label class="form-label" for="surface-bottom">底面高(m)</label>
-        <input
-          id="surface-bottom"
-          v-model.number="surfaceGridForm.bottom"
-          type="number"
-          step="1"
-          min="0"
-          class="form-input"
-          placeholder="底面高度"
-          required
-        >
-      </div>
-      <div class="form-row">
-        <label class="form-label" for="surface-top">顶面高(m)</label>
-        <input
-          id="surface-top"
-          v-model.number="surfaceGridForm.top"
-          type="number"
-          step="1"
-          min="0"
-          class="form-input"
-          placeholder="顶面高度"
-          required
-        >
+    <form @submit.prevent="submitSurfaceGrid">
+      <!-- 参数表单 -->
+      <div class="form-group">
+        <div class="group-title">网格参数</div>
+        <div class="param-line">
+          <span class="param-label">层级</span>
+          <select
+            v-model.number="surfaceGridForm.level"
+            class="param-select"
+            aria-label="层级快选"
+          >
+            <option v-for="level in levelOptions" :key="level" :value="level">{{ level }}级</option>
+          </select>
+        </div>
+        <div class="param-line">
+          <span class="param-label">底面高(m)</span>
+          <input
+            v-model.number="surfaceGridForm.bottom"
+            type="number"
+            step="1"
+            min="0"
+            class="param-input"
+            placeholder="底面高度"
+            required
+          >
+          <select
+            class="param-select-sm"
+            @change="e => { if(e.target.value !== '') surfaceGridForm.bottom = Number(e.target.value); e.target.selectedIndex = 0; }"
+            aria-label="底面高快选"
+          >
+            <option value="">快选</option>
+            <option v-for="h in heightOptions" :key="h" :value="h">{{ h }}</option>
+          </select>
+        </div>
+        <div class="param-line">
+          <span class="param-label">顶面高(m)</span>
+          <input
+            v-model.number="surfaceGridForm.top"
+            type="number"
+            step="1"
+            min="0"
+            class="param-input"
+            placeholder="顶面高度"
+            required
+          >
+          <select
+            class="param-select-sm"
+            @change="e => { if(e.target.value !== '') surfaceGridForm.top = Number(e.target.value); e.target.selectedIndex = 0; }"
+            aria-label="顶面高快选"
+          >
+            <option value="">快选</option>
+            <option v-for="h in heightOptions" :key="h" :value="h">{{ h }}</option>
+          </select>
+        </div>
       </div>
 
-      <div class="tip">
-        点击地图添加节点；需至少 3 个点组成闭合多边形；底部高度需小于顶部高度。
-      </div>
-
-      <div class="points-head">
-        <div class="points-title">多边形节点（{{ surfacePoints.length }}）</div>
-        <div class="points-actions">
-          <button type="button" class="btn-danger" @click="clearSurfaceAll" :disabled="surfaceLoading">
-            <Trash2 :size="14" />
+      <!-- 节点列表 -->
+      <div class="form-group">
+        <div class="group-title-row">
+          <span class="group-title">多边形节点</span>
+          <span class="group-sub">({{ surfacePoints.length }})</span>
+          <button type="button" class="btn-link-clear" @click="clearSurfaceAll" :disabled="surfaceLoading">
             清空
           </button>
         </div>
-      </div>
 
-      <div class="points-table">
-        <div v-if="surfacePoints.length === 0" class="points-empty">请点击地图添加点（至少 3 个）</div>
+        <div v-if="surfacePoints.length === 0" class="empty-hint">
+          请点击地图添加点（至少 3 个）
+        </div>
 
-        <div v-for="(p, idx) in surfacePoints" :key="idx" class="point-row">
-          <div class="point-header">
-            <div class="idx">{{ idx + 1 }}</div>
-            <button type="button" class="icon-btn" title="删除该点" @click="removeSurfacePoint(idx)" :disabled="surfaceLoading">
-              <Trash2 :size="14" />
-            </button>
-          </div>
-          <div class="point-fields">
-            <div class="field">
-              <label class="field-label">经度</label>
-              <input v-model.number="p.lon" class="point-input" type="number" step="0.0000000001" required>
+        <div v-else class="points-list">
+          <div v-for="(p, idx) in surfacePoints" :key="idx" class="point-card">
+            <div class="point-card-header">
+              <span class="point-index">{{ idx + 1 }}</span>
+              <button type="button" class="btn-point-delete" @click="removeSurfacePoint(idx)" title="删除该点" :disabled="surfaceLoading">
+                <Trash2 :size="14" />
+              </button>
             </div>
-            <div class="field">
-              <label class="field-label">纬度</label>
-              <input v-model.number="p.lat" class="point-input" type="number" step="0.0000000001" required>
+            <div class="point-fields">
+              <div class="field">
+                <span class="field-label">经度</span>
+                <input v-model.number="p.lon" class="field-input" type="number" step="any">
+              </div>
+              <div class="field">
+                <span class="field-label">纬度</span>
+                <input v-model.number="p.lat" class="field-input" type="number" step="any">
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="form-actions">
-        <button
-          type="submit"
-          class="btn-primary"
-          :disabled="surfaceLoading || !canSubmitSurface"
-        >
-          <Loader2 v-if="surfaceLoading" :size="14" class="spin" />
+      <!-- 操作按钮 -->
+      <div class="btn-row">
+        <button type="submit" class="btn-query" :disabled="surfaceLoading || !canSubmitSurface">
+          <Loader2 v-if="surfaceLoading" :size="16" class="spin" />
           {{ surfaceLoading ? '计算中...' : '开始计算' }}
         </button>
-      </div>
-      <div class="form-actions" style="margin-top: 12px;">
-        <button type="button" class="btn-danger" @click="clearGrids">
-          <Trash2 :size="14" />
-          清除已生成格网
+        <button type="button" class="btn-clear" @click="clearGrids">
+          <span>清除网格</span>
         </button>
       </div>
     </form>
 
-    <div v-if="surfaceError" class="error">{{ surfaceError }}</div>
+    <div v-if="surfaceError" class="error-box">{{ surfaceError }}</div>
 
-    <div v-if="surfaceResult" class="result">
+    <div v-if="surfaceResult" class="result-box">
       <div class="result-row">
-        <span class="result-k">网格数量</span>
-        <span class="result-v">{{ surfaceResult.data?.count }}</span>
+        <span class="result-label">网格数量</span>
+        <span class="result-num">{{ surfaceResult.data?.count }}</span>
       </div>
       <div class="result-row">
-        <span class="result-k">状态</span>
-        <span class="result-v">{{ surfaceResult.status }}</span>
-      </div>
-      <div v-if="surfaceResult.data?.cells?.length" class="result-hint">
-        已在地图上绘制返回网格边界
+        <span class="result-label">状态</span>
+        <span class="result-status success">{{ surfaceResult.status }}</span>
       </div>
     </div>
   </div>
@@ -1044,61 +1072,22 @@ watch(
   color: #64748b;
   margin-bottom: 14px;
   padding: 8px 12px;
-  background: rgba(34, 197, 94, 0.08);
-  border-radius: 6px;
-  border: 1px solid rgba(34, 197, 94, 0.18);
+  background: #f5f3f0;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
 }
 
 .tip-blue {
-  background: rgba(59, 130, 246, 0.08);
-  border-color: rgba(59, 130, 246, 0.18);
-  color: #93c5fd;
+  background: #f5f3f0;
+  border-color: #e2e8f0;
+  color: #475569;
 }
 
 .tip-warning {
-  background: rgba(245, 158, 11, 0.08);
-  border-color: rgba(245, 158, 11, 0.18);
-  color: #fbbf24;
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #dc2626;
   margin-top: 8px;
-}
-
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.calc-content .form-row,
-.form-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.calc-content .form-label,
-.form-label {
-  width: 72px;
-  font-size: 13px;
-  color: #94a3b8;
-  flex-shrink: 0;
-}
-
-.calc-content .form-input,
-.form-input {
-  flex: 1;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.2);
-  color: #f1f5f9;
-  font-size: 14px;
-  outline: none;
-  transition: all 0.15s ease;
-}
-
-.form-input:focus {
-  border-color: #22c55e;
-  background: rgba(34, 197, 94, 0.06);
 }
 
 .points-head {
@@ -1111,7 +1100,7 @@ watch(
 .points-title {
   font-size: 13px;
   font-weight: 500;
-  color: #e2e8f0;
+  color: #475569;
 }
 
 .points-actions {
@@ -1122,7 +1111,7 @@ watch(
 .points-table {
   max-height: 200px;
   overflow-y: auto;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid #e2e8f0;
   border-radius: 8px;
 }
 
@@ -1131,13 +1120,14 @@ watch(
   text-align: center;
   color: #64748b;
   font-size: 13px;
-  background: rgba(0, 0, 0, 0.2);
+  border: 1px dashed #d4c9b8;
+  border-radius: 8px;
 }
 
 .point-row {
   padding: 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(0, 0, 0, 0.15);
+  border-bottom: 1px solid #ebe6df;
+  background: #ffffff;
 }
 
 .point-row:last-child {
@@ -1186,9 +1176,9 @@ watch(
   height: 28px;
   padding: 0 8px;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.2);
-  color: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #334155;
   font-size: 12px;
   outline: none;
 }
@@ -1233,7 +1223,7 @@ watch(
   gap: 6px;
   padding: 10px 20px;
   border: none;
-  background: linear-gradient(135deg, #3b82f6, #0ea5e9);
+  background: linear-gradient(135deg, #7db8e0, #5b9fd4);
   color: #fff;
   border-radius: 8px;
   font-size: 14px;
@@ -1284,7 +1274,7 @@ watch(
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.06);
-  color: #e2e8f0;
+  color: #475569;
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -1322,8 +1312,8 @@ watch(
   gap: 6px;
   padding: 8px 14px;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
   color: #94a3b8;
   font-size: 12px;
   cursor: pointer;
@@ -1345,7 +1335,7 @@ watch(
 }
 
 .mode-btn.active {
-  border-color: #3b82f6;
+  border-color: #7db8e0;
   background: rgba(59, 130, 246, 0.15);
   color: #93c5fd;
 }
@@ -1383,15 +1373,17 @@ watch(
 .holes-list {
   margin-top: 8px;
   padding: 10px;
-  background: rgba(239, 68, 68, 0.08);
-  border: 1px solid rgba(239, 68, 68, 0.15);
-  border-radius: 6px;
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-radius: 8px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .holes-title {
   font-size: 12px;
   font-weight: 500;
-  color: #fca5a5;
+  color: #dc2626;
   margin-bottom: 8px;
 }
 
@@ -1400,11 +1392,11 @@ watch(
   align-items: center;
   justify-content: space-between;
   padding: 6px 8px;
-  background: rgba(0, 0, 0, 0.2);
+  background: #ffffff;
   border-radius: 4px;
   margin-bottom: 4px;
   font-size: 11px;
-  color: #e2e8f0;
+  color: #475569;
 }
 
 .hole-item-mini:last-child {
@@ -1414,14 +1406,14 @@ watch(
 .hole-points-mini {
   margin-top: 8px;
   padding: 6px;
-  background: rgba(0, 0, 0, 0.15);
+  background: #ffffff;
   border-radius: 4px;
   margin-bottom: 6px;
 }
 
 .hole-points-title {
   font-size: 10px;
-  color: #f87171;
+  color: #dc2626;
   margin-bottom: 4px;
   font-weight: 500;
 }
@@ -1452,9 +1444,9 @@ watch(
 .current-hole-points {
   margin-top: 8px;
   padding: 10px;
-  background: rgba(239, 68, 68, 0.05);
-  border: 1px dashed rgba(239, 68, 68, 0.2);
-  border-radius: 6px;
+  background: #fef2f2;
+  border: 1px dashed #fca5a5;
+  border-radius: 8px;
 }
 
 .point-row-mini {
@@ -1480,9 +1472,9 @@ watch(
   height: 24px;
   padding: 0 4px;
   border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.3);
-  color: #e2e8f0;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #475569;
   font-size: 10px;
   outline: none;
   overflow: hidden;
@@ -1536,18 +1528,18 @@ watch(
 .error {
   margin-top: 12px;
   padding: 10px;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  border-radius: 6px;
-  color: #fca5a5;
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-radius: 8px;
+  color: #dc2626;
   font-size: 13px;
 }
 
 .result {
   margin-top: 16px;
   padding: 14px;
-  background: rgba(34, 197, 94, 0.08);
-  border: 1px solid rgba(34, 197, 94, 0.2);
+  background: #f9f9f9;
+  border: 1px solid #ddd;
   border-radius: 8px;
 }
 
@@ -1563,16 +1555,16 @@ watch(
 }
 
 .result-v {
-  color: #86efac;
+  color: #334155;
   font-weight: 500;
 }
 
 .result-hint {
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px solid rgba(34, 197, 94, 0.2);
+  border-top: 1px solid #ddd;
   font-size: 12px;
-  color: #86efac;
+  color: #64748b;
   text-align: center;
 }
 
@@ -1594,12 +1586,632 @@ watch(
 .coming-soon-text {
   font-size: 18px;
   font-weight: 600;
-  color: #e2e8f0;
+  color: #475569;
   margin-bottom: 8px;
 }
 
 .coming-soon-desc {
   font-size: 14px;
   color: #64748b;
+}
+
+/* ========== DEM风格样式 ========== */
+.polygon-grid-query,
+.range-grid-query {
+  padding: 0;
+  width: 100%;
+  box-sizing: border-box;
+  position: relative;
+}
+
+/* 表单组 */
+.polygon-grid-query .form-group,
+.range-grid-query .form-group {
+  margin-bottom: 12px;
+}
+
+.polygon-grid-query .group-title,
+.range-grid-query .group-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 8px;
+}
+
+.polygon-grid-query .group-title-row,
+.range-grid-query .group-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.polygon-grid-query .group-title-row .group-title,
+.range-grid-query .group-title-row .group-title {
+  margin-bottom: 0;
+}
+
+.polygon-grid-query .group-sub,
+.range-grid-query .group-sub {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.polygon-grid-query .btn-link-clear,
+.range-grid-query .btn-link-clear {
+  margin-left: auto;
+  padding: 4px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #64748b;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.polygon-grid-query .btn-link-clear:hover:not(:disabled),
+.range-grid-query .btn-link-clear:hover:not(:disabled) {
+  background: #f5f3f0;
+  color: #334155;
+}
+
+.polygon-grid-query .btn-link-clear:disabled,
+.range-grid-query .btn-link-clear:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 参数行 */
+.polygon-grid-query .param-line,
+.range-grid-query .param-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.polygon-grid-query .param-line:last-child,
+.range-grid-query .param-line:last-child {
+  margin-bottom: 0;
+}
+
+.polygon-grid-query .param-label,
+.range-grid-query .param-label {
+  width: 70px;
+  font-size: 14px;
+  color: #334155;
+  flex-shrink: 0;
+}
+
+.polygon-grid-query .param-input,
+.range-grid-query .param-input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 14px;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease;
+}
+
+.polygon-grid-query .param-input:focus,
+.range-grid-query .param-input:focus {
+  outline: none;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
+}
+
+.polygon-grid-query .param-select,
+.range-grid-query .param-select {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 14px;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.polygon-grid-query .param-select:focus,
+.range-grid-query .param-select:focus {
+  outline: none;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
+}
+
+.polygon-grid-query .param-select-sm,
+.range-grid-query .param-select-sm {
+  width: 70px;
+  height: 34px;
+  padding: 0 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 13px;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+
+.polygon-grid-query .param-select-sm:focus,
+.range-grid-query .param-select-sm:focus {
+  outline: none;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
+}
+
+/* 空状态 */
+.polygon-grid-query .empty-hint,
+.range-grid-query .empty-hint {
+  padding: 14px;
+  text-align: center;
+  color: #64748b;
+  font-size: 14px;
+  border: 1px dashed #d4c9b8;
+  border-radius: 8px;
+}
+
+/* 点列表 */
+.polygon-grid-query .points-list,
+.range-grid-query .points-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.polygon-grid-query .point-card,
+.range-grid-query .point-card {
+  padding: 8px;
+  background: #ffffff;
+  border: 1px solid #ebe6df;
+  border-radius: 8px;
+  transition: border-color 0.15s ease;
+}
+
+.polygon-grid-query .point-card:hover,
+.range-grid-query .point-card:hover {
+  border-color: #d4c9b8;
+}
+
+.polygon-grid-query .point-card-header,
+.range-grid-query .point-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.polygon-grid-query .point-index,
+.range-grid-query .point-index {
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.polygon-grid-query .btn-point-delete,
+.range-grid-query .btn-point-delete {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: #fef2f2;
+  color: #dc2626;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.polygon-grid-query .btn-point-delete:hover:not(:disabled),
+.range-grid-query .btn-point-delete:hover:not(:disabled) {
+  background: #fee2e2;
+}
+
+.polygon-grid-query .btn-point-delete:disabled,
+.range-grid-query .btn-point-delete:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.polygon-grid-query .point-fields,
+.range-grid-query .point-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.polygon-grid-query .field,
+.range-grid-query .field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.polygon-grid-query .field-label,
+.range-grid-query .field-label {
+  flex: 0 0 44px;
+  font-size: 12px;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.polygon-grid-query .field-input,
+.range-grid-query .field-input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.polygon-grid-query .field-input:focus,
+.range-grid-query .field-input:focus {
+  outline: none;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 2px rgba(91, 159, 212, 0.12);
+}
+
+/* 按钮行 */
+.polygon-grid-query .btn-row,
+.range-grid-query .btn-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.polygon-grid-query .btn-query,
+.range-grid-query .btn-query {
+  flex: 1;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #7db8e0, #5b9fd4);
+  border: none;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.polygon-grid-query .btn-query:hover:not(:disabled),
+.range-grid-query .btn-query:hover:not(:disabled) {
+  background: linear-gradient(135deg, #6aa8d4, #4a8fc4);
+}
+
+.polygon-grid-query .btn-query:disabled,
+.range-grid-query .btn-query:disabled {
+  background: #e2e8f0;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.polygon-grid-query .btn-clear,
+.range-grid-query .btn-clear {
+  width: 88px;
+  white-space: nowrap;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  font-size: 15px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.polygon-grid-query .btn-clear:hover,
+.range-grid-query .btn-clear:hover {
+  background: #e8e8e8;
+}
+
+/* 错误提示 */
+.polygon-grid-query .error-box,
+.range-grid-query .error-box {
+  padding: 10px 12px;
+  border: 1px solid #fca5a5;
+  border-radius: 8px;
+  background: #fef2f2;
+  font-size: 14px;
+  color: #dc2626;
+  margin-bottom: 10px;
+}
+
+.polygon-grid-query .param-error-tip,
+.range-grid-query .param-error-tip {
+  font-size: 13px;
+  color: #dc2626;
+  padding: 8px 12px;
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+/* 结果区 */
+.polygon-grid-query .result-box,
+.range-grid-query .result-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.polygon-grid-query .result-row,
+.range-grid-query .result-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: #f9f9f9;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+.polygon-grid-query .result-label,
+.range-grid-query .result-label {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.polygon-grid-query .result-num,
+.range-grid-query .result-num {
+  font-size: 14px;
+  font-weight: 500;
+  color: #334155;
+}
+
+.polygon-grid-query .result-status,
+.range-grid-query .result-status {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.polygon-grid-query .result-status.success,
+.range-grid-query .result-status.success {
+  color: #059669;
+}
+
+/* 绘制模式切换 */
+.polygon-grid-query .mode-switch,
+.range-grid-query .mode-switch {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.polygon-grid-query .mode-btn-group,
+.range-grid-query .mode-btn-group {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.polygon-grid-query .mode-btn,
+.range-grid-query .mode-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #64748b;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.polygon-grid-query .mode-btn.btn-equal,
+.range-grid-query .mode-btn.btn-equal {
+  flex: 1;
+  min-width: 60px;
+  max-width: 100px;
+  padding: 8px 8px;
+  font-size: 12px;
+}
+
+.polygon-grid-query .mode-btn:hover:not(:disabled),
+.range-grid-query .mode-btn:hover:not(:disabled) {
+  border-color: #7db8e0;
+}
+
+.polygon-grid-query .mode-btn.active,
+.range-grid-query .mode-btn.active {
+  border-color: #7db8e0;
+  background: rgba(91, 159, 212, 0.15);
+  color: #334155;
+}
+
+.polygon-grid-query .mode-btn:disabled,
+.range-grid-query .mode-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.polygon-grid-query .mode-btn.finish-btn,
+.range-grid-query .mode-btn.finish-btn {
+  border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+  color: #059669;
+}
+
+.polygon-grid-query .mode-dot,
+.range-grid-query .mode-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.polygon-grid-query .outer-dot,
+.range-grid-query .outer-dot {
+  background: #f59e0b;
+}
+
+.polygon-grid-query .hole-dot,
+.range-grid-query .hole-dot {
+  background: #dc2626;
+}
+
+/* 洞列表 */
+.polygon-grid-query .holes-list,
+.range-grid-query .holes-list {
+  margin-bottom: 12px;
+  padding: 10px;
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-radius: 8px;
+}
+
+.polygon-grid-query .holes-title,
+.range-grid-query .holes-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: #dc2626;
+  margin-bottom: 8px;
+}
+
+.polygon-grid-query .hole-item,
+.range-grid-query .hole-item {
+  margin-bottom: 8px;
+}
+
+.polygon-grid-query .hole-item:last-child,
+.range-grid-query .hole-item:last-child {
+  margin-bottom: 0;
+}
+
+.polygon-grid-query .hole-item-header,
+.range-grid-query .hole-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: #dc2626;
+}
+
+/* 当前绘制的洞 */
+.polygon-grid-query .current-hole,
+.range-grid-query .current-hole {
+  margin-bottom: 12px;
+  padding: 10px;
+  background: #fef2f2;
+  border: 1px dashed #fca5a5;
+  border-radius: 8px;
+}
+
+/* 小尺寸点列表 */
+.polygon-grid-query .points-list-mini,
+.range-grid-query .points-list-mini {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.polygon-grid-query .point-mini-row,
+.range-grid-query .point-mini-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  min-width: 0;
+}
+
+.polygon-grid-query .point-mini-index,
+.range-grid-query .point-mini-index {
+  flex: 0 0 20px;
+  font-size: 11px;
+  color: #dc2626;
+}
+
+.polygon-grid-query .point-mini-edit,
+.range-grid-query .point-mini-edit {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 4px;
+}
+
+.polygon-grid-query .point-mini-input,
+.range-grid-query .point-mini-input {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  padding: 0 4px;
+  border-radius: 4px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #475569;
+  font-size: 11px;
+  outline: none;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.polygon-grid-query .point-mini-input:focus,
+.range-grid-query .point-mini-input:focus {
+  border-color: #7db8e0;
+}
+
+.polygon-grid-query .btn-point-delete-mini,
+.range-grid-query .btn-point-delete-mini {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.polygon-grid-query .btn-point-delete-mini:hover:not(:disabled),
+.range-grid-query .btn-point-delete-mini:hover:not(:disabled) {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.polygon-grid-query .btn-point-delete-mini:disabled,
+.range-grid-query .btn-point-delete-mini:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 加载动画 */
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 </style>

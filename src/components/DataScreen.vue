@@ -404,7 +404,7 @@ html, body, #app {
   overflow: hidden;
 }
 
-/* 顶部导航 */
+/* 顶部导航 - 淡蓝清新 */
 .topbar {
   position: fixed;
   top: 0;
@@ -415,11 +415,11 @@ html, body, #app {
   align-items: center;
   justify-content: space-between;
   padding: 0 32px;
-  background: linear-gradient(180deg, rgba(10, 15, 30, 0.98) 0%, rgba(15, 23, 42, 0.95) 100%);
-  backdrop-filter: blur(20px);
-  border-bottom: 1px solid rgba(59, 130, 246, 0.15);
+  background: linear-gradient(180deg, #d0e8f5 0%, #c0ddf0 100%);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(90, 150, 200, 0.6);
   z-index: 100;
-  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 16px rgba(60, 120, 180, 0.18);
 }
 
 .topbar::before {
@@ -430,7 +430,7 @@ html, body, #app {
   transform: translateX(-50%);
   width: 50%;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.5), rgba(14, 165, 233, 0.5), rgba(59, 130, 246, 0.5), transparent);
+  background: linear-gradient(90deg, transparent, rgba(70, 140, 200, 0.5), rgba(100, 170, 220, 0.7), rgba(70, 140, 200, 0.5), transparent);
 }
 
 /* 两侧区域 */
@@ -484,7 +484,7 @@ html, body, #app {
 
 .header-english-title .english-main {
   font-size: 18px;
-  color: rgba(255, 255, 255, 0.85);
+  color: rgba(30, 74, 110, 0.95);
   font-family: 'Georgia', 'Times New Roman', serif;
   font-style: italic;
   font-weight: 600;
@@ -493,7 +493,7 @@ html, body, #app {
 
 .header-english-title .english-sub {
   font-size: 9px;
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(30, 74, 110, 0.7);
   font-family: 'Georgia', 'Times New Roman', serif;
   font-style: italic;
   letter-spacing: 1px;
@@ -512,30 +512,31 @@ html, body, #app {
 
 .nav-btn {
   padding: 8px 20px;
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.12) 0%, rgba(14, 165, 233, 0.08) 100%);
-  border: 1px solid rgba(59, 130, 246, 0.25);
-  border-radius: 4px;
-  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(90, 150, 200, 0.6);
+  border-radius: 6px;
+  color: #1e4a6e;
   font-size: 14px;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.25s ease;
   text-align: center;
   white-space: nowrap;
 }
 
 .nav-btn:hover {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.25) 0%, rgba(14, 165, 233, 0.2) 100%);
-  border-color: rgba(59, 130, 246, 0.5);
-  color: #fff;
-  box-shadow: 0 0 12px rgba(59, 130, 246, 0.2);
-  transform: translateY(-2px);
+  background: #ffffff;
+  border-color: #5b9fd4;
+  color: #1e4a6e;
+  box-shadow: 0 2px 8px rgba(60, 120, 180, 0.25);
+  transform: translateY(-1px);
 }
 
 .nav-btn.active {
-  background: linear-gradient(135deg, rgba(249, 115, 22, 0.25) 0%, rgba(234, 88, 12, 0.15) 100%);
-  border-color: rgba(249, 115, 22, 0.5);
-  color: #fb923c;
-  box-shadow: 0 0 15px rgba(249, 115, 22, 0.25);
+  background: #ffffff;
+  border-color: #4a90c2;
+  color: #1e6ba8;
+  box-shadow: 0 2px 10px rgba(60, 120, 180, 0.3);
+  font-weight: 600;
 }
 
 /* 系统状态 - 独立定位 */
@@ -551,7 +552,7 @@ html, body, #app {
 }
 
 .side-label {
-  color: rgba(255, 255, 255, 0.6);
+  color: rgba(30, 74, 110, 0.65);
   font-size: 12px;
 }
 
@@ -578,7 +579,7 @@ html, body, #app {
 .corner-bracket::after {
   content: '';
   position: absolute;
-  background: rgba(59, 130, 246, 0.5);
+  background: rgba(70, 130, 180, 0.7);
 }
 
 .corner-bracket.top-left::before {
@@ -646,7 +647,7 @@ html, body, #app {
 
 .side-label {
   font-size: 9px;
-  color: rgba(148, 163, 184, 0.6);
+  color: rgba(30, 74, 110, 0.55);
   text-transform: uppercase;
   letter-spacing: 1px;
 }
@@ -719,11 +720,11 @@ html, body, #app {
 
 .side-line {
   display: block;
-  background: linear-gradient(90deg, transparent 0%, rgba(59, 130, 246, 0.6) 100%);
+  background: linear-gradient(90deg, transparent 0%, rgba(70, 130, 180, 0.7) 100%);
 }
 
 .title-side-lines.left .side-line {
-  background: linear-gradient(270deg, transparent 0%, rgba(59, 130, 246, 0.6) 100%);
+  background: linear-gradient(270deg, transparent 0%, rgba(70, 130, 180, 0.7) 100%);
 }
 
 .line-long {
@@ -751,7 +752,7 @@ html, body, #app {
   left: -40px;
   right: -40px;
   bottom: -8px;
-  background: linear-gradient(180deg, rgba(20, 35, 70, 0.9) 0%, rgba(10, 18, 40, 0.7) 100%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, rgba(220, 240, 255, 0.9) 100%);
   clip-path: polygon(8% 0%, 92% 0%, 100% 100%, 0% 100%);
   z-index: -1;
 }
@@ -763,7 +764,7 @@ html, body, #app {
   left: 0;
   right: 0;
   bottom: 0;
-  border: 1px solid rgba(59, 130, 246, 0.3);
+  border: 1px solid rgba(90, 150, 200, 0.6);
   clip-path: polygon(8% 0%, 92% 0%, 100% 100%, 0% 100%);
   z-index: -1;
 }
@@ -776,9 +777,9 @@ html, body, #app {
 .main-title {
   font-size: 20px;
   font-weight: 600;
-  color: #fff;
+  color: #1e4a6e;
   letter-spacing: 4px;
-  text-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
+  text-shadow: none;
   margin: 0;
   white-space: nowrap;
 }
@@ -795,19 +796,19 @@ html, body, #app {
 .underline-line {
   width: 80px;
   height: 1px;
-  background: linear-gradient(90deg, transparent 0%, rgba(59, 130, 246, 0.6) 50%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, rgba(70, 130, 180, 0.7) 50%, transparent 100%);
 }
 
 .underline-line:last-child {
-  background: linear-gradient(270deg, transparent 0%, rgba(59, 130, 246, 0.6) 50%, transparent 100%);
+  background: linear-gradient(270deg, transparent 0%, rgba(70, 130, 180, 0.7) 50%, transparent 100%);
 }
 
 .underline-dot {
   width: 6px;
   height: 6px;
-  background: rgba(59, 130, 246, 0.8);
+  background: #4a90c2;
   border-radius: 50%;
-  box-shadow: 0 0 8px rgba(59, 130, 246, 0.8);
+  box-shadow: 0 0 6px rgba(70, 130, 180, 0.5);
 }
 
 /* 右侧时间盒子 */
@@ -816,24 +817,24 @@ html, body, #app {
   align-items: center;
   gap: 8px;
   padding: 6px 14px;
-  background: rgba(59, 130, 246, 0.08);
-  border: 1px solid rgba(59, 130, 246, 0.15);
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(90, 150, 200, 0.6);
   border-radius: 6px;
-  color: rgba(255, 255, 255, 0.85);
+  color: #1e4a6e;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   backdrop-filter: blur(8px);
-  transition: all 0.3s ease;
+  transition: all 0.25s ease;
 }
 
 .time-box:hover {
-  background: rgba(59, 130, 246, 0.12);
-  border-color: rgba(59, 130, 246, 0.25);
-  box-shadow: 0 0 15px rgba(59, 130, 246, 0.1);
+  background: #ffffff;
+  border-color: #5b9fd4;
+  box-shadow: 0 2px 8px rgba(60, 120, 180, 0.2);
 }
 
 .time-box svg {
-  color: rgba(59, 130, 246, 0.7);
+  color: #5b9fd4;
 }
 
 .app-main {

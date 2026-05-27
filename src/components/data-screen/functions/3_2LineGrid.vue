@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { Loader2, Trash2 } from 'lucide-vue-next'
 
@@ -26,6 +26,15 @@ const lineForm = reactive({
 })
 
 const points = ref([])
+
+// 层级选项
+const levelOptions = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+
+// 高度快选选项
+const heightOptions = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]
+
+// 半宽/半高快选选项
+const halfOptions = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50]
 
 const loading = ref(false)
 const error = ref('')
@@ -259,410 +268,562 @@ async function submit() {
 </script>
 
 <template>
-  <div v-if="functionName === '三维线网格化' || functionName === '线矩形缓冲区（管道）网格化'" class="calc-content">
-    <form class="form" @submit.prevent="functionName === '线矩形缓冲区（管道）网格化' ? submitLinePipeGrid() : submit()">
-      <!-- 三维线网格化表单 -->
-      <template v-if="functionName === '三维线网格化'">
-        <div class="form-row">
-          <label class="form-label" for="lg-level">层级</label>
-          <input
-            id="lg-level"
+  <div v-if="functionName === '三维线网格化' || functionName === '线矩形缓冲区（管道）网格化'" class="line-grid-query">
+    <!-- 三维线网格化 -->
+    <template v-if="functionName === '三维线网格化'">
+      <!-- 参数表单 -->
+      <div class="form-group">
+        <div class="group-title">网格参数</div>
+        <div class="param-line">
+          <span class="param-label">层级</span>
+          <select
             v-model.number="lineForm.level"
-            type="number"
-            step="1"
-            min="0"
-            class="form-input"
-            required
+            class="param-select"
+            aria-label="层级快选"
           >
+            <option v-for="level in levelOptions" :key="level" :value="level">{{ level }}级</option>
+          </select>
         </div>
-      </template>
-
-      <!-- 线矩形缓冲区（管道）网格化表单 -->
-      <template v-if="functionName === '线矩形缓冲区（管道）网格化'">
-        <div class="form-row">
-          <label class="form-label" for="pipe-level">层级</label>
-          <input
-            id="pipe-level"
-            v-model.number="pipeForm.level"
-            type="number"
-            step="1"
-            min="0"
-            max="32"
-            class="form-input"
-            placeholder="建议 20-25"
-            required
-          >
-        </div>
-        <div class="form-row">
-          <label class="form-label" for="pipe-halfWidth">半宽(m)</label>
-          <input
-            id="pipe-halfWidth"
-            v-model.number="pipeForm.halfWidth"
-            type="number"
-            step="1"
-            min="1"
-            class="form-input"
-            placeholder="矩形截面半宽"
-            required
-          >
-        </div>
-        <div class="form-row">
-          <label class="form-label" for="pipe-halfHeight">半高(m)</label>
-          <input
-            id="pipe-halfHeight"
-            v-model.number="pipeForm.halfHeight"
-            type="number"
-            step="1"
-            min="1"
-            class="form-input"
-            placeholder="矩形截面半高"
-            required
-          >
-        </div>
-        <div v-if="pipeHalfHeightError" class="radius-error-tip">
-          半高（{{ pipeHalfHeightError.halfHeight }}m）不能大于第{{ pipeHalfHeightError.pointIdx }}个输入点的高度（{{ pipeHalfHeightError.pointHeight }}m）
-        </div>
-      </template>
-
-      <div class="tip">
-        点击地图添加节点；下方可改/删（至少 2 点）。
       </div>
 
-      <div class="points-head">
-        <div class="points-title">线节点（{{ points.length }}）</div>
-        <div class="points-actions">
-          <button type="button" class="btn-danger" @click="clearAll" :disabled="loading">
-            <Trash2 :size="14" />
+      <!-- 线节点列表 -->
+      <div class="form-group">
+        <div class="group-title-row">
+          <span class="group-title">线节点</span>
+          <span class="group-sub">({{ points.length }}个)</span>
+          <button type="button" class="btn-link-clear" @click="clearAll" :disabled="loading">
             清空
           </button>
         </div>
-      </div>
 
-      <div class="points-table">
-        <div v-if="points.length === 0" class="points-empty">请点击地图添加点（至少 2 个）</div>
+        <div v-if="points.length === 0" class="empty-hint">
+          请点击地图添加点（至少 2 个）
+        </div>
 
-        <div v-for="(p, idx) in points" :key="idx" class="point-row">
-          <div class="idx">{{ idx + 1 }}</div>
-          <div class="point-fields">
-            <div class="field">
-              <div class="field-label">经度</div>
-              <input v-model.number="p.lon" class="point-input" type="number" step="0.0000000001" required>
+        <div v-else class="points-list">
+          <div v-for="(p, idx) in points" :key="idx" class="point-card">
+            <div class="point-card-header">
+              <span class="point-index">#{{ idx + 1 }}</span>
+              <button type="button" class="btn-point-delete" @click="removePoint(idx)" title="删除该点">
+                <Trash2 :size="14" />
+              </button>
             </div>
-            <div class="field">
-              <div class="field-label">纬度</div>
-              <input v-model.number="p.lat" class="point-input" type="number" step="0.0000000001" required>
-            </div>
-            <div class="field field-height">
-              <div class="field-label">高度</div>
-              <div class="height-row">
-                <input v-model.number="p.height" class="point-input" type="number" step="0.01" required>
-                <span class="unit">m</span>
-                <button type="button" class="icon-btn" title="删除该点" @click="removePoint(idx)" :disabled="loading">
-                  <Trash2 :size="14" />
-                </button>
+            <div class="point-fields">
+              <div class="field">
+                <span class="field-label">经度</span>
+                <input v-model.number="p.lon" class="field-input" type="number" step="any">
+              </div>
+              <div class="field">
+                <span class="field-label">纬度</span>
+                <input v-model.number="p.lat" class="field-input" type="number" step="any">
+              </div>
+              <div class="field">
+                <span class="field-label">高度(m)</span>
+                <input v-model.number="p.height" class="field-input" type="number" step="any">
+                <select
+                  class="field-select"
+                  @change="e => { if(e.target.value !== '') p.height = Number(e.target.value); e.target.selectedIndex = 0; }"
+                  aria-label="高度快选"
+                >
+                  <option value="">快选</option>
+                  <option v-for="h in heightOptions" :key="h" :value="h">{{ h }}</option>
+                </select>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="form-actions">
-        <button
-          type="submit"
-          class="btn-primary"
-          :disabled="loading || (functionName === '线矩形缓冲区（管道）网格化' ? !canSubmitPipe : !canSubmit) || (functionName === '线矩形缓冲区（管道）网格化' && !!pipeHalfHeightError)"
-        >
-          <Loader2 v-if="loading" :size="14" class="spin" />
+      <!-- 操作按钮 -->
+      <div class="btn-row">
+        <button class="btn-query" @click="submit" :disabled="loading || !canSubmit">
+          <Loader2 v-if="loading" :size="16" class="spin" />
           {{ loading ? '计算中...' : '开始计算' }}
         </button>
-      </div>
-
-      <!-- 清除格网按钮放在表单底部，始终可见 -->
-      <div class="form-actions" style="margin-top: 12px;">
-        <button type="button" class="btn-danger" @click="clearGrids">
-          <Trash2 :size="14" />
-          清除已生成格网
+        <button class="btn-clear" @click="clearGrids">
+          <span>清除网格</span>
         </button>
       </div>
-    </form>
 
-    <div v-if="error" class="error">{{ error }}</div>
+      <div v-if="error" class="error-box">{{ error }}</div>
 
-    <div v-if="result" class="result">
-      <div class="result-row">
-        <span class="result-k">网格数量</span>
-        <span class="result-v">{{ result.data?.count }}</span>
+      <div v-if="result" class="result-box">
+        <div class="result-row">
+          <span class="result-label">网格数量</span>
+          <span class="result-num">{{ result.data?.count }}</span>
+        </div>
+        <div class="result-row">
+          <span class="result-label">状态</span>
+          <span class="result-status success">{{ result.status }}</span>
+        </div>
       </div>
-      <div class="result-row">
-        <span class="result-k">状态</span>
-        <span class="result-v">{{ result.status }}</span>
-      </div>
-      <div v-if="result.data?.cells?.length" class="result-hint">
-        已在地图上绘制返回网格边界
-      </div>
-    </div>
+    </template>
 
-    <!-- 清除格网按钮已移至表单内部，始终可见 -->
+    <!-- 线矩形缓冲区（管道）网格化 -->
+    <template v-if="functionName === '线矩形缓冲区（管道）网格化'">
+      <!-- 参数表单 -->
+      <div class="form-group">
+        <div class="group-title">网格参数</div>
+        <div class="param-line">
+          <span class="param-label">层级</span>
+          <select
+            v-model.number="pipeForm.level"
+            class="param-select"
+            aria-label="层级快选"
+          >
+            <option v-for="level in levelOptions" :key="level" :value="level">{{ level }}级</option>
+          </select>
+        </div>
+        <div class="param-line">
+          <span class="param-label">半宽(m)</span>
+          <input
+            v-model.number="pipeForm.halfWidth"
+            type="number"
+            step="1"
+            min="1"
+            class="param-input"
+          >
+          <select
+            class="param-select-sm"
+            @change="e => { if(e.target.value !== '') pipeForm.halfWidth = Number(e.target.value); e.target.selectedIndex = 0; }"
+            aria-label="半宽快选"
+          >
+            <option value="">快选</option>
+            <option v-for="h in halfOptions" :key="h" :value="h">{{ h }}</option>
+          </select>
+        </div>
+        <div class="param-line">
+          <span class="param-label">半高(m)</span>
+          <input
+            v-model.number="pipeForm.halfHeight"
+            type="number"
+            step="1"
+            min="1"
+            class="param-input"
+          >
+          <select
+            class="param-select-sm"
+            @change="e => { if(e.target.value !== '') pipeForm.halfHeight = Number(e.target.value); e.target.selectedIndex = 0; }"
+            aria-label="半高快选"
+          >
+            <option value="">快选</option>
+            <option v-for="h in halfOptions" :key="h" :value="h">{{ h }}</option>
+          </select>
+        </div>
+        <div v-if="pipeHalfHeightError" class="param-error">
+          半高（{{ pipeHalfHeightError.halfHeight }}m）不能大于第{{ pipeHalfHeightError.pointIdx }}个输入点的高度（{{ pipeHalfHeightError.pointHeight }}m）
+        </div>
+      </div>
+
+      <!-- 线节点列表 -->
+      <div class="form-group">
+        <div class="group-title-row">
+          <span class="group-title">线节点</span>
+          <span class="group-sub">({{ points.length }}个)</span>
+          <button type="button" class="btn-link-clear" @click="clearAll" :disabled="loading">
+            清空
+          </button>
+        </div>
+
+        <div v-if="points.length === 0" class="empty-hint">
+          请点击地图添加点（至少 2 个）
+        </div>
+
+        <div v-else class="points-list">
+          <div v-for="(p, idx) in points" :key="idx" class="point-card">
+            <div class="point-card-header">
+              <span class="point-index">#{{ idx + 1 }}</span>
+              <button type="button" class="btn-point-delete" @click="removePoint(idx)" title="删除该点">
+                <Trash2 :size="14" />
+              </button>
+            </div>
+            <div class="point-fields">
+              <div class="field">
+                <span class="field-label">经度</span>
+                <input v-model.number="p.lon" class="field-input" type="number" step="any">
+              </div>
+              <div class="field">
+                <span class="field-label">纬度</span>
+                <input v-model.number="p.lat" class="field-input" type="number" step="any">
+              </div>
+              <div class="field">
+                <span class="field-label">高度(m)</span>
+                <input v-model.number="p.height" class="field-input" type="number" step="any">
+                <select
+                  class="field-select"
+                  @change="e => { if(e.target.value !== '') p.height = Number(e.target.value); e.target.selectedIndex = 0; }"
+                  aria-label="高度快选"
+                >
+                  <option value="">快选</option>
+                  <option v-for="h in heightOptions" :key="h" :value="h">{{ h }}</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 操作按钮 -->
+      <div class="btn-row">
+        <button 
+          class="btn-query" 
+          @click="submitLinePipeGrid" 
+          :disabled="loading || !canSubmitPipe || !!pipeHalfHeightError"
+        >
+          <Loader2 v-if="loading" :size="16" class="spin" />
+          {{ loading ? '计算中...' : '开始计算' }}
+        </button>
+        <button class="btn-clear" @click="clearGrids">
+          <span>清除网格</span>
+        </button>
+      </div>
+
+      <div v-if="error" class="error-box">{{ error }}</div>
+
+      <div v-if="result" class="result-box">
+        <div class="result-row">
+          <span class="result-label">网格数量</span>
+          <span class="result-num">{{ result.data?.count }}</span>
+        </div>
+        <div class="result-row">
+          <span class="result-label">状态</span>
+          <span class="result-status success">{{ result.status }}</span>
+        </div>
+      </div>
+    </template>
   </div>
 </template>
 
 <style scoped>
-.tip {
-  font-size: 12px;
-  color: #64748b;
-  margin-bottom: 14px;
-  padding: 8px 12px;
-  background: rgba(34, 197, 94, 0.08);
-  border-radius: 6px;
-  border: 1px solid rgba(34, 197, 94, 0.18);
+.line-grid-query {
+  padding: 0;
+  width: 100%;
+  box-sizing: border-box;
+  position: relative;
 }
 
-.radius-error-tip {
-  font-size: 12px;
-  color: #fca5a5;
-  padding: 8px 12px;
-  background: rgba(239, 68, 68, 0.1);
-  border-radius: 6px;
-  border: 1px solid rgba(239, 68, 68, 0.3);
+/* 提示框 */
+.hint-box {
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: #f5f3f0;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #475569;
+  font-size: 14px;
+}
+
+/* 表单组 */
+.form-group {
+  margin-bottom: 12px;
+}
+
+.group-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #334155;
   margin-bottom: 8px;
 }
 
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.form-row {
+.group-title-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
-.form-label {
-  width: 72px;
+.group-title-row .group-title {
+  margin-bottom: 0;
+}
+
+.group-sub {
   font-size: 13px;
-  color: #94a3b8;
+  color: #64748b;
+}
+
+.btn-link-clear {
+  margin-left: auto;
+  padding: 4px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #64748b;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.btn-link-clear:hover:not(:disabled) {
+  background: #f5f3f0;
+  color: #334155;
+}
+
+.btn-link-clear:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 空状态 */
+.empty-hint {
+  padding: 14px;
+  text-align: center;
+  color: #64748b;
+  font-size: 14px;
+  border: 1px dashed #d4c9b8;
+  border-radius: 8px;
+}
+
+/* 参数行 */
+.param-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.param-line:last-child {
+  margin-bottom: 0;
+}
+
+.param-label {
+  width: 70px;
+  font-size: 14px;
+  color: #334155;
   flex-shrink: 0;
 }
 
-.form-input {
+.param-input {
   flex: 1;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.2);
-  color: #f1f5f9;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
   font-size: 14px;
+  box-sizing: border-box;
+}
+
+.param-input:focus {
   outline: none;
-  transition: all 0.15s ease;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
 }
 
-.form-input:focus {
-  border-color: #22c55e;
-  background: rgba(34, 197, 94, 0.06);
-}
-
-.points-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 4px;
-}
-
-.points-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #e2e8f0;
-}
-
-.points-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.btn-danger {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  color: #e2e8f0;
-  font-size: 12px;
+.param-select {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 14px;
+  box-sizing: border-box;
   cursor: pointer;
-  transition: all 0.15s ease;
 }
 
-.btn-danger:hover:not(:disabled) {
-  border-color: rgba(239, 68, 68, 0.4);
-  background: rgba(239, 68, 68, 0.14);
-  color: #fecaca;
+.param-select:focus {
+  outline: none;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
 }
 
-.btn-danger:disabled {
-  opacity: 0.6;
-  cursor: default;
+.param-select-sm {
+  width: 70px;
+  height: 34px;
+  padding: 0 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 13px;
+  box-sizing: border-box;
+  cursor: pointer;
 }
 
-.points-table {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
-  overflow: hidden;
-  max-height: 340px;
+.param-select-sm:focus {
+  outline: none;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
+}
+
+/* 错误提示 */
+.param-error {
+  font-size: 13px;
+  color: #dc2626;
+  padding: 8px 12px;
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.error-box {
+  padding: 10px 12px;
+  border: 1px solid #fca5a5;
+  border-radius: 8px;
+  background: #fef2f2;
+  font-size: 14px;
+  color: #dc2626;
+  margin-bottom: 10px;
+}
+
+/* 点列表 */
+.points-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
   overflow-y: auto;
 }
 
-.points-table::-webkit-scrollbar {
-  width: 4px;
-}
-
-.points-table::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.points-table::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 2px;
-}
-
-.points-empty {
-  padding: 12px;
-  font-size: 12px;
-  color: #64748b;
-  background: rgba(0, 0, 0, 0.15);
-}
-
-.point-row {
-  display: grid;
-  grid-template-columns: 30px 1fr;
-  gap: 10px;
+.point-card {
   padding: 10px;
-  align-items: start;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(0, 0, 0, 0.18);
+  background: #ffffff;
+  border: 1px solid #ebe6df;
+  border-radius: 8px;
 }
 
-.point-row:first-child {
-  border-top: none;
+.point-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
 }
 
-.idx {
+.point-index {
   font-size: 12px;
-  color: #64748b;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-  padding-top: 4px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.btn-point-delete {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: #fef2f2;
+  color: #dc2626;
+  cursor: pointer;
+}
+
+.btn-point-delete:hover {
+  background: #fee2e2;
 }
 
 .point-fields {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  min-width: 0;
+  gap: 6px;
 }
 
 .field {
-  min-width: 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .field-label {
-  width: 46px;
-  font-size: 12px;
-  color: rgba(148, 163, 184, 0.9);
-  flex-shrink: 0;
-}
-
-.height-row {
-  flex: 1;
-  display: grid;
-  grid-template-columns: 1fr auto 34px;
-  gap: 8px;
-  align-items: center;
-  min-width: 0;
-}
-
-.unit {
-  font-size: 12px;
-  color: rgba(148, 163, 184, 0.85);
-  flex-shrink: 0;
-}
-
-.point-input {
-  flex: 1;
-  width: auto;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.2);
-  color: #f1f5f9;
+  width: 50px;
   font-size: 13px;
-  outline: none;
+  color: #64748b;
+  flex-shrink: 0;
 }
 
-.point-input:focus {
-  border-color: rgba(34, 197, 94, 0.55);
+.field-input {
+  flex: 1;
+  min-width: 60px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 13px;
+  box-sizing: border-box;
 }
 
-.icon-btn {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.04);
-  color: #94a3b8;
+.field-select {
+  width: 80px;
+  height: 32px;
+  padding: 0 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 13px;
   cursor: pointer;
-  display: inline-flex;
+  box-sizing: border-box;
+}
+
+.field-select:focus {
+  outline: none;
+  border-color: #7db8e0;
+}
+
+.field-input:focus {
+  outline: none;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 2px rgba(91, 159, 212, 0.12);
+}
+
+/* 按钮行 */
+.btn-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.btn-query {
+  flex: 1;
+  height: 38px;
+  display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s ease;
-}
-
-.icon-btn:hover:not(:disabled) {
-  border-color: rgba(239, 68, 68, 0.4);
-  background: rgba(239, 68, 68, 0.12);
-  color: #fecaca;
-}
-
-.icon-btn:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.form-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 6px;
-}
-
-.btn-primary {
-  display: flex;
-  align-items: center;
   gap: 6px;
-  padding: 10px 22px;
   border-radius: 8px;
+  background: linear-gradient(135deg, #7db8e0, #5b9fd4);
   border: none;
-  background: linear-gradient(135deg, #22c55e, #16a34a);
   color: #fff;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
 }
 
-.btn-primary:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(34, 197, 94, 0.35);
+.btn-query:hover:not(:disabled) {
+  background: linear-gradient(135deg, #6aa8d4, #4a8fc4);
 }
 
-.btn-primary:disabled {
-  opacity: 0.7;
-  cursor: default;
+.btn-query:disabled {
+  background: #e2e8f0;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.btn-clear {
+  width: 88px;
+  white-space: nowrap;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.btn-clear:hover {
+  background: #e8e8e8;
 }
 
 .spin {
@@ -674,47 +835,41 @@ async function submit() {
   to { transform: rotate(360deg); }
 }
 
-.error {
-  margin-top: 14px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  background: rgba(239, 68, 68, 0.1);
-  font-size: 13px;
-  color: #fca5a5;
-}
-
-.result {
-  margin-top: 16px;
-  padding: 14px;
-  background: rgba(34, 197, 94, 0.08);
-  border: 1px solid rgba(34, 197, 94, 0.2);
-  border-radius: 8px;
+/* 结果区 */
+.result-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .result-row {
   display: flex;
-  justify-content: space-between;
-  padding: 6px 0;
-  font-size: 13px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: #f9f9f9;
+  border: 1px solid #ddd;
+  border-radius: 6px;
 }
 
-.result-k {
+.result-label {
+  font-size: 13px;
   color: #64748b;
 }
 
-.result-v {
-  color: #86efac;
+.result-num {
+  font-size: 14px;
+  font-weight: 500;
+  color: #334155;
+}
+
+.result-status {
+  font-size: 14px;
   font-weight: 500;
 }
 
-.result-hint {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(34, 197, 94, 0.2);
-  font-size: 12px;
-  color: #86efac;
-  text-align: center;
+.result-status.success {
+  color: #059669;
 }
 </style>
 

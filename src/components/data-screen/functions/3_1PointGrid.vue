@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { reactive, ref } from 'vue'
 import { Loader2, Trash2 } from 'lucide-vue-next'
 import LineGrid from './3_2LineGrid.vue'
@@ -30,6 +30,31 @@ const pointGridForm = reactive({
   level: 14,
   radius: 30,
 })
+
+// 高度快选选项
+const heightOptions = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]
+
+// 层级选项
+const levelOptions = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+
+// 半径快选选项
+const radiusOptions = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50]
+
+function onHeightPresetChange(event) {
+  const val = event.target.value
+  if (val !== '') {
+    pointGridForm.height = Number(val)
+  }
+  event.target.selectedIndex = 0
+}
+
+function onRadiusPresetChange(event) {
+  const val = event.target.value
+  if (val !== '') {
+    pointGridForm.radius = Number(val)
+  }
+  event.target.selectedIndex = 0
+}
 const pointGridLoading = ref(false)
 const pointGridError = ref('')
 const pointGridResult = ref(null)
@@ -190,209 +215,208 @@ async function submitPointBufferGrid() {
 </script>
 
 <template>
-  <div class="calc-content">
+  <div class="point-grid-query">
+    <!-- 点网格化 -->
     <template v-if="functionName === '点网格化'">
-      <div class="tip">
-        点击地图可自动填充经纬度和高度
+      <div class="hint-box">
+        <span>点击地图可自动填充经纬度和高度</span>
       </div>
-      <form class="form" @submit.prevent="submitPointGrid">
-        <div class="form-row">
-          <label class="form-label" for="pgp-lon">经度</label>
+
+      <!-- 参数表单 -->
+      <div class="form-group">
+        <div class="group-title">网格参数</div>
+        <div class="param-line">
+          <span class="param-label">经度</span>
           <input
-            id="pgp-lon"
             v-model.number="pointGridForm.longitude"
             type="number"
             step="0.0000000001"
-            class="form-input"
-            required
+            class="param-input"
           >
         </div>
-        <div class="form-row">
-          <label class="form-label" for="pgp-lat">纬度</label>
+        <div class="param-line">
+          <span class="param-label">纬度</span>
           <input
-            id="pgp-lat"
             v-model.number="pointGridForm.latitude"
             type="number"
             step="0.0000000001"
-            class="form-input"
-            required
+            class="param-input"
           >
         </div>
-        <div class="form-row">
-          <label class="form-label" for="pgp-height">高度(m)</label>
+        <div class="param-line">
+          <span class="param-label">高度(m)</span>
           <input
-            id="pgp-height"
             v-model.number="pointGridForm.height"
             type="number"
             step="0.01"
-            class="form-input"
-            required
+            class="param-input"
           >
-        </div>
-        <div class="form-row">
-          <label class="form-label" for="pgp-level">层级</label>
-          <input
-            id="pgp-level"
-            v-model.number="pointGridForm.level"
-            type="number"
-            step="1"
-            min="0"
-            class="form-input"
-            required
+          <select
+            class="field-preset-select"
+            aria-label="高度快选"
+            @change="onHeightPresetChange"
           >
+            <option value="">快选</option>
+            <option v-for="h in heightOptions" :key="h" :value="h">
+              {{ h }}
+            </option>
+          </select>
         </div>
-        <div class="form-actions">
-          <button
-            type="submit"
-            class="btn-primary"
-            :disabled="pointGridLoading"
-          >
-            <Loader2 v-if="pointGridLoading" :size="14" class="spin" />
-            {{ pointGridLoading ? '计算中...' : '开始计算' }}
-          </button>
+        <div class="param-line">
+          <span class="param-label">层级</span>
+          <select v-model.number="pointGridForm.level" class="param-select">
+            <option v-for="lvl in levelOptions" :key="lvl" :value="lvl">第 {{ lvl }} 级</option>
+          </select>
         </div>
-      </form>
-      <div v-if="pointGridError" class="error">{{ pointGridError }}</div>
-      <div class="form-actions" style="margin: 12px 0 0; justify-content: flex-end;">
-        <button type="button" class="btn-danger" @click="clearGrids">
-          <Trash2 :size="14" />
-          清除已生成格网
+      </div>
+
+      <!-- 操作按钮 -->
+      <div class="btn-row">
+        <button class="btn-query" @click="submitPointGrid" :disabled="pointGridLoading">
+          <Loader2 v-if="pointGridLoading" :size="16" class="spin" />
+          {{ pointGridLoading ? '计算中...' : '开始计算' }}
+        </button>
+        <button class="btn-clear" @click="clearGrids">
+          <span>清除网格</span>
         </button>
       </div>
-      <div v-if="pointGridResult" class="result">
+
+      <!-- 错误提示 -->
+      <div v-if="pointGridError" class="error-box">{{ pointGridError }}</div>
+
+      <!-- 查询结果 -->
+      <div v-if="pointGridResult" class="result-box">
         <div class="result-row">
-          <span class="result-k">网格编码</span>
-          <span class="result-v code">{{ pointGridResult.data?.code }}</span>
+          <span class="result-label">网格编码</span>
+          <span class="result-num code">{{ pointGridResult.data?.code }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">中心点</span>
-          <span class="result-v">{{ pointGridResult.data?.center?.[0] }}, {{ pointGridResult.data?.center?.[1] }}, {{ pointGridResult.data?.center?.[2] }}</span>
+          <span class="result-label">中心点</span>
+          <span class="result-num">
+            {{ pointGridResult.data?.center?.[0]?.toFixed(6) }}, 
+            {{ pointGridResult.data?.center?.[1]?.toFixed(6) }}, 
+            {{ pointGridResult.data?.center?.[2]?.toFixed(1) }}
+          </span>
         </div>
         <div class="result-row">
-          <span class="result-k">最大纬度</span>
-          <span class="result-v">{{ pointGridResult.data?.maxlat }}</span>
+          <span class="result-label">边界范围</span>
+          <span class="result-num">
+            经度 {{ pointGridResult.data?.minlon?.toFixed(6) }} ~ {{ pointGridResult.data?.maxlon?.toFixed(6) }}<br>
+            纬度 {{ pointGridResult.data?.minlat?.toFixed(6) }} ~ {{ pointGridResult.data?.maxlat?.toFixed(6) }}<br>
+            高度 {{ pointGridResult.data?.bottom?.toFixed(1) }} ~ {{ pointGridResult.data?.top?.toFixed(1) }}m
+          </span>
         </div>
         <div class="result-row">
-          <span class="result-k">最小纬度</span>
-          <span class="result-v">{{ pointGridResult.data?.minlat }}</span>
-        </div>
-        <div class="result-row">
-          <span class="result-k">最大经度</span>
-          <span class="result-v">{{ pointGridResult.data?.maxlon }}</span>
-        </div>
-        <div class="result-row">
-          <span class="result-k">最小经度</span>
-          <span class="result-v">{{ pointGridResult.data?.minlon }}</span>
-        </div>
-        <div class="result-row">
-          <span class="result-k">上边界</span>
-          <span class="result-v">{{ pointGridResult.data?.top }}</span>
-        </div>
-        <div class="result-row">
-          <span class="result-k">下边界</span>
-          <span class="result-v">{{ pointGridResult.data?.bottom }}</span>
-        </div>
-        <div class="result-row">
-          <span class="result-k">状态</span>
-          <span class="result-v">{{ pointGridResult.status }}</span>
+          <span class="result-label">状态</span>
+          <span class="result-status success">{{ pointGridResult.status }}</span>
         </div>
       </div>
     </template>
 
+    <!-- 点缓冲区（球体）网格化 -->
     <template v-if="functionName === '点缓冲区（球体）网格化'">
-      <div class="tip">
-        点击地图可自动填充经纬度和高度
+      <div class="hint-box">
+        <span>点击地图可自动填充经纬度和高度</span>
       </div>
-      <form class="form" @submit.prevent="submitPointBufferGrid">
-        <div class="form-row">
-          <label class="form-label" for="pgp-lon2">经度</label>
+
+      <!-- 参数表单 -->
+      <div class="form-group">
+        <div class="group-title">网格参数</div>
+        <div class="param-line">
+          <span class="param-label">经度</span>
           <input
-            id="pgp-lon2"
             v-model.number="pointGridForm.longitude"
             type="number"
             step="0.0000000001"
-            class="form-input"
-            required
+            class="param-input"
           >
         </div>
-        <div class="form-row">
-          <label class="form-label" for="pgp-lat2">纬度</label>
+        <div class="param-line">
+          <span class="param-label">纬度</span>
           <input
-            id="pgp-lat2"
             v-model.number="pointGridForm.latitude"
             type="number"
             step="0.0000000001"
-            class="form-input"
-            required
+            class="param-input"
           >
         </div>
-        <div class="form-row">
-          <label class="form-label" for="pgp-height2">高度(m)</label>
+        <div class="param-line">
+          <span class="param-label">高度(m)</span>
           <input
-            id="pgp-height2"
             v-model.number="pointGridForm.height"
             type="number"
             step="0.01"
-            class="form-input"
-            required
+            class="param-input"
           >
+          <select
+            class="field-preset-select"
+            aria-label="高度快选"
+            @change="onHeightPresetChange"
+          >
+            <option value="">快选</option>
+            <option v-for="h in heightOptions" :key="h" :value="h">
+              {{ h }}
+            </option>
+          </select>
         </div>
         <div v-if="pointGridForm.radius > pointGridForm.height" class="radius-error-tip">
           半径（{{ pointGridForm.radius }}m）不能大于高度（{{ pointGridForm.height }}m）
         </div>
-        <div class="form-row">
-          <label class="form-label" for="pgp-radius">半径(m)</label>
+        <div class="param-line">
+          <span class="param-label">半径(m)</span>
           <input
-            id="pgp-radius"
             v-model.number="pointGridForm.radius"
             type="number"
             step="1"
             min="1"
-            class="form-input"
-            required
+            class="param-input"
           >
-        </div>
-        <div class="form-row">
-          <label class="form-label" for="pgp-level2">层级</label>
-          <input
-            id="pgp-level2"
-            v-model.number="pointGridForm.level"
-            type="number"
-            step="1"
-            min="0"
-            class="form-input"
-            required
+          <select
+            class="field-preset-select"
+            aria-label="半径快选"
+            @change="onRadiusPresetChange"
           >
+            <option value="">快选</option>
+            <option v-for="r in radiusOptions" :key="r" :value="r">
+              {{ r }}
+            </option>
+          </select>
         </div>
-        <div class="form-actions">
-          <button
-            type="submit"
-            class="btn-primary"
-            :disabled="pointGridLoading || pointGridForm.radius > pointGridForm.height"
-          >
-            <Loader2 v-if="pointGridLoading" :size="14" class="spin" />
-            {{ pointGridLoading ? '计算中...' : '开始计算' }}
-          </button>
+        <div class="param-line">
+          <span class="param-label">层级</span>
+          <select v-model.number="pointGridForm.level" class="param-select">
+            <option v-for="lvl in levelOptions" :key="lvl" :value="lvl">第 {{ lvl }} 级</option>
+          </select>
         </div>
-        <div class="form-actions" style="margin-top: 12px; justify-content: flex-end;">
-          <button type="button" class="btn-danger" @click="clearGrids">
-            <Trash2 :size="14" />
-            清除已生成格网
-          </button>
-        </div>
-      </form>
-      <div v-if="pointGridError" class="error">{{ pointGridError }}</div>
-      <div v-if="pointGridResult" class="result result--green">
+      </div>
+
+      <!-- 操作按钮 -->
+      <div class="btn-row">
+        <button 
+          class="btn-query" 
+          @click="submitPointBufferGrid" 
+          :disabled="pointGridLoading || pointGridForm.radius > pointGridForm.height"
+        >
+          <Loader2 v-if="pointGridLoading" :size="16" class="spin" />
+          {{ pointGridLoading ? '计算中...' : '开始计算' }}
+        </button>
+        <button class="btn-clear" @click="clearGrids">
+          <span>清除网格</span>
+        </button>
+      </div>
+
+      <!-- 错误提示 -->
+      <div v-if="pointGridError" class="error-box">{{ pointGridError }}</div>
+
+      <!-- 查询结果 -->
+      <div v-if="pointGridResult" class="result-box">
         <div class="result-row">
-          <span class="result-k">网格数量</span>
-          <span class="result-v">{{ pointGridResult.data?.cells?.length || 0 }}</span>
+          <span class="result-label">网格数量</span>
+          <span class="result-num">{{ pointGridResult.data?.cells?.length || 0 }}</span>
         </div>
         <div class="result-row">
-          <span class="result-k">状态</span>
-          <span class="result-v">{{ pointGridResult.status }}</span>
-        </div>
-        <div class="result-hint">
-          已在地图上绘制返回网格边界
+          <span class="result-label">状态</span>
+          <span class="result-status success">{{ pointGridResult.status }}</span>
         </div>
       </div>
     </template>
@@ -405,30 +429,257 @@ async function submitPointBufferGrid() {
       @show-grid="(v) => emit('showGrid', v)"
       @show-line="(v) => emit('show-line', v)"
     />
-
-    <!-- 清除格网按钮已移至表单内部，始终可见 -->
   </div>
 </template>
 
 <style scoped>
+.point-grid-query {
+  padding: 0;
+  width: 100%;
+  box-sizing: border-box;
+  position: relative;
+}
+
+/* 提示框 */
+.hint-box {
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: #f5f3f0;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #475569;
+  font-size: 14px;
+}
+
+/* 表单组 */
+.form-group {
+  margin-bottom: 12px;
+}
+
+.group-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 8px;
+}
+
+/* 参数行 */
+.param-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.param-line:last-child {
+  margin-bottom: 0;
+}
+
+.param-label {
+  width: 70px;
+  font-size: 14px;
+  color: #334155;
+  flex-shrink: 0;
+}
+
+.param-input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.param-input:focus {
+  outline: none;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
+}
+
+.field-preset-select {
+  width: 70px;
+  min-width: 70px;
+  height: 34px;
+  padding: 0 24px 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 14px;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+
+.field-preset-select:focus {
+  outline: none;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
+}
+
+.param-select {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 24px 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 14px;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+.param-select:focus {
+  outline: none;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
+}
+
+/* 错误提示 */
+.radius-error-tip {
+  font-size: 13px;
+  color: #dc2626;
+  padding: 8px 12px;
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.error-box {
+  padding: 10px 12px;
+  border: 1px solid #fca5a5;
+  border-radius: 8px;
+  background: #fef2f2;
+  font-size: 14px;
+  color: #dc2626;
+  margin-bottom: 10px;
+}
+
+/* 按钮行 */
+.btn-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.btn-query {
+  flex: 1;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #7db8e0, #5b9fd4);
+  border: none;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn-query:hover:not(:disabled) {
+  background: linear-gradient(135deg, #6aa8d4, #4a8fc4);
+}
+
+.btn-query:disabled {
+  background: #e2e8f0;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.btn-clear {
+  width: 88px;
+  white-space: nowrap;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.btn-clear:hover {
+  background: #e8e8e8;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* 结果区 */
+.result-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.result-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: #f9f9f9;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+}
+
+.result-label {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.result-num {
+  font-size: 14px;
+  font-weight: 500;
+  color: #334155;
+  word-break: break-all;
+}
+
+.result-num.code {
+  font-family: 'Monaco', 'Consolas', monospace;
+}
+
+.result-status {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.result-status.success {
+  color: #059669;
+}
+
+/* 以下是旧样式，保留兼容 */
 .tip {
   font-size: 12px;
   color: #64748b;
   margin-bottom: 14px;
   padding: 8px 12px;
-  background: rgba(59, 130, 246, 0.1);
+  background: #eef6fc;
   border-radius: 6px;
-  border: 1px solid rgba(59, 130, 246, 0.2);
-}
-
-.radius-error-tip {
-  font-size: 12px;
-  color: #fca5a5;
-  padding: 8px 12px;
-  background: rgba(239, 68, 68, 0.1);
-  border-radius: 6px;
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  margin-bottom: 8px;
+  border: 1px solid #bfdbfe;
 }
 
 .form {
@@ -454,17 +705,17 @@ async function submitPointBufferGrid() {
   flex: 1;
   padding: 10px 12px;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.2);
-  color: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #334155;
   font-size: 14px;
   outline: none;
   transition: all 0.15s ease;
 }
 
 .form-input:focus {
-  border-color: #3b82f6;
-  background: rgba(99, 102, 241, 0.1);
+  border-color: #7db8e0;
+  background: #ffffff;
 }
 
 .form-actions {
@@ -482,7 +733,7 @@ async function submitPointBufferGrid() {
   padding: 10px 22px;
   border-radius: 8px;
   border: none;
-  background: linear-gradient(135deg, #3b82f6, #0ea5e9);
+  background: linear-gradient(135deg, #7db8e0, #5b9fd4);
   color: #fff;
   font-size: 13px;
   font-weight: 500;
@@ -492,21 +743,12 @@ async function submitPointBufferGrid() {
 
 .btn-primary:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
+  box-shadow: 0 4px 12px rgba(91, 159, 212, 0.25);
 }
 
 .btn-primary:disabled {
   opacity: 0.7;
   cursor: default;
-}
-
-.spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
 }
 
 .error {
@@ -528,7 +770,6 @@ async function submitPointBufferGrid() {
   color: #4ade80;
 }
 
-/* 点缓冲区（球体）网格化：绿色底边和绿色字体，与 PolygonGrid 一致 */
 .result--green {
   margin-top: 16px;
   padding: 14px;
@@ -571,33 +812,10 @@ async function submitPointBufferGrid() {
   gap: 10px;
 }
 
-.result-row {
-  display: grid;
-  grid-template-columns: 80px 1fr;
-  gap: 10px;
-  font-size: 15px;
-}
-
-.result-k {
-  color: #64748b;
-}
-
-.result-v {
-  color: #e2e8f0;
-  font-variant-numeric: tabular-nums;
-  word-break: break-all;
-}
-
-.result-v.code {
-  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
-  color: #93c5fd;
-  font-size: 14px;
-}
-
 .result-header {
   font-size: 14px;
   font-weight: 600;
-  color: #e2e8f0;
+  color: #475569;
   margin: 12px 0 8px;
   padding-bottom: 8px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
@@ -606,9 +824,9 @@ async function submitPointBufferGrid() {
 .result-cell {
   padding: 10px;
   margin-bottom: 10px;
-  background: rgba(0, 0, 0, 0.2);
+  background: #ffffff;
   border-radius: 8px;
-  border: 1px solid rgba(59, 130, 246, 0.2);
+  border: 1px solid #bfdbfe;
 }
 
 .result-cell-title {
@@ -627,7 +845,7 @@ async function submitPointBufferGrid() {
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.06);
-  color: #e2e8f0;
+  color: #475569;
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s ease;

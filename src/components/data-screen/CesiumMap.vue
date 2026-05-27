@@ -28,6 +28,13 @@ const onFenceConfirmCallback = ref(null)
 
 const emit = defineEmits(['point-selected', 'fence-confirm', 'box-select-start', 'box-select-end', 'get-view-bounds'])
 
+const props = defineProps({
+  show3DToggle: {
+    type: Boolean,
+    default: true,
+  },
+})
+
 // 框选相关变量
 let isBoxSelecting = false
 let boxSelectHandler = null
@@ -2232,7 +2239,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- 3D底图开关 -->
-    <div class="tileset-toggle" @click="toggle3DTiles">
+    <div v-if="props.show3DToggle" class="tileset-toggle" @click="toggle3DTiles">
       <span class="toggle-label">3D底图</span>
       <div class="toggle-switch" :class="{ active: show3DTiles }">
         <div class="toggle-slider" />
@@ -2258,7 +2265,8 @@ onBeforeUnmount(() => {
 
 .mouse-info {
   position: absolute;
-  right: 20px;
+  left: 50%;
+  transform: translateX(-50%);
   bottom: 20px;
   display: flex;
   gap: 16px;
@@ -2289,7 +2297,7 @@ onBeforeUnmount(() => {
 .tileset-toggle {
   position: absolute;
   right: 20px;
-  bottom: 70px;
+  bottom: 20px;
   display: flex;
   align-items: center;
   gap: 10px;

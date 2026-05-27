@@ -1,6 +1,6 @@
-<script setup>
-import { reactive, ref, computed } from 'vue'
-import { Loader2, Trash2, Search, MapPin } from 'lucide-vue-next'
+﻿<script setup>
+import { reactive, ref, computed, watch } from 'vue'
+import { Loader2, Trash2, MapPin } from 'lucide-vue-next'
 
 const props = defineProps({
   serviceName: {
@@ -37,6 +37,60 @@ const osgbAggGridForm = reactive({
   level: 9,
   minLevel: 0,
 })
+
+const GRID_LEVEL_MAX = 21
+const gridLevelOptions = Array.from({ length: GRID_LEVEL_MAX + 1 }, (_, i) => i)
+
+/** 高度快选：0–120 整十 */
+const heightPresetOptions = Array.from({ length: 13 }, (_, i) => i * 10)
+
+function onBottomPresetChange(event) {
+  const val = event.target.value
+  if (val !== '') {
+    polygonForm.bottom = Number(val)
+  }
+  event.target.selectedIndex = 0
+}
+
+function onTopPresetChange(event) {
+  const val = event.target.value
+  if (val !== '') {
+    polygonForm.top = Number(val)
+  }
+  event.target.selectedIndex = 0
+}
+
+const osgbAggMinLevelOptions = computed(() => {
+  const max = Number(osgbAggGridForm.level)
+  if (Number.isNaN(max) || max < 0) return [0]
+  return Array.from({ length: Math.min(max, GRID_LEVEL_MAX) + 1 }, (_, i) => i)
+})
+
+const polygonMinLevelOptions = computed(() => {
+  const max = Number(polygonForm.level)
+  if (Number.isNaN(max) || max < 0) return [0]
+  return Array.from({ length: Math.min(max, GRID_LEVEL_MAX) + 1 }, (_, i) => i)
+})
+
+watch(
+  () => osgbAggGridForm.level,
+  (level) => {
+    const max = Number(level)
+    if (!Number.isNaN(max) && osgbAggGridForm.minLevel > max) {
+      osgbAggGridForm.minLevel = max
+    }
+  },
+)
+
+watch(
+  () => polygonForm.level,
+  (level) => {
+    const max = Number(level)
+    if (!Number.isNaN(max) && polygonForm.minLevel > max) {
+      polygonForm.minLevel = max
+    }
+  },
+)
 
 const osgbAggLoading = ref(false)
 const osgbAggError = ref('')
@@ -270,8 +324,14 @@ async function submitOsgbAggGridQuery() {
   osgbAggResult.value = null
   osgbAggStats.value = null
 
-  if (!osgbAggGridForm.level || osgbAggGridForm.level < 0) {
-    osgbAggError.value = '请输入有效的网格层级'
+  const level = Number(osgbAggGridForm.level)
+  const minLevel = Number(osgbAggGridForm.minLevel)
+  if (Number.isNaN(level) || level < 0 || level > GRID_LEVEL_MAX) {
+    osgbAggError.value = '请选择有效的网格层级'
+    return
+  }
+  if (Number.isNaN(minLevel) || minLevel < 0 || minLevel > level) {
+    osgbAggError.value = '最小层级不能大于网格层级'
     return
   }
 
@@ -279,8 +339,8 @@ async function submitOsgbAggGridQuery() {
 
   try {
     const payload = {
-      level: Number(osgbAggGridForm.level),
-      minLevel: Number(osgbAggGridForm.minLevel) || 0,
+      level,
+      minLevel: minLevel || 0,
     }
 
     console.log('[倾斜摄影多源聚合网格查询] 发送 payload:', payload)
@@ -409,8 +469,14 @@ async function submitPolygonGrid() {
     return
   }
 
-  if (!polygonForm.level || polygonForm.level < 0) {
-    polygonError.value = '请输入有效的层级'
+  const level = Number(polygonForm.level)
+  const minLevel = Number(polygonForm.minLevel)
+  if (Number.isNaN(level) || level < 0 || level > GRID_LEVEL_MAX) {
+    polygonError.value = '请选择有效的网格层级'
+    return
+  }
+  if (polygonForm.aggregate && (Number.isNaN(minLevel) || minLevel < 0 || minLevel > level)) {
+    polygonError.value = '最小层级不能大于网格层级'
     return
   }
 
@@ -431,15 +497,14 @@ async function submitPolygonGrid() {
 
     const payload = {
       polygon: polygonCoords,
-      level: Number(polygonForm.level),
+      level,
       bottom: Number(polygonForm.bottom),
       top: Number(polygonForm.top),
       aggregate: Boolean(polygonForm.aggregate),
     }
 
-    // 如果开启聚合且设置了 minLevel
-    if (polygonForm.aggregate && polygonForm.minLevel > 0) {
-      payload.minLevel = Number(polygonForm.minLevel)
+    if (polygonForm.aggregate && minLevel > 0) {
+      payload.minLevel = minLevel
     }
 
     console.log('[多粒度混合适网建模] 发送 payload:', payload)
@@ -533,278 +598,314 @@ function clearGrids() {
 
 <template>
   <div class="calc-content">
-    <template v-if="functionName === '多粒度混合格网建模'">
-      <div class="tip">
+    <div v-if="functionName === '多粒度混合格网建模'" class="hybrid-grid-query">
+      <div class="hint-box">
         <MapPin :size="14" />
-        <span>点击地图添加多边形顶点（至少3个点组成闭合多边形）</span>
+        <span>点击地图添加多边形顶点（至少 3 个点组成闭合多边形）</span>
       </div>
 
-      <form class="form" @submit.prevent="submitPolygonGrid">
-        <!-- 顶点列表 -->
-        <div class="points-section">
-          <div class="points-title">
-            <span>多边形顶点</span>
-            <span class="points-count">({{ polygonPoints.length }}个)</span>
-            <button type="button" class="icon-btn-mini clear-btn" @click="clearPoints" :disabled="polygonPoints.length === 0" title="清空所有点">
-              <Trash2 :size="11" />
-            </button>
-          </div>
+      <div class="form-group">
+        <div class="group-title-row">
+          <span class="group-title">多边形顶点</span>
+          <span class="group-sub">({{ polygonPoints.length }} 个)</span>
+          <button
+            type="button"
+            class="btn-link-clear"
+            :disabled="polygonPoints.length === 0"
+            @click="clearPoints"
+          >
+            清空
+          </button>
+        </div>
 
-          <div v-if="polygonPoints.length === 0" class="empty-hint">
-            暂无顶点，请点击地图添加
-          </div>
+        <div v-if="polygonPoints.length === 0" class="empty-hint">
+          暂无顶点，请点击地图添加
+        </div>
 
-          <div v-else class="points-list">
-            <div v-for="(point, idx) in polygonPoints" :key="idx" class="point-card">
-              <div class="point-card-header">
-                <div class="point-index-badge">{{ idx + 1 }}</div>
-                <button type="button" class="icon-btn-mini" @click="removePoint(idx)" title="删除此点">
-                  <Trash2 :size="14" />
-                </button>
+        <div v-else class="points-list">
+          <div v-for="(point, idx) in polygonPoints" :key="idx" class="point-card">
+            <div class="point-card-header">
+              <span class="point-index-badge">{{ idx + 1 }}</span>
+              <button
+                type="button"
+                class="btn-point-delete"
+                title="删除此点"
+                @click="removePoint(idx)"
+              >
+                <Trash2 :size="14" />
+              </button>
+            </div>
+            <div class="point-fields">
+              <div class="field">
+                <span class="field-label">经度</span>
+                <input
+                  v-model.number="polygonPoints[idx].lon"
+                  class="field-input"
+                  type="number"
+                  step="any"
+                  placeholder="经度"
+                >
               </div>
-              <div class="point-fields">
-                <div class="field">
-                  <label class="field-label">经度</label>
-                  <input
-                    v-model.number="polygonPoints[idx].lon"
-                    class="point-input-mini"
-                    type="number"
-                    step="any"
-                    placeholder="经度"
-                  >
-                </div>
-                <div class="field">
-                  <label class="field-label">纬度</label>
-                  <input
-                    v-model.number="polygonPoints[idx].lat"
-                    class="point-input-mini"
-                    type="number"
-                    step="any"
-                    placeholder="纬度"
-                  >
-                </div>
-                <div class="field">
-                  <label class="field-label">高度(m)</label>
-                  <input
-                    v-model.number="polygonPoints[idx].height"
-                    class="point-input-mini"
-                    type="number"
-                    step="any"
-                    placeholder="高度"
-                  >
-                </div>
+              <div class="field">
+                <span class="field-label">纬度</span>
+                <input
+                  v-model.number="polygonPoints[idx].lat"
+                  class="field-input"
+                  type="number"
+                  step="any"
+                  placeholder="纬度"
+                >
+              </div>
+              <div class="field">
+                <span class="field-label">高度(m)</span>
+                <input
+                  v-model.number="polygonPoints[idx].height"
+                  class="field-input"
+                  type="number"
+                  step="any"
+                  placeholder="高度"
+                >
               </div>
             </div>
           </div>
         </div>
+      </div>
 
-        <!-- 高度设置 -->
-        <div class="form-row">
-          <label class="form-label" for="pg-bottom">底面高</label>
-          <input
-            id="pg-bottom"
-            v-model.number="polygonForm.bottom"
-            type="number"
-            step="any"
-            class="form-input"
-            placeholder="底面高度"
-          >
+      <div class="form-group">
+        <div class="group-title">高度范围</div>
+        <div class="param-line">
+          <span class="param-label">底面高</span>
+          <div class="param-input-combo">
+            <input
+              id="pg-bottom"
+              v-model.number="polygonForm.bottom"
+              type="number"
+              step="any"
+              class="param-input"
+              placeholder="手动输入"
+            >
+            <select
+              class="param-preset-select"
+              aria-label="底面高度快选"
+              @change="onBottomPresetChange"
+            >
+              <option value="">快选</option>
+              <option
+                v-for="h in heightPresetOptions"
+                :key="`bottom-${h}`"
+                :value="h"
+              >
+                {{ h }}
+              </option>
+            </select>
+          </div>
         </div>
-
-        <div class="form-row">
-          <label class="form-label" for="pg-top">顶面高</label>
-          <input
-            id="pg-top"
-            v-model.number="polygonForm.top"
-            type="number"
-            step="any"
-            class="form-input"
-            placeholder="顶面高度"
-          >
+        <div class="param-line">
+          <span class="param-label">顶面高</span>
+          <div class="param-input-combo">
+            <input
+              id="pg-top"
+              v-model.number="polygonForm.top"
+              type="number"
+              step="any"
+              class="param-input"
+              placeholder="手动输入"
+            >
+            <select
+              class="param-preset-select"
+              aria-label="顶面高度快选"
+              @change="onTopPresetChange"
+            >
+              <option value="">快选</option>
+              <option
+                v-for="h in heightPresetOptions"
+                :key="`top-${h}`"
+                :value="h"
+              >
+                {{ h }}
+              </option>
+            </select>
+          </div>
         </div>
+      </div>
 
-        <!-- 网格设置 -->
-        <div class="form-row">
-          <label class="form-label" for="pg-level">层级</label>
-          <input
+      <div class="form-group">
+        <div class="group-title">网格参数</div>
+        <div class="param-line">
+          <span class="param-label">层级</span>
+          <select
             id="pg-level"
             v-model.number="polygonForm.level"
-            type="number"
-            step="1"
-            min="0"
-            class="form-input"
-            placeholder="网格层级"
+            class="param-select"
           >
+            <option
+              v-for="lv in gridLevelOptions"
+              :key="`pg-level-${lv}`"
+              :value="lv"
+            >
+              层级 {{ lv }}
+            </option>
+          </select>
         </div>
-
-        <div class="form-row checkbox-row">
+        <div class="param-line param-line-checkbox">
           <label class="checkbox-label">
             <input
-              type="checkbox"
               v-model="polygonForm.aggregate"
+              type="checkbox"
               class="checkbox-input"
             >
             <span class="checkbox-text">开启聚合</span>
           </label>
         </div>
-
-        <div v-if="polygonForm.aggregate" class="form-row">
-          <label class="form-label" for="pg-minLevel">最小层级</label>
-          <input
+        <div v-if="polygonForm.aggregate" class="param-line">
+          <span class="param-label">最小层级</span>
+          <select
             id="pg-minLevel"
             v-model.number="polygonForm.minLevel"
-            type="number"
-            step="1"
-            min="0"
-            class="form-input"
-            placeholder="聚合最小层级"
+            class="param-select"
           >
-        </div>
-
-        <div class="form-actions-stack">
-          <div class="form-actions form-actions-primary">
-            <button
-              type="submit"
-              class="btn-primary btn-primary-block"
-              :disabled="polygonLoading || !canSubmit"
+            <option
+              v-for="lv in polygonMinLevelOptions"
+              :key="`pg-min-${lv}`"
+              :value="lv"
             >
-              <Loader2 v-if="polygonLoading" :size="13" class="spin" />
-              <Search v-else :size="13" />
-              {{ polygonLoading ? '计算中...' : '开始计算' }}
-            </button>
-          </div>
-          <div class="form-actions form-actions-clear-grid">
-            <button
-              type="button"
-              class="btn-clear-generated-grid"
-              @click="clearGrids"
-              :disabled="!polygonResult"
-            >
-              <Trash2 :size="14" />
-              清除已生成格网
-            </button>
-          </div>
-        </div>
-      </form>
-
-      <div v-if="polygonError" class="error">{{ polygonError }}</div>
-
-      <!-- 查询结果统计 -->
-      <div v-if="queryStats" class="result-stats">
-        <div class="stat-card">
-          <div class="stat-value">{{ queryStats.total }}</div>
-          <div class="stat-label">网格数量</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" :class="{ 'success': queryStats.status === 'success', 'error': queryStats.status !== 'success' }">
-            {{ queryStats.status }}
-          </div>
-          <div class="stat-label">查询状态</div>
-        </div>
-        <div v-if="queryStats.aggregated" class="stat-card">
-          <div class="stat-value aggregated">已聚合</div>
-          <div class="stat-label">聚合状态</div>
+              层级 {{ lv }}
+            </option>
+          </select>
         </div>
       </div>
-    </template>
+
+      <div class="btn-row">
+        <button
+          type="button"
+          class="btn-query"
+          :disabled="polygonLoading || !canSubmit"
+          @click="submitPolygonGrid"
+        >
+          <Loader2 v-if="polygonLoading" :size="16" class="spin" />
+          <span>{{ polygonLoading ? '计算中...' : '计算' }}</span>
+        </button>
+        <button
+          type="button"
+          class="btn-clear"
+          :disabled="!polygonResult"
+          @click="clearGrids"
+        >
+          <span>清除网格</span>
+        </button>
+      </div>
+
+      <div v-if="polygonError" class="error-box">{{ polygonError }}</div>
+
+      <div v-if="queryStats" class="result-box">
+        <div class="result-row">
+          <span class="result-label">网格数量</span>
+          <span class="result-num">{{ queryStats.total }}</span>
+        </div>
+        <div class="result-row">
+          <span class="result-label">状态</span>
+          <span
+            class="result-status"
+            :class="{ success: queryStats.status === 'success' }"
+          >
+            {{ queryStats.status === 'success' ? '成功' : queryStats.status }}
+          </span>
+        </div>
+        <div v-if="queryStats.aggregated" class="result-row">
+          <span class="result-label">聚合</span>
+          <span class="result-status success">已聚合</span>
+        </div>
+      </div>
+    </div>
 
     <!-- ==================== 倾斜摄影多源聚合网格查询 ==================== -->
-    <template v-if="functionName === '倾斜摄影多源聚合网格查询'">
-      <div class="tip">
-        <Search :size="14" />
-        <span>查询倾斜摄影聚合网格数据，返回指定层级范围内的聚合网格信息</span>
-      </div>
-
-      <form class="form" @submit.prevent="submitOsgbAggGridQuery">
-        <div class="form-row">
-          <label class="form-label" for="oag-level">
-            <span class="required">*</span>网格层级
-          </label>
-          <input
+    <div v-if="functionName === '倾斜摄影多源聚合网格查询'" class="osgb-agg-query">
+      <div class="form-group">
+        <div class="group-title">查询参数</div>
+        <div class="param-line">
+          <span class="param-label">层级</span>
+          <select
             id="oag-level"
             v-model.number="osgbAggGridForm.level"
-            type="number"
-            step="1"
-            min="0"
-            max="21"
-            class="form-input"
-            placeholder="请输入网格层级 (0-21)"
-            required
+            class="param-select"
           >
+            <option
+              v-for="lv in gridLevelOptions"
+              :key="`level-${lv}`"
+              :value="lv"
+            >
+              层级 {{ lv }}
+            </option>
+          </select>
         </div>
-
-        <div class="form-row">
-          <label class="form-label" for="oag-minLevel">最小层级</label>
-          <input
+        <div class="param-line">
+          <span class="param-label">最小层级</span>
+          <select
             id="oag-minLevel"
             v-model.number="osgbAggGridForm.minLevel"
-            type="number"
-            step="1"
-            min="0"
-            class="form-input"
-            placeholder="默认为0"
+            class="param-select"
           >
-        </div>
-
-        <div class="form-actions-stack">
-          <div class="form-actions form-actions-primary">
-            <button
-              type="submit"
-              class="btn-primary btn-primary-block"
-              :disabled="osgbAggLoading"
+            <option
+              v-for="lv in osgbAggMinLevelOptions"
+              :key="`min-${lv}`"
+              :value="lv"
             >
-              <Loader2 v-if="osgbAggLoading" :size="13" class="spin" />
-              <Search v-else :size="13" />
-              {{ osgbAggLoading ? '查询中...' : '开始查询' }}
-            </button>
-          </div>
-          <div class="form-actions form-actions-clear-grid">
-            <button
-              type="button"
-              class="btn-clear-generated-grid"
-              @click="clearOsgbAggGrids"
-              :disabled="!osgbAggResult"
-            >
-              <Trash2 :size="14" />
-              清除已生成网格
-            </button>
-          </div>
-        </div>
-      </form>
-
-      <div v-if="osgbAggError" class="error">{{ osgbAggError }}</div>
-
-      <!-- 查询结果统计 -->
-      <div v-if="osgbAggStats" class="result-stats-wrapper">
-        <div class="result-stats-row">
-          <div class="stat-card">
-            <div class="stat-value">{{ osgbAggStats.total }}</div>
-            <div class="stat-label">网格数量</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-value" :class="{ 'success': osgbAggStats.status === 'success', 'error': osgbAggStats.status !== 'success' }">
-              {{ osgbAggStats.status }}
-            </div>
-            <div class="stat-label">查询状态</div>
-          </div>
-        </div>
-        <div class="result-stats-row">
-          <div v-if="osgbAggStats.level !== undefined" class="stat-card">
-            <div class="stat-value">{{ osgbAggStats.level }}</div>
-            <div class="stat-label">网格层级</div>
-          </div>
-          <div v-if="osgbAggStats.minLevel !== undefined" class="stat-card">
-            <div class="stat-value">{{ osgbAggStats.minLevel }}</div>
-            <div class="stat-label">最小聚合层级</div>
-          </div>
+              层级 {{ lv }}
+            </option>
+          </select>
         </div>
       </div>
 
-      <!-- 无数据提示 -->
-      <div v-if="osgbAggResult?.data && osgbAggGridsData.length === 0" class="no-data">
-        <span>未查询到聚合网格数据</span>
+      <div class="btn-row">
+        <button
+          type="button"
+          class="btn-query"
+          :disabled="osgbAggLoading"
+          @click="submitOsgbAggGridQuery"
+        >
+          <Loader2 v-if="osgbAggLoading" :size="16" class="spin" />
+          <span>{{ osgbAggLoading ? '查询中...' : '查询' }}</span>
+        </button>
+        <button
+          type="button"
+          class="btn-clear"
+          :disabled="!osgbAggResult"
+          @click="clearOsgbAggGrids"
+        >
+          <span>清除网格</span>
+        </button>
       </div>
-    </template>
+
+      <div v-if="osgbAggError" class="error-box">{{ osgbAggError }}</div>
+
+      <div v-if="osgbAggStats" class="result-box">
+        <div class="result-row">
+          <span class="result-label">网格数量</span>
+          <span class="result-num">{{ osgbAggStats.total }}</span>
+        </div>
+        <div class="result-row">
+          <span class="result-label">状态</span>
+          <span
+            class="result-status"
+            :class="{ success: osgbAggStats.status === 'success' }"
+          >
+            {{ osgbAggStats.status === 'success' ? '成功' : osgbAggStats.status }}
+          </span>
+        </div>
+        <div v-if="osgbAggStats.level !== undefined" class="result-row">
+          <span class="result-label">网格层级</span>
+          <span class="result-num">{{ osgbAggStats.level }}</span>
+        </div>
+        <div v-if="osgbAggStats.minLevel !== undefined" class="result-row">
+          <span class="result-label">最小聚合层级</span>
+          <span class="result-num">{{ osgbAggStats.minLevel }}</span>
+        </div>
+      </div>
+
+      <div v-if="osgbAggResult?.data && osgbAggGridsData.length === 0" class="empty-box">
+        未查询到聚合网格数据
+      </div>
+    </div>
   </div>
 </template>
 
@@ -820,18 +921,18 @@ function clearGrids() {
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
-  background: rgba(59, 130, 246, 0.1);
-  border: 1px solid rgba(59, 130, 246, 0.2);
+  background: #eef6fc;
+  border: 1px solid #bfdbfe;
   border-radius: 6px;
-  color: #60a5fa;
+  color: #4a7eb0;
   font-size: 13px;
 }
 
 /* 顶点列表区域 */
 .points-section {
-  background: rgba(30, 41, 59, 0.4);
+  background: #f5f3f0;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid #ebe6df;
   padding: 10px 10px 10px 12px;
   overflow-x: hidden;
 }
@@ -842,10 +943,10 @@ function clearGrids() {
   gap: 8px;
   font-size: 13px;
   font-weight: 600;
-  color: #60a5fa;
+  color: #4a7eb0;
   margin-bottom: 10px;
   padding-bottom: 8px;
-  border-bottom: 1px solid rgba(96, 165, 250, 0.15);
+  border-bottom: 1px solid #e8e4df;
 }
 
 .points-count {
@@ -933,9 +1034,9 @@ function clearGrids() {
   height: 26px;
   padding: 0 8px;
   border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.3);
-  color: #e2e8f0;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #475569;
   font-size: 11px;
   outline: none;
   width: 100%;
@@ -943,7 +1044,8 @@ function clearGrids() {
 }
 
 .point-input-mini:focus {
-  border-color: rgba(59, 130, 246, 0.6);
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 2px rgba(91, 159, 212, 0.12);
 }
 
 .icon-btn-mini {
@@ -1001,17 +1103,18 @@ function clearGrids() {
   flex: 1;
   padding: 8px 10px;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.2);
-  color: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #334155;
   font-size: 13px;
   outline: none;
   transition: all 0.15s ease;
 }
 
 .form-input:focus {
-  border-color: #3b82f6;
-  background: rgba(99, 102, 241, 0.1);
+  border-color: #7db8e0;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.12);
 }
 
 .form-input::placeholder {
@@ -1033,12 +1136,12 @@ function clearGrids() {
   width: 16px;
   height: 16px;
   cursor: pointer;
-  accent-color: #3b82f6;
+  accent-color: #5b9fd4;
 }
 
 .checkbox-text {
   font-size: 13px;
-  color: #e2e8f0;
+  color: #475569;
 }
 
 .form-actions-stack {
@@ -1112,7 +1215,7 @@ function clearGrids() {
   padding: 8px 16px;
   border-radius: 6px;
   border: none;
-  background: linear-gradient(135deg, #3b82f6, #0ea5e9);
+  background: linear-gradient(135deg, #7db8e0, #5b9fd4);
   color: #fff;
   font-size: 13px;
   font-weight: 500;
@@ -1122,7 +1225,7 @@ function clearGrids() {
 
 .btn-primary:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+  box-shadow: 0 4px 12px rgba(91, 159, 212, 0.25);
 }
 
 .btn-primary:disabled {
@@ -1171,15 +1274,15 @@ function clearGrids() {
   flex: 1;
   padding: 12px 14px;
   border-radius: 8px;
-  background: rgba(30, 41, 59, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: #f5f3f0;
+  border: 1px solid #ebe6df;
   text-align: center;
 }
 
 .stat-value {
   font-size: 20px;
   font-weight: 700;
-  color: #60a5fa;
+  color: #4a7eb0;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1211,8 +1314,445 @@ function clearGrids() {
   padding: 30px;
   text-align: center;
   color: #64748b;
-  background: rgba(30, 41, 59, 0.5);
+  background: #f5f3f0;
   border-radius: 10px;
   border: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+/* 聚合类计算窗口 — 对齐 DEM 计算窗口样式 */
+.osgb-agg-query,
+.hybrid-grid-query {
+  padding: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.osgb-agg-query .form-group,
+.hybrid-grid-query .form-group {
+  margin-bottom: 12px;
+}
+
+.osgb-agg-query .group-title,
+.hybrid-grid-query .group-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 8px;
+}
+
+.osgb-agg-query .param-line,
+.hybrid-grid-query .param-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.osgb-agg-query .param-line:last-child,
+.hybrid-grid-query .param-line:last-child {
+  margin-bottom: 0;
+}
+
+.osgb-agg-query .param-label,
+.hybrid-grid-query .param-label {
+  width: 72px;
+  font-size: 14px;
+  color: #334155;
+  text-align: left;
+  flex-shrink: 0;
+}
+
+.osgb-agg-query .param-line input,
+.hybrid-grid-query .param-line input,
+.hybrid-grid-query .param-input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.osgb-agg-query .param-line input::placeholder,
+.hybrid-grid-query .param-line input::placeholder,
+.hybrid-grid-query .param-input::placeholder {
+  color: #94a3b8;
+}
+
+.osgb-agg-query .param-line input:focus,
+.hybrid-grid-query .param-line input:focus,
+.hybrid-grid-query .param-input:focus,
+.osgb-agg-query .param-select:focus,
+.hybrid-grid-query .param-select:focus {
+  outline: none;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
+}
+
+.osgb-agg-query .param-select,
+.hybrid-grid-query .param-select {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 14px;
+  box-sizing: border-box;
+  cursor: pointer;
+  appearance: auto;
+}
+
+.osgb-agg-query .btn-row,
+.hybrid-grid-query .btn-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.osgb-agg-query .btn-query,
+.hybrid-grid-query .btn-query {
+  flex: 1;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #7db8e0, #5b9fd4);
+  border: none;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.osgb-agg-query .btn-query:hover:not(:disabled),
+.hybrid-grid-query .btn-query:hover:not(:disabled) {
+  background: linear-gradient(135deg, #6aa8d4, #4a8fc4);
+}
+
+.osgb-agg-query .btn-query:disabled,
+.hybrid-grid-query .btn-query:disabled {
+  background: #e2e8f0;
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.osgb-agg-query .btn-clear,
+.hybrid-grid-query .btn-clear {
+  width: 88px;
+  white-space: nowrap;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.osgb-agg-query .btn-clear:hover:not(:disabled),
+.hybrid-grid-query .btn-clear:hover:not(:disabled) {
+  background: #f5f3f0;
+  border-color: #d4c9b8;
+}
+
+.osgb-agg-query .btn-clear:disabled,
+.hybrid-grid-query .btn-clear:disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+.osgb-agg-query .error-box,
+.hybrid-grid-query .error-box {
+  padding: 10px 12px;
+  border: 1px solid #fca5a5;
+  border-radius: 8px;
+  background: #fef2f2;
+  font-size: 14px;
+  color: #dc2626;
+  margin-bottom: 10px;
+}
+
+.osgb-agg-query .result-box,
+.hybrid-grid-query .result-box {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.osgb-agg-query .result-row,
+.hybrid-grid-query .result-row {
+  flex: 1 1 calc(50% - 4px);
+  min-width: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid #ebe6df;
+  border-radius: 8px;
+  background: #ffffff;
+  box-sizing: border-box;
+}
+
+.osgb-agg-query .result-label,
+.hybrid-grid-query .result-label {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.osgb-agg-query .result-num,
+.hybrid-grid-query .result-num {
+  font-size: 18px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.osgb-agg-query .result-status,
+.hybrid-grid-query .result-status {
+  font-size: 15px;
+  font-weight: 600;
+  color: #dc2626;
+}
+
+.osgb-agg-query .result-status.success,
+.hybrid-grid-query .result-status.success {
+  color: #059669;
+}
+
+.osgb-agg-query .empty-box,
+.hybrid-grid-query .empty-box {
+  padding: 16px;
+  text-align: center;
+  color: #64748b;
+  font-size: 14px;
+  border: 1px dashed #d4c9b8;
+  border-radius: 8px;
+  background: #faf8f4;
+}
+
+.osgb-agg-query .spin,
+.hybrid-grid-query .spin {
+  animation: spin 1s linear infinite;
+}
+
+/* 多粒度混合格网建模 — 顶点与提示 */
+.hybrid-grid-query .hint-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: #eef6fc;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  color: #2563eb;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.hybrid-grid-query .hint-box svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.hybrid-grid-query .group-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.hybrid-grid-query .group-title-row .group-title {
+  margin-bottom: 0;
+}
+
+.hybrid-grid-query .group-sub {
+  font-size: 13px;
+  color: #64748b;
+}
+
+.hybrid-grid-query .btn-link-clear {
+  margin-left: auto;
+  padding: 4px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #64748b;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.hybrid-grid-query .btn-link-clear:hover:not(:disabled) {
+  background: #f5f3f0;
+  color: #334155;
+}
+
+.hybrid-grid-query .btn-link-clear:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.hybrid-grid-query .empty-hint {
+  padding: 14px;
+  text-align: center;
+  color: #64748b;
+  font-size: 14px;
+  background: #faf8f4;
+  border: 1px dashed #d4c9b8;
+  border-radius: 8px;
+}
+
+.hybrid-grid-query .points-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.hybrid-grid-query .point-card {
+  padding: 10px;
+  background: #ffffff;
+  border: 1px solid #ebe6df;
+  border-radius: 8px;
+}
+
+.hybrid-grid-query .point-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.hybrid-grid-query .point-index-badge {
+  min-width: 28px;
+  height: 24px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #eef6fc;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #5b9fd4;
+}
+
+.hybrid-grid-query .btn-point-delete {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: #fef2f2;
+  color: #dc2626;
+  cursor: pointer;
+}
+
+.hybrid-grid-query .btn-point-delete:hover {
+  background: #fee2e2;
+}
+
+.hybrid-grid-query .point-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hybrid-grid-query .field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hybrid-grid-query .field-label {
+  flex: 0 0 52px;
+  font-size: 13px;
+  color: #64748b;
+}
+
+.hybrid-grid-query .field-input {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.hybrid-grid-query .field-input:focus {
+  outline: none;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 2px rgba(91, 159, 212, 0.12);
+}
+
+.hybrid-grid-query .param-input-combo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hybrid-grid-query .param-input-combo .param-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.hybrid-grid-query .param-preset-select {
+  flex: 0 0 64px;
+  height: 34px;
+  padding: 0 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f5f3f0;
+  color: #475569;
+  font-size: 13px;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.hybrid-grid-query .param-preset-select:focus {
+  outline: none;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
+}
+
+.hybrid-grid-query .param-line-checkbox {
+  margin-bottom: 4px;
+}
+
+.hybrid-grid-query .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #334155;
+}
+
+.hybrid-grid-query .checkbox-input {
+  width: 16px;
+  height: 16px;
+  accent-color: #5b9fd4;
+  cursor: pointer;
 }
 </style>

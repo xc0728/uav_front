@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { reactive, ref, computed } from 'vue'
 import { Loader2, Trash2, Search, MapPin, Navigation, Database, X, Check } from 'lucide-vue-next'
 
@@ -46,6 +46,33 @@ const storeSuccess = ref(false)
 
 // 层级选项
 const levelOptions = [9]
+
+/** 高度快选：10–50 整十 */
+const heightPresetOptions = Array.from({ length: 5 }, (_, i) => (i + 1) * 10)
+
+function onHeightPresetChange(event, pointIndex) {
+  const val = event.target.value
+  if (val !== '') {
+    pathPoints.value[pointIndex].height = Number(val)
+  }
+  event.target.selectedIndex = 0
+}
+
+function onConflictHeightPresetChange(event, pointIndex) {
+  const val = event.target.value
+  if (val !== '') {
+    conflictPoints.value[pointIndex].height = Number(val)
+  }
+  event.target.selectedIndex = 0
+}
+
+function onConflictFirstHeightPresetChange(event, pointIndex) {
+  const val = event.target.value
+  if (val !== '') {
+    conflictFirstPoints.value[pointIndex].height = Number(val)
+  }
+  event.target.selectedIndex = 0
+}
 
 // 标准化点数据
 function normalizePoint(p) {
@@ -716,205 +743,202 @@ async function submitAstarPath() {
 </script>
 
 <template>
-  <div class="calc-content">
+  <div class="path-planning">
+    <!-- A星航路规划 -->
     <template v-if="functionName === 'A星航路规划'">
-      <div class="tip">
-        <MapPin :size="14" />
-        <span>点击地图添加航路点（至少2个点：起点 + 终点，可添加多个途经点）</span>
-      </div>
+      <!-- 航路点列表 -->
+      <div class="form-group">
+        <div class="group-title-row">
+          <span class="group-title">航路点列表</span>
+          <span class="group-sub">({{ pathPoints.length }}个)</span>
+          <button
+            type="button"
+            class="btn-link-clear"
+            @click="clearPoints"
+            :disabled="pathPoints.length === 0"
+            title="清空所有点"
+          >
+            清空
+          </button>
+        </div>
 
-      <form class="form" @submit.prevent="submitAstarPath">
-        <!-- 航路点列表 -->
-        <div class="points-section">
-          <div class="points-title">
-            <span>航路点列表</span>
-            <span class="points-count">({{ pathPoints.length }}个)</span>
-            <button type="button" class="icon-btn-mini clear-btn" @click="clearPoints" :disabled="pathPoints.length === 0" title="清空所有点">
-              <Trash2 :size="11" />
-            </button>
-          </div>
+        <div v-if="pathPoints.length === 0" class="empty-hint">
+          暂无航路点，请点击地图添加（至少2个点）
+        </div>
 
-          <div v-if="pathPoints.length === 0" class="empty-hint">
-            暂无航路点，请点击地图添加（至少2个点）
-          </div>
-
-          <div v-else class="points-list">
-            <div v-for="(point, idx) in pathPoints" :key="idx" class="point-card">
-              <div class="point-card-header">
-                <div class="point-index-badge" :class="{
-                  'badge-start': idx === 0,
-                  'badge-end': idx === pathPoints.length - 1 && pathPoints.length > 1,
-                  'badge-waypoint': idx !== 0 && idx !== pathPoints.length - 1
-                }">
-                  {{ idx === 0 ? '起点' : idx === pathPoints.length - 1 ? '终点' : `途经${idx}` }}
-                </div>
-                <button type="button" class="icon-btn-mini" @click="removePoint(idx)" title="删除此点">
-                  <Trash2 :size="14" />
-                </button>
+        <div v-else class="points-list">
+          <div v-for="(point, idx) in pathPoints" :key="idx" class="point-card">
+            <div class="point-card-header">
+              <span class="point-index-badge" :class="{
+                'badge-start': idx === 0,
+                'badge-end': idx === pathPoints.length - 1 && pathPoints.length > 1,
+                'badge-waypoint': idx !== 0 && idx !== pathPoints.length - 1
+              }">
+                {{ idx === 0 ? '起点' : idx === pathPoints.length - 1 ? '终点' : `途经${idx}` }}
+              </span>
+              <button type="button" class="btn-point-delete" @click="removePoint(idx)" title="删除此点">
+                <Trash2 :size="14" />
+              </button>
+            </div>
+            <div class="point-fields">
+              <div class="field">
+                <span class="field-label">经度</span>
+                <input
+                  v-model.number="pathPoints[idx].lon"
+                  class="field-input"
+                  type="number"
+                  step="any"
+                  placeholder="经度"
+                >
               </div>
-              <div class="point-fields">
-                <div class="field">
-                  <label class="field-label">经度</label>
-                  <input
-                    v-model.number="pathPoints[idx].lon"
-                    class="point-input-mini"
-                    type="number"
-                    step="any"
-                    placeholder="经度"
-                  >
-                </div>
-                <div class="field">
-                  <label class="field-label">纬度</label>
-                  <input
-                    v-model.number="pathPoints[idx].lat"
-                    class="point-input-mini"
-                    type="number"
-                    step="any"
-                    placeholder="纬度"
-                  >
-                </div>
-                <div class="field">
-                  <label class="field-label">高度(m)</label>
+              <div class="field">
+                <span class="field-label">纬度</span>
+                <input
+                  v-model.number="pathPoints[idx].lat"
+                  class="field-input"
+                  type="number"
+                  step="any"
+                  placeholder="纬度"
+                >
+              </div>
+              <div class="field">
+                <span class="field-label">高度(m)</span>
+                <div class="field-input-group">
                   <input
                     v-model.number="pathPoints[idx].height"
-                    class="point-input-mini"
+                    class="field-input"
                     type="number"
                     step="any"
-                    placeholder="高度"
+                    placeholder="手动输入"
                   >
+                  <select
+                    class="field-preset-select"
+                    aria-label="高度快选"
+                    @change="(e) => onHeightPresetChange(e, idx)"
+                  >
+                    <option value="">快选</option>
+                    <option
+                      v-for="h in heightPresetOptions"
+                      :key="`astar-${idx}-${h}`"
+                      :value="h"
+                    >
+                      {{ h }}
+                    </option>
+                  </select>
                 </div>
               </div>
             </div>
           </div>
         </div>
+      </div>
 
-        <!-- 基础参数 -->
-        <div class="form-row">
-          <label class="form-label" for="startTime">开始时间</label>
+      <!-- 基础参数 -->
+      <div class="form-group">
+        <div class="group-title">基础参数</div>
+        <div class="param-line">
+          <span class="param-label">开始时间</span>
           <input
-            id="startTime"
             v-model.number="astarForm.startTime"
             type="number"
             step="1"
-            class="form-input"
+            class="param-input"
             placeholder="北京时间秒级时间戳"
           >
         </div>
-
-        <div class="form-row">
-          <label class="form-label" for="workHeight">工作面高度</label>
+        <div class="param-line">
+          <span class="param-label">工作高度</span>
           <input
-            id="workHeight"
             v-model.number="astarForm.workHeight"
             type="number"
             step="any"
-            class="form-input"
+            class="param-input"
             placeholder="无人机作业基准高度"
           >
         </div>
-
-        <!-- 网格设置 -->
-        <div class="form-row">
-          <label class="form-label" for="level">网格层级</label>
-          <select
-            id="level"
-            v-model.number="astarForm.level"
-            class="form-select"
-            required
-          >
-            <option v-for="lvl in levelOptions" :key="lvl" :value="lvl">
-              第 {{ lvl }} 级
-            </option>
+        <div class="param-line">
+          <span class="param-label">网格层级</span>
+          <select v-model.number="astarForm.level" class="param-select">
+            <option v-for="lvl in levelOptions" :key="lvl" :value="lvl">第 {{ lvl }} 级</option>
           </select>
-          <span class="form-hint">当前仅支持 9 级网格</span>
         </div>
-
-        <div class="form-row">
-          <label class="form-label" for="planeRadius">无人机半径</label>
+        <div class="param-line">
+          <span class="param-label">无人机半径</span>
           <input
-            id="planeRadius"
             v-model.number="astarForm.planeRadius"
             type="number"
             step="0.01"
-            class="form-input"
-            placeholder="无人机机身半径(米)"
+            class="param-input"
+            placeholder="机身半径(米)"
           >
         </div>
-
-        <div class="form-row">
-          <label class="form-label" for="speed">飞行速度</label>
+        <div class="param-line">
+          <span class="param-label">飞行速度</span>
           <input
-            id="speed"
             v-model.number="astarForm.speed"
             type="number"
             step="0.1"
-            class="form-input"
+            class="param-input"
             placeholder="飞行速度(米/秒)"
           >
         </div>
+      </div>
 
-        <!-- 约束条件 -->
-        <div class="constraint-section">
-          <div class="constraint-title">约束条件</div>
-          <div class="form-row">
-            <label class="checkbox-label">
-              <input
-                type="checkbox"
-                v-model="astarForm.useGdConstraint"
-                class="checkbox-input"
-              >
-              <span class="checkbox-text">启用实景三维障碍校验</span>
-            </label>
-          </div>
-        </div>
-
-        <div class="form-actions-stack">
-          <div class="form-actions form-actions-primary">
-            <button
-              type="submit"
-              class="btn-primary btn-primary-block"
-              :disabled="astarLoading || !canSubmit"
+      <!-- 约束条件 -->
+      <div class="form-group">
+        <div class="group-title">约束条件</div>
+        <div class="param-line-checkbox">
+          <label class="checkbox-label">
+            <input
+              type="checkbox"
+              v-model="astarForm.useGdConstraint"
+              class="checkbox-input"
             >
-              <Loader2 v-if="astarLoading" :size="13" class="spin" />
-              <Navigation v-else :size="13" />
-              {{ astarLoading ? '规划中...' : '开始路径规划' }}
-            </button>
-          </div>
-          <div class="form-actions form-actions-clear-grid">
-            <button
-              type="button"
-              class="btn-clear-generated-grid"
-              @click="clearPath"
-              :disabled="!astarResult"
-            >
-              <Trash2 :size="14" />
-              清除已生成路径
-            </button>
-          </div>
+            <span class="checkbox-text">启用实景三维障碍校验</span>
+          </label>
         </div>
-      </form>
+      </div>
 
-      <div v-if="astarError" class="error">{{ astarError }}</div>
+      <!-- 操作按钮 -->
+      <div class="btn-row">
+        <button
+          type="button"
+          class="btn-query"
+          @click="submitAstarPath"
+          :disabled="astarLoading || !canSubmit"
+        >
+          <Loader2 v-if="astarLoading" :size="16" class="spin" />
+          <Navigation v-else :size="16" />
+          {{ astarLoading ? '规划中...' : '开始路径规划' }}
+        </button>
+        <button
+          type="button"
+          class="btn-clear"
+          @click="clearPath"
+          :disabled="!astarResult"
+        >
+          <span>清除网格</span>
+        </button>
+      </div>
 
-      <!-- 查询结果统计 -->
-      <div v-if="pathStats" class="result-stats">
-        <div class="stat-card">
-          <div class="stat-value">{{ pathStats.totalPoints }}</div>
-          <div class="stat-label">路径网格数</div>
+      <div v-if="astarError" class="error-box">{{ astarError }}</div>
+
+      <!-- 查询结果 -->
+      <div v-if="pathStats" class="result-box">
+        <div class="result-row">
+          <span class="result-label">路径网格数</span>
+          <span class="result-num">{{ pathStats.totalPoints }}</span>
         </div>
-        <div class="stat-card">
-          <div class="stat-value success">{{ pathStats.status }}</div>
-          <div class="stat-label">规划状态</div>
+        <div class="result-row">
+          <span class="result-label">状态</span>
+          <span class="result-status" :class="pathStats.status === 'success' ? 'success' : ''">
+            {{ pathStats.status === 'success' ? '成功' : pathStats.status }}
+          </span>
         </div>
       </div>
 
       <!-- 入库按钮 -->
       <div v-if="astarResult && astarResult.path && astarResult.path.length > 0" class="store-section">
-        <button
-          type="button"
-          class="btn-store"
-          @click="openStoreModal"
-        >
+        <button type="button" class="btn-store" @click="openStoreModal">
           <Database :size="14" />
           航路入库
         </button>
@@ -986,247 +1010,231 @@ async function submitAstarPath() {
 
     <!-- 路径冲突检测（所有冲突） -->
     <template v-if="functionName === '路径冲突检测（所有冲突）'">
-      <div class="tip">
-        <MapPin :size="14" />
-        <span>点击地图添加路径点（至少2个点：起点 + 终点，可添加多个途经点）</span>
-      </div>
+      <!-- 路径点列表 -->
+      <div class="form-group">
+        <div class="group-title-row">
+          <span class="group-title">路径点列表</span>
+          <span class="group-sub">({{ conflictPoints.length }}个)</span>
+          <button
+            type="button"
+            class="btn-link-clear"
+            @click="clearConflictPoints"
+            :disabled="conflictPoints.length === 0"
+            title="清空所有点"
+          >
+            清空
+          </button>
+        </div>
 
-      <form class="form" @submit.prevent="submitConflictCheck">
-        <!-- 路径点列表 -->
-        <div class="points-section">
-          <div class="points-title">
-            <span>路径点列表</span>
-            <span class="points-count">({{ conflictPoints.length }}个)</span>
-            <button type="button" class="icon-btn-mini clear-btn" @click="clearConflictPoints" :disabled="conflictPoints.length === 0" title="清空所有点">
-              <Trash2 :size="11" />
-            </button>
-          </div>
+        <div v-if="conflictPoints.length === 0" class="empty-hint">
+          暂无路径点，请点击地图添加（至少2个点）
+        </div>
 
-          <div v-if="conflictPoints.length === 0" class="empty-hint">
-            暂无路径点，请点击地图添加（至少2个点）
-          </div>
-
-          <div v-else class="points-list">
-            <div v-for="(point, idx) in conflictPoints" :key="idx" class="point-card">
-              <div class="point-card-header">
-                <div class="point-index-badge" :class="{
-                  'badge-start': idx === 0,
-                  'badge-end': idx === conflictPoints.length - 1 && conflictPoints.length > 1,
-                  'badge-waypoint': idx !== 0 && idx !== conflictPoints.length - 1
-                }">
-                  {{ idx === 0 ? '起点' : idx === conflictPoints.length - 1 ? '终点' : `途经${idx}` }}
-                </div>
-                <button type="button" class="icon-btn-mini" @click="removeConflictPoint(idx)" title="删除此点">
-                  <Trash2 :size="14" />
-                </button>
+        <div v-else class="points-list">
+          <div v-for="(point, idx) in conflictPoints" :key="idx" class="point-card">
+            <div class="point-card-header">
+              <span class="point-index-badge" :class="{
+                'badge-start': idx === 0,
+                'badge-end': idx === conflictPoints.length - 1 && conflictPoints.length > 1,
+                'badge-waypoint': idx !== 0 && idx !== conflictPoints.length - 1
+              }">
+                {{ idx === 0 ? '起点' : idx === conflictPoints.length - 1 ? '终点' : `途经${idx}` }}
+              </span>
+              <button type="button" class="btn-point-delete" @click="removeConflictPoint(idx)" title="删除此点">
+                <Trash2 :size="14" />
+              </button>
+            </div>
+            <div class="point-fields">
+              <div class="field">
+                <span class="field-label">经度</span>
+                <input
+                  v-model.number="conflictPoints[idx].lon"
+                  class="field-input"
+                  type="number"
+                  step="any"
+                  placeholder="经度"
+                >
               </div>
-              <div class="point-fields">
-                <div class="field">
-                  <label class="field-label">经度</label>
-                  <input
-                    v-model.number="conflictPoints[idx].lon"
-                    class="point-input-mini"
-                    type="number"
-                    step="any"
-                    placeholder="经度"
-                  >
-                </div>
-                <div class="field">
-                  <label class="field-label">纬度</label>
-                  <input
-                    v-model.number="conflictPoints[idx].lat"
-                    class="point-input-mini"
-                    type="number"
-                    step="any"
-                    placeholder="纬度"
-                  >
-                </div>
-                <div class="field">
-                  <label class="field-label">高度(m)</label>
+              <div class="field">
+                <span class="field-label">纬度</span>
+                <input
+                  v-model.number="conflictPoints[idx].lat"
+                  class="field-input"
+                  type="number"
+                  step="any"
+                  placeholder="纬度"
+                >
+              </div>
+              <div class="field">
+                <span class="field-label">高度(m)</span>
+                <div class="field-input-group">
                   <input
                     v-model.number="conflictPoints[idx].height"
-                    class="point-input-mini"
+                    class="field-input"
                     type="number"
                     step="any"
-                    placeholder="高度"
+                    placeholder="手动输入"
                   >
+                  <select
+                    class="field-preset-select"
+                    aria-label="高度快选"
+                    @change="(e) => onConflictHeightPresetChange(e, idx)"
+                  >
+                    <option value="">快选</option>
+                    <option
+                      v-for="h in heightPresetOptions"
+                      :key="`conflict-${idx}-${h}`"
+                      :value="h"
+                    >
+                      {{ h }}
+                    </option>
+                  </select>
                 </div>
               </div>
             </div>
           </div>
         </div>
+      </div>
 
-        <!-- 基础参数 -->
-        <div class="form-row">
-          <label class="form-label" for="conflictStartTime">开始时间</label>
+      <!-- 基础参数 -->
+      <div class="form-group">
+        <div class="group-title">基础参数</div>
+        <div class="param-line">
+          <span class="param-label">开始时间</span>
           <input
-            id="conflictStartTime"
             v-model.number="conflictForm.startTime"
             type="number"
             step="1"
-            class="form-input"
+            class="param-input"
             placeholder="北京时间秒级时间戳"
           >
         </div>
-
-        <div class="form-row">
-          <label class="form-label" for="conflictWorkHeight">工作面高度</label>
+        <div class="param-line">
+          <span class="param-label">工作高度</span>
           <input
-            id="conflictWorkHeight"
             v-model.number="conflictForm.workHeight"
             type="number"
             step="any"
-            class="form-input"
+            class="param-input"
             placeholder="无人机作业基准高度"
           >
         </div>
-
-        <!-- 网格设置 -->
-        <div class="form-row">
-          <label class="form-label" for="conflictLevel">网格层级</label>
-          <select
-            id="conflictLevel"
-            v-model.number="conflictForm.level"
-            class="form-select"
-            required
-          >
+        <div class="param-line">
+          <span class="param-label">网格层级</span>
+          <select v-model.number="conflictForm.level" class="param-select">
             <option :value="9">第 9 级</option>
           </select>
-          <span class="form-hint">当前仅支持 9 级网格</span>
         </div>
-
-        <div class="form-row">
-          <label class="form-label" for="conflictPlaneRadius">无人机半径</label>
+        <div class="param-line">
+          <span class="param-label">无人机半径</span>
           <input
-            id="conflictPlaneRadius"
             v-model.number="conflictForm.planeRadius"
             type="number"
             step="0.01"
-            class="form-input"
-            placeholder="无人机机身半径(米)"
+            class="param-input"
+            placeholder="机身半径(米)"
           >
         </div>
-
-        <div class="form-row">
-          <label class="form-label" for="conflictSpeed">飞行速度</label>
+        <div class="param-line">
+          <span class="param-label">飞行速度</span>
           <input
-            id="conflictSpeed"
             v-model.number="conflictForm.speed"
             type="number"
             step="0.1"
-            class="form-input"
+            class="param-input"
             placeholder="飞行速度(米/秒)"
           >
         </div>
+      </div>
 
-        <!-- 约束条件 -->
-        <div class="constraint-section">
-          <div class="constraint-title">约束条件</div>
-          <div class="form-row">
-            <label class="checkbox-label">
-              <input
-                type="checkbox"
-                v-model="conflictForm.useGdConstraint"
-                class="checkbox-input"
-              >
-              <span class="checkbox-text">启用实景三维障碍校验</span>
-            </label>
-          </div>
-        </div>
-
-        <!-- 提交按钮 -->
-        <div class="form-actions-stack">
-          <div class="form-actions form-actions-primary">
-            <button
-              type="submit"
-              class="btn-primary btn-primary-block"
-              :disabled="conflictLoading || !canSubmitConflict"
+      <!-- 约束条件 -->
+      <div class="form-group">
+        <div class="group-title">约束条件</div>
+        <div class="param-line-checkbox">
+          <label class="checkbox-label">
+            <input
+              type="checkbox"
+              v-model="conflictForm.useGdConstraint"
+              class="checkbox-input"
             >
-              <Loader2 v-if="conflictLoading" :size="13" class="spin" />
-              <Search v-else :size="13" />
-              {{ conflictLoading ? '检测中...' : '开始冲突检测' }}
-            </button>
-          </div>
-          <div class="form-actions form-actions-clear-grid">
-            <button
-              type="button"
-              class="btn-clear-generated-grid"
-              @click="clearConflictResult"
-              :disabled="!conflictResult"
-            >
-              <Trash2 :size="14" />
-              清除检测结果
-            </button>
-          </div>
+            <span class="checkbox-text">启用实景三维障碍校验</span>
+          </label>
         </div>
-      </form>
+      </div>
 
-      <div v-if="conflictError" class="error">{{ conflictError }}</div>
+      <!-- 操作按钮 -->
+      <div class="btn-row">
+        <button
+          type="button"
+          class="btn-query"
+          @click="submitConflictCheck"
+          :disabled="conflictLoading || !canSubmitConflict"
+        >
+          <Loader2 v-if="conflictLoading" :size="16" class="spin" />
+          <Search v-else :size="16" />
+          {{ conflictLoading ? '检测中...' : '开始冲突检测' }}
+        </button>
+        <button
+          type="button"
+          class="btn-clear"
+          @click="clearConflictResult"
+          :disabled="!conflictResult"
+        >
+          <span>清除网格</span>
+        </button>
+      </div>
 
-      <!-- 检测结果 -->
-      <div v-if="conflictResult">
-        <!-- 无冲突结果 -->
-        <div v-if="conflictResult.status === 'no_conflict'" class="result-success">
-          <div class="result-icon">
-            <Check :size="24" />
-          </div>
-          <div class="result-title">检测通过</div>
-          <div class="result-message">{{ conflictResult.reason }}</div>
+      <div v-if="conflictError" class="error-box">{{ conflictError }}</div>
+
+      <!-- 查询结果 -->
+      <div v-if="conflictStats" class="result-box">
+        <div class="result-row">
+          <span class="result-label">冲突网格数</span>
+          <span class="result-num">{{ conflictStats.conflictCount }}</span>
         </div>
+        <div class="result-row">
+          <span class="result-label">状态</span>
+          <span class="result-status" :class="conflictResult?.status === 'no_conflict' ? 'success' : ''">
+            {{ conflictResult?.status === 'no_conflict' ? '成功' : '冲突' }}
+          </span>
+        </div>
+      </div>
 
-        <!-- 有冲突结果 -->
-        <div v-if="conflictResult.status === 'has_conflict'">
-          <div class="conflict-warning">
-            <div class="conflict-warning-icon">!</div>
-            <div class="conflict-warning-text">
-              检测到 {{ conflictStats?.conflictCount || 0 }} 个冲突网格
-            </div>
+      <!-- 无冲突提示 -->
+      <div v-if="conflictResult?.status === 'no_conflict'" class="empty-box">
+        检测通过，无冲突
+      </div>
+
+      <!-- 冲突列表 -->
+      <div v-if="conflictResult?.status === 'has_conflict' && conflictResult.grids && conflictResult.grids.length > 0" class="conflict-list">
+        <div class="conflict-list-title">冲突详情</div>
+        <div v-for="(grid, idx) in conflictResult.grids" :key="idx" class="conflict-item">
+          <div class="conflict-item-header">
+            <span class="conflict-index">#{{ idx + 1 }}</span>
+            <span class="conflict-type">{{ getConflictTypeName(grid.code) }}</span>
           </div>
-
-          <!-- 冲突统计 -->
-          <div v-if="conflictStats" class="result-stats">
-            <div class="stat-card">
-              <div class="stat-value error">{{ conflictStats.conflictCount }}</div>
-              <div class="stat-label">冲突网格数</div>
+          <div class="conflict-item-details">
+            <div class="conflict-detail">
+              <span class="detail-label">编码:</span>
+              <span class="detail-value">{{ grid.code || 'N/A' }}</span>
             </div>
-            <div class="stat-card">
-              <div class="stat-value error">冲突</div>
-              <div class="stat-label">检测状态</div>
+            <div class="conflict-detail">
+              <span class="detail-label">中心:</span>
+              <span class="detail-value">
+                {{ grid.center ? `${grid.center[0]?.toFixed(6)}, ${grid.center[1]?.toFixed(6)}, ${grid.center[2]?.toFixed(1)}` : 'N/A' }}
+              </span>
             </div>
-          </div>
-
-          <!-- 冲突列表 -->
-          <div v-if="conflictResult.grids && conflictResult.grids.length > 0" class="conflict-list">
-            <div class="conflict-list-title">冲突详情</div>
-            <div v-for="(grid, idx) in conflictResult.grids" :key="idx" class="conflict-item">
-              <div class="conflict-item-header">
-                <span class="conflict-index">#{{ idx + 1 }}</span>
-                <span class="conflict-type">{{ getConflictTypeName(grid.code) }}</span>
-              </div>
-              <div class="conflict-item-details">
-                <div class="conflict-detail">
-                  <span class="detail-label">编码:</span>
-                  <span class="detail-value">{{ grid.code || 'N/A' }}</span>
-                </div>
-                <div class="conflict-detail">
-                  <span class="detail-label">中心:</span>
-                  <span class="detail-value">
-                    {{ grid.center ? `${grid.center[0]?.toFixed(6)}, ${grid.center[1]?.toFixed(6)}, ${grid.center[2]?.toFixed(1)}` : 'N/A' }}
-                  </span>
-                </div>
-                <div class="conflict-detail">
-                  <span class="detail-label">范围:</span>
-                  <span class="detail-value">
-                    经度 {{ grid.minlon?.toFixed(6) }} ~ {{ grid.maxlon?.toFixed(6) }}<br>
-                    纬度 {{ grid.minlat?.toFixed(6) }} ~ {{ grid.maxlat?.toFixed(6) }}<br>
-                    高度 {{ grid.bottom?.toFixed(1) }} ~ {{ grid.top?.toFixed(1) }}m
-                  </span>
-                </div>
-                <div v-if="grid.reason" class="conflict-reason">
-                  <span class="detail-label">原因:</span>
-                  <span class="detail-value reason-text">{{ grid.reason }}</span>
-                </div>
-              </div>
+            <div class="conflict-detail">
+              <span class="detail-label">范围:</span>
+              <span class="detail-value">
+                经度 {{ grid.minlon?.toFixed(6) }} ~ {{ grid.maxlon?.toFixed(6) }}<br>
+                纬度 {{ grid.minlat?.toFixed(6) }} ~ {{ grid.maxlat?.toFixed(6) }}<br>
+                高度 {{ grid.bottom?.toFixed(1) }} ~ {{ grid.top?.toFixed(1) }}m
+              </span>
+            </div>
+            <div v-if="grid.reason" class="conflict-reason">
+              <span class="detail-label">原因:</span>
+              <span class="detail-value reason-text">{{ grid.reason }}</span>
             </div>
           </div>
         </div>
@@ -1235,182 +1243,181 @@ async function submitAstarPath() {
 
     <!-- 路径冲突检测（首个冲突） -->
     <template v-if="functionName === '路径冲突检测（首个冲突）'">
-      <div class="tip">
-        <MapPin :size="14" />
-        <span>点击地图添加路径点（至少2个点：起点 + 终点，可添加多个途经点）</span>
-      </div>
+      <!-- 路径点列表 -->
+      <div class="form-group">
+        <div class="group-title-row">
+          <span class="group-title">路径点列表</span>
+          <span class="group-sub">({{ conflictFirstPoints.length }}个)</span>
+          <button
+            type="button"
+            class="btn-link-clear"
+            @click="clearConflictFirstPoints"
+            :disabled="conflictFirstPoints.length === 0"
+            title="清空所有点"
+          >
+            清空
+          </button>
+        </div>
 
-      <form class="form" @submit.prevent="submitConflictFirstCheck">
-        <!-- 路径点列表 -->
-        <div class="points-section">
-          <div class="points-title">
-            <span>路径点列表</span>
-            <span class="points-count">({{ conflictFirstPoints.length }}个)</span>
-            <button type="button" class="icon-btn-mini clear-btn" @click="clearConflictFirstPoints" :disabled="conflictFirstPoints.length === 0" title="清空所有点">
-              <Trash2 :size="11" />
-            </button>
-          </div>
+        <div v-if="conflictFirstPoints.length === 0" class="empty-hint">
+          暂无路径点，请点击地图添加（至少2个点）
+        </div>
 
-          <div v-if="conflictFirstPoints.length === 0" class="empty-hint">
-            暂无路径点，请点击地图添加（至少2个点）
-          </div>
-
-          <div v-else class="points-list">
-            <div v-for="(point, idx) in conflictFirstPoints" :key="idx" class="point-card">
-              <div class="point-card-header">
-                <div class="point-index-badge" :class="{
-                  'badge-start': idx === 0,
-                  'badge-end': idx === conflictFirstPoints.length - 1 && conflictFirstPoints.length > 1,
-                  'badge-waypoint': idx !== 0 && idx !== conflictFirstPoints.length - 1
-                }">
-                  {{ idx === 0 ? '起点' : idx === conflictFirstPoints.length - 1 ? '终点' : `途经${idx}` }}
-                </div>
-                <button type="button" class="icon-btn-mini" @click="removeConflictFirstPoint(idx)" title="删除此点">
-                  <Trash2 :size="14" />
-                </button>
+        <div v-else class="points-list">
+          <div v-for="(point, idx) in conflictFirstPoints" :key="idx" class="point-card">
+            <div class="point-card-header">
+              <span class="point-index-badge" :class="{
+                'badge-start': idx === 0,
+                'badge-end': idx === conflictFirstPoints.length - 1 && conflictFirstPoints.length > 1,
+                'badge-waypoint': idx !== 0 && idx !== conflictFirstPoints.length - 1
+              }">
+                {{ idx === 0 ? '起点' : idx === conflictFirstPoints.length - 1 ? '终点' : `途经${idx}` }}
+              </span>
+              <button type="button" class="btn-point-delete" @click="removeConflictFirstPoint(idx)" title="删除此点">
+                <Trash2 :size="14" />
+              </button>
+            </div>
+            <div class="point-fields">
+              <div class="field">
+                <span class="field-label">经度</span>
+                <input
+                  v-model.number="conflictFirstPoints[idx].lon"
+                  class="field-input"
+                  type="number"
+                  step="any"
+                  placeholder="经度"
+                >
               </div>
-              <div class="point-fields">
-                <div class="field">
-                  <label class="field-label">经度</label>
-                  <input
-                    v-model.number="conflictFirstPoints[idx].lon"
-                    class="point-input-mini"
-                    type="number"
-                    step="any"
-                    placeholder="经度"
-                  >
-                </div>
-                <div class="field">
-                  <label class="field-label">纬度</label>
-                  <input
-                    v-model.number="conflictFirstPoints[idx].lat"
-                    class="point-input-mini"
-                    type="number"
-                    step="any"
-                    placeholder="纬度"
-                  >
-                </div>
-                <div class="field">
-                  <label class="field-label">高度(m)</label>
+              <div class="field">
+                <span class="field-label">纬度</span>
+                <input
+                  v-model.number="conflictFirstPoints[idx].lat"
+                  class="field-input"
+                  type="number"
+                  step="any"
+                  placeholder="纬度"
+                >
+              </div>
+              <div class="field">
+                <span class="field-label">高度(m)</span>
+                <div class="field-input-group">
                   <input
                     v-model.number="conflictFirstPoints[idx].height"
-                    class="point-input-mini"
+                    class="field-input"
                     type="number"
                     step="any"
-                    placeholder="高度"
+                    placeholder="手动输入"
                   >
+                  <select
+                    class="field-preset-select"
+                    aria-label="高度快选"
+                    @change="(e) => onConflictFirstHeightPresetChange(e, idx)"
+                  >
+                    <option value="">快选</option>
+                    <option
+                      v-for="h in heightPresetOptions"
+                      :key="`conflictFirst-${idx}-${h}`"
+                      :value="h"
+                    >
+                      {{ h }}
+                    </option>
+                  </select>
                 </div>
               </div>
             </div>
           </div>
         </div>
+      </div>
 
-        <!-- 基础参数 -->
-        <div class="form-row">
-          <label class="form-label" for="conflictFirstStartTime">开始时间</label>
+      <!-- 基础参数 -->
+      <div class="form-group">
+        <div class="group-title">基础参数</div>
+        <div class="param-line">
+          <span class="param-label">开始时间</span>
           <input
-            id="conflictFirstStartTime"
             v-model.number="conflictFirstForm.startTime"
             type="number"
             step="1"
-            class="form-input"
+            class="param-input"
             placeholder="北京时间秒级时间戳"
           >
         </div>
-
-        <div class="form-row">
-          <label class="form-label" for="conflictFirstWorkHeight">工作面高度</label>
+        <div class="param-line">
+          <span class="param-label">工作高度</span>
           <input
-            id="conflictFirstWorkHeight"
             v-model.number="conflictFirstForm.workHeight"
             type="number"
             step="any"
-            class="form-input"
+            class="param-input"
             placeholder="无人机作业基准高度"
           >
         </div>
-
-        <!-- 网格设置 -->
-        <div class="form-row">
-          <label class="form-label" for="conflictFirstLevel">网格层级</label>
-          <select
-            id="conflictFirstLevel"
-            v-model.number="conflictFirstForm.level"
-            class="form-select"
-            required
-          >
+        <div class="param-line">
+          <span class="param-label">网格层级</span>
+          <select v-model.number="conflictFirstForm.level" class="param-select">
             <option :value="9">第 9 级</option>
           </select>
-          <span class="form-hint">当前仅支持 9 级网格</span>
         </div>
-
-        <div class="form-row">
-          <label class="form-label" for="conflictFirstPlaneRadius">无人机半径</label>
+        <div class="param-line">
+          <span class="param-label">无人机半径</span>
           <input
-            id="conflictFirstPlaneRadius"
             v-model.number="conflictFirstForm.planeRadius"
             type="number"
             step="0.01"
-            class="form-input"
-            placeholder="无人机机身半径(米)"
+            class="param-input"
+            placeholder="机身半径(米)"
           >
         </div>
-
-        <div class="form-row">
-          <label class="form-label" for="conflictFirstSpeed">飞行速度</label>
+        <div class="param-line">
+          <span class="param-label">飞行速度</span>
           <input
-            id="conflictFirstSpeed"
             v-model.number="conflictFirstForm.speed"
             type="number"
             step="0.1"
-            class="form-input"
+            class="param-input"
             placeholder="飞行速度(米/秒)"
           >
         </div>
+      </div>
 
-        <!-- 约束条件 -->
-        <div class="constraint-section">
-          <div class="constraint-title">约束条件</div>
-          <div class="form-row">
-            <label class="checkbox-label">
-              <input
-                type="checkbox"
-                v-model="conflictFirstForm.useGdConstraint"
-                class="checkbox-input"
-              >
-              <span class="checkbox-text">启用实景三维障碍校验</span>
-            </label>
-          </div>
-        </div>
-
-        <!-- 提交按钮 -->
-        <div class="form-actions-stack">
-          <div class="form-actions form-actions-primary">
-            <button
-              type="submit"
-              class="btn-primary btn-primary-block"
-              :disabled="conflictFirstLoading || !canSubmitConflictFirst"
+      <!-- 约束条件 -->
+      <div class="form-group">
+        <div class="group-title">约束条件</div>
+        <div class="param-line-checkbox">
+          <label class="checkbox-label">
+            <input
+              type="checkbox"
+              v-model="conflictFirstForm.useGdConstraint"
+              class="checkbox-input"
             >
-              <Loader2 v-if="conflictFirstLoading" :size="13" class="spin" />
-              <Search v-else :size="13" />
-              {{ conflictFirstLoading ? '检测中...' : '开始冲突检测' }}
-            </button>
-          </div>
-          <div class="form-actions form-actions-clear-grid">
-            <button
-              type="button"
-              class="btn-clear-generated-grid"
-              @click="clearConflictFirstResult"
-              :disabled="!conflictFirstResult"
-            >
-              <Trash2 :size="14" />
-              清除检测结果
-            </button>
-          </div>
+            <span class="checkbox-text">启用实景三维障碍校验</span>
+          </label>
         </div>
-      </form>
+      </div>
 
-      <div v-if="conflictFirstError" class="error">{{ conflictFirstError }}</div>
+      <!-- 操作按钮 -->
+      <div class="btn-row">
+        <button
+          type="button"
+          class="btn-query"
+          @click="submitConflictFirstCheck"
+          :disabled="conflictFirstLoading || !canSubmitConflictFirst"
+        >
+          <Loader2 v-if="conflictFirstLoading" :size="16" class="spin" />
+          <Search v-else :size="16" />
+          {{ conflictFirstLoading ? '检测中...' : '开始冲突检测' }}
+        </button>
+        <button
+          type="button"
+          class="btn-clear"
+          @click="clearConflictFirstResult"
+          :disabled="!conflictFirstResult"
+        >
+          <span>清除网格</span>
+        </button>
+      </div>
+
+      <div v-if="conflictFirstError" class="error-box">{{ conflictFirstError }}</div>
 
       <!-- 检测结果 -->
       <div v-if="conflictFirstResult">
@@ -1469,251 +1476,307 @@ async function submitAstarPath() {
 </template>
 
 <style scoped>
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.path-planning {
+  padding: 0;
+  width: 100%;
+  box-sizing: border-box;
+  position: relative;
 }
 
-.tip {
+/* 提示框 */
+.hint-box {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   padding: 10px 12px;
-  background: rgba(59, 130, 246, 0.1);
-  border: 1px solid rgba(59, 130, 246, 0.2);
-  border-radius: 6px;
-  color: #60a5fa;
-  font-size: 13px;
-}
-
-/* 航路点列表区域 */
-.points-section {
-  background: rgba(30, 41, 59, 0.4);
+  margin-bottom: 12px;
+  background: #f5f3f0;
+  border: 1px solid #e2e8f0;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  padding: 10px 10px 10px 12px;
-  overflow-x: hidden;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.5;
 }
 
-.points-title {
+.hint-box svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: #64748b;
+}
+
+/* 表单组 */
+.form-group {
+  margin-bottom: 12px;
+}
+
+.group-title-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.group-title-row .group-title {
+  margin-bottom: 0;
+}
+
+.group-title {
+  font-size: 15px;
   font-weight: 600;
-  color: #60a5fa;
-  margin-bottom: 10px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid rgba(96, 165, 250, 0.15);
+  color: #334155;
+  margin-bottom: 8px;
 }
 
-.points-count {
-  font-weight: 400;
-  color: #94a3b8;
-  font-size: 12px;
+.group-sub {
+  font-size: 13px;
+  color: #64748b;
 }
 
-.clear-btn {
+.btn-link-clear {
   margin-left: auto;
+  padding: 4px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #64748b;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s ease;
 }
 
+.btn-link-clear:hover:not(:disabled) {
+  background: #f5f3f0;
+  color: #334155;
+}
+
+.btn-link-clear:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 航路点列表 */
 .empty-hint {
-  padding: 16px;
+  padding: 14px;
   text-align: center;
   color: #64748b;
-  font-size: 12px;
+  font-size: 14px;
+  border: 1px dashed #d4c9b8;
+  border-radius: 8px;
 }
 
 .points-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-height: 180px;
+  gap: 8px;
+  max-height: 220px;
   overflow-y: auto;
-  overflow-x: hidden;
 }
 
-/* 单个航路点卡片 */
 .point-card {
-  padding: 10px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  font-size: 11px;
-  color: #94a3b8;
+  padding: 8px;
+  background: #ffffff;
+  border: 1px solid #ebe6df;
+  border-radius: 8px;
+  transition: border-color 0.15s ease;
 }
 
-.point-card:last-child {
-  border-bottom: none;
+.point-card:hover {
+  border-color: #d4c9b8;
 }
 
 .point-card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .point-index-badge {
-  flex: 0 0 auto;
+  min-width: 28px;
   height: 24px;
-  padding: 0 10px;
-  display: flex;
+  padding: 0 8px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: 6px;
+  font-size: 13px;
   font-weight: 600;
-  white-space: nowrap;
 }
 
 .badge-start {
   background: rgba(34, 197, 94, 0.2);
-  color: #4ade80;
+  color: #22c55e;
 }
 
 .badge-end {
   background: rgba(239, 68, 68, 0.2);
-  color: #f87171;
+  color: #ef4444;
 }
 
 .badge-waypoint {
   background: rgba(59, 130, 246, 0.2);
-  color: #93c5fd;
+  color: #3b82f6;
+}
+
+.btn-point-delete {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: #fef2f2;
+  color: #dc2626;
+  cursor: pointer;
+}
+
+.btn-point-delete:hover {
+  background: #fee2e2;
 }
 
 .point-fields {
-  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-width: 0;
 }
 
 .field {
   display: flex;
   align-items: center;
-  gap: 6px;
-  width: 100%;
+  gap: 4px;
 }
 
 .field-label {
-  flex: 0 0 52px;
-  font-size: 11px;
+  flex: 0 0 44px;
+  font-size: 12px;
   color: #64748b;
+  white-space: nowrap;
 }
 
-.point-input-mini {
+.field-input {
   flex: 1;
   min-width: 0;
-  height: 26px;
+  height: 32px;
   padding: 0 8px;
-  border-radius: 4px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.3);
-  color: #e2e8f0;
-  font-size: 11px;
-  outline: none;
-  width: 100%;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 13px;
   box-sizing: border-box;
 }
 
-.point-input-mini:focus {
-  border-color: rgba(59, 130, 246, 0.6);
+.field-input:focus {
+  outline: none;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 2px rgba(91, 159, 212, 0.12);
 }
 
-.icon-btn-mini {
-  flex: 0 0 24px;
-  height: 24px;
+.field-input-group {
+  flex: 1;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  background: rgba(239, 68, 68, 0.15);
-  color: #fca5a5;
-  cursor: pointer;
-  border-radius: 4px;
+  gap: 4px;
+  min-width: 0;
 }
 
-.icon-btn-mini:hover:not(:disabled) {
-  background: rgba(239, 68, 68, 0.3);
+.field-input-group .field-input {
+  flex: 1;
+  min-width: 0;
 }
 
-.icon-btn-mini:disabled {
-  opacity: 0.3;
-  cursor: default;
-}
-
-.clear-btn {
-  background: rgba(100, 116, 139, 0.1);
-  color: #64748b;
-}
-
-.clear-btn:hover:not(:disabled) {
-  background: rgba(100, 116, 139, 0.2);
-  color: #94a3b8;
-}
-
-/* 表单行 */
-.form-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.form-label {
-  width: 90px;
+.field-preset-select {
+  width: 56px;
+  min-width: 56px;
+  height: 32px;
+  padding: 0 20px 0 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
   font-size: 12px;
-  color: #94a3b8;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+}
+
+.field-preset-select:focus {
+  outline: none;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 2px rgba(91, 159, 212, 0.12);
+}
+
+/* 参数行 */
+.param-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.param-line:last-child {
+  margin-bottom: 0;
+}
+
+.param-label {
+  width: 80px;
+  font-size: 14px;
+  color: #334155;
+  text-align: left;
   flex-shrink: 0;
 }
 
-.form-hint {
-  font-size: 11px;
-  color: #64748b;
-  margin-left: 8px;
-}
-
-.form-input {
+.param-input {
   flex: 1;
-  padding: 8px 10px;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.2);
-  color: #f1f5f9;
-  font-size: 13px;
+  background: #fff;
+  color: #334155;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.param-input:focus {
   outline: none;
-  transition: all 0.15s ease;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
 }
 
-.form-input:focus {
-  border-color: #3b82f6;
-  background: rgba(99, 102, 241, 0.1);
+.param-input::placeholder {
+  color: #94a3b8;
 }
 
-.form-input::placeholder {
-  color: #475569;
-}
-
-.form-select {
+.param-select {
   flex: 1;
-  padding: 8px 10px;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.2);
-  color: #f1f5f9;
-  font-size: 13px;
-  outline: none;
+  background: #fff;
+  color: #334155;
+  font-size: 14px;
+  box-sizing: border-box;
   cursor: pointer;
-  transition: all 0.15s ease;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
 }
 
-.form-select:focus {
-  border-color: #3b82f6;
-  background: rgba(99, 102, 241, 0.1);
+.param-select:focus {
+  outline: none;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
 }
 
-.checkbox-row {
-  margin-top: 4px;
+.param-line-checkbox {
+  margin-bottom: 0;
 }
 
 .checkbox-label {
@@ -1721,187 +1784,147 @@ async function submitAstarPath() {
   align-items: center;
   gap: 8px;
   cursor: pointer;
+  font-size: 14px;
+  color: #334155;
 }
 
 .checkbox-input {
   width: 16px;
   height: 16px;
+  accent-color: #5b9fd4;
   cursor: pointer;
-  accent-color: #3b82f6;
 }
 
 .checkbox-text {
-  font-size: 13px;
-  color: #e2e8f0;
+  font-size: 14px;
+  color: #334155;
 }
 
-/* 约束条件区域 */
-.constraint-section {
-  background: rgba(30, 41, 59, 0.3);
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  padding: 10px 12px;
-  margin-top: 4px;
-}
-
-.constraint-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: #94a3b8;
-  margin-bottom: 8px;
-}
-
-.form-actions-stack {
+/* 按钮行 */
+.btn-row {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: 8px;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
-.form-actions {
+.btn-query {
+  flex: 1;
+  height: 38px;
   display: flex;
-  gap: 10px;
-}
-
-.form-actions-primary {
-  width: 100%;
-}
-
-.form-actions-primary .btn-primary-block {
-  width: 100%;
-  justify-content: center;
-  padding: 10px 20px;
-  border-radius: 10px;
-}
-
-.form-actions-clear-grid {
-  width: 100%;
-  justify-content: flex-end;
-}
-
-/* 清除按钮样式：深酒红底、珊瑚色描边与文字/图标、大圆角 */
-.btn-clear-generated-grid {
-  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  width: 55%;
-  max-width: 100%;
-  box-sizing: border-box;
-  padding: 10px 14px;
-  border-radius: 12px;
-  border: 1px solid rgba(248, 113, 113, 0.65);
-  background: rgba(127, 29, 29, 0.35);
-  color: #fecaca;
-  font-size: 12px;
+  gap: 6px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #7db8e0, #5b9fd4);
+  border: none;
+  color: #fff;
+  font-size: 15px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-  white-space: nowrap;
 }
 
-.btn-clear-generated-grid :deep(svg) {
-  flex-shrink: 0;
+.btn-query:hover:not(:disabled) {
+  background: linear-gradient(135deg, #6aa8d4, #4a8fc4);
 }
 
-.btn-clear-generated-grid:hover:not(:disabled) {
-  background: rgba(153, 27, 27, 0.45);
-  border-color: #f87171;
-  color: #fff;
-}
-
-.btn-clear-generated-grid:disabled {
-  opacity: 0.45;
+.btn-query:disabled {
+  background: #e2e8f0;
+  color: #94a3b8;
   cursor: not-allowed;
 }
 
-.btn-primary {
+.btn-clear {
+  width: 88px;
+  white-space: nowrap;
+  height: 38px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  border-radius: 6px;
-  border: none;
-  background: linear-gradient(135deg, #3b82f6, #0ea5e9);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.btn-primary:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
-}
-
-.btn-primary:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.error {
-  margin-top: 12px;
-  padding: 10px 12px;
-  border-radius: 6px;
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  background: rgba(239, 68, 68, 0.1);
-  font-size: 13px;
-  color: #fca5a5;
-}
-
-.result-stats {
-  margin-top: 14px;
-  display: flex;
-  gap: 10px;
-}
-
-.stat-card {
-  flex: 1;
-  padding: 12px 14px;
+  justify-content: center;
   border-radius: 8px;
-  background: rgba(30, 41, 59, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  text-align: center;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  font-size: 15px;
+  cursor: pointer;
 }
 
-.stat-value {
-  font-size: 20px;
-  font-weight: 700;
-  color: #60a5fa;
-  font-variant-numeric: tabular-nums;
+.btn-clear:hover:not(:disabled) {
+  background: #e8e8e8;
 }
 
-.stat-value.success {
-  color: #34d399;
+.btn-clear:disabled {
+  color: #999;
+  cursor: not-allowed;
+}
+
+/* 错误提示 */
+.error-box {
+  padding: 10px 12px;
+  border: 1px solid #fca5a5;
+  border-radius: 8px;
+  background: #fef2f2;
+  font-size: 14px;
+  color: #dc2626;
+  margin-bottom: 10px;
+}
+
+/* 结果区 */
+.result-box {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.result-row {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid #ddd;
+  background: #f9f9f9;
+  border-radius: 6px;
+}
+
+.result-label {
   font-size: 13px;
-  text-transform: uppercase;
-}
-
-.stat-value.error {
-  color: #f87171;
-  font-size: 13px;
-  text-transform: uppercase;
-}
-
-.stat-label {
-  font-size: 11px;
   color: #64748b;
-  margin-top: 4px;
+}
+
+.result-num {
+  font-size: 18px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.result-num.error {
+  color: #dc2626;
+}
+
+.result-status {
+  font-size: 15px;
+  font-weight: 600;
+  color: #dc2626;
+}
+
+.result-status.success {
+  color: #059669;
+}
+
+/* 空状态 */
+.empty-box {
+  padding: 16px;
+  text-align: center;
+  color: #64748b;
+  font-size: 14px;
+  border: 1px dashed #d4c9b8;
+  border-radius: 8px;
+  margin-bottom: 10px;
 }
 
 /* 入库按钮 */
 .store-section {
-  margin-top: 14px;
+  margin-bottom: 10px;
   display: flex;
   justify-content: center;
 }
@@ -1926,7 +1949,6 @@ async function submitAstarPath() {
   border-color: #a855f7;
   color: #fff;
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(126, 34, 206, 0.3);
 }
 
 .btn-store :deep(svg) {
@@ -1949,7 +1971,7 @@ async function submitAstarPath() {
 }
 
 .modal-content {
-  background: linear-gradient(145deg, #1e293b, #0f172a);
+  background: linear-gradient(145deg, #f5f3f0, #faf8f4);
   border: 1px solid rgba(168, 85, 247, 0.3);
   border-radius: 12px;
   width: 400px;
@@ -1963,15 +1985,15 @@ async function submitAstarPath() {
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(126, 34, 206, 0.1);
+  border-bottom: 1px solid #ebe6df;
+  background: #faf8f4;
 }
 
 .modal-header h3 {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
-  color: #e9d5ff;
+  color: #334155;
 }
 
 .modal-close {
@@ -1997,7 +2019,7 @@ async function submitAstarPath() {
 }
 
 .store-info {
-  background: rgba(0, 0, 0, 0.3);
+  background: #ffffff;
   border-radius: 8px;
   padding: 12px;
   margin-bottom: 16px;
@@ -2017,7 +2039,7 @@ async function submitAstarPath() {
 }
 
 .store-info-value {
-  color: #e2e8f0;
+  color: #475569;
   font-family: monospace;
 }
 
@@ -2036,9 +2058,9 @@ async function submitAstarPath() {
   width: 100%;
   padding: 10px 12px;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(0, 0, 0, 0.4);
-  color: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #334155;
   font-size: 14px;
   outline: none;
   box-sizing: border-box;
@@ -2046,8 +2068,9 @@ async function submitAstarPath() {
 }
 
 .store-input:focus {
-  border-color: #a855f7;
-  background: rgba(126, 34, 206, 0.1);
+  border-color: #7db8e0;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
 }
 
 .store-input::placeholder {
@@ -2083,7 +2106,7 @@ async function submitAstarPath() {
   gap: 12px;
   padding: 16px 20px;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.2);
+  background: #ffffff;
 }
 
 .btn-cancel,
@@ -2109,7 +2132,7 @@ async function submitAstarPath() {
 
 .btn-cancel:hover:not(:disabled) {
   background: rgba(100, 116, 139, 0.3);
-  color: #e2e8f0;
+  color: #475569;
 }
 
 .btn-confirm {
@@ -2130,93 +2153,36 @@ async function submitAstarPath() {
   transform: none;
 }
 
-/* 无冲突结果 */
-.result-success {
-  margin-top: 14px;
-  padding: 24px;
-  border-radius: 12px;
-  background: rgba(34, 197, 94, 0.1);
-  border: 1px solid rgba(34, 197, 94, 0.3);
-  text-align: center;
+.spin {
+  animation: spin 1s linear infinite;
 }
 
-.result-icon {
-  width: 48px;
-  height: 48px;
-  margin: 0 auto 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(34, 197, 94, 0.2);
-  border-radius: 50%;
-  color: #4ade80;
-}
-
-.result-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: #4ade80;
-  margin-bottom: 8px;
-}
-
-.result-message {
-  font-size: 14px;
-  color: #86efac;
-}
-
-/* 冲突警告 */
-.conflict-warning {
-  margin-top: 14px;
-  padding: 16px;
-  border-radius: 10px;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.conflict-warning-icon {
-  width: 36px;
-  height: 36px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(239, 68, 68, 0.2);
-  border-radius: 50%;
-  color: #f87171;
-  font-size: 20px;
-  font-weight: 700;
-  flex-shrink: 0;
-}
-
-.conflict-warning-text {
-  font-size: 15px;
-  font-weight: 500;
-  color: #fca5a5;
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 /* 冲突列表 */
 .conflict-list {
-  margin-top: 14px;
-  background: rgba(30, 41, 59, 0.5);
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 12px;
+  border: 1px solid #ebe6df;
+  border-radius: 8px;
   overflow: hidden;
 }
 
 .conflict-list-title {
-  padding: 12px 14px;
+  padding: 10px 12px;
   font-size: 13px;
   font-weight: 600;
-  color: #f87171;
-  background: rgba(239, 68, 68, 0.1);
-  border-bottom: 1px solid rgba(239, 68, 68, 0.2);
+  color: #dc2626;
+  background: #fef2f2;
+  border-bottom: 1px solid #fca5a5;
 }
 
 .conflict-item {
   padding: 12px 14px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid #ebe6df;
+  background: #ffffff;
 }
 
 .conflict-item:last-child {
@@ -2233,8 +2199,8 @@ async function submitAstarPath() {
 .conflict-index {
   font-size: 12px;
   font-weight: 600;
-  color: #f87171;
-  background: rgba(239, 68, 68, 0.15);
+  color: #dc2626;
+  background: #fef2f2;
   padding: 2px 8px;
   border-radius: 4px;
 }
@@ -2242,7 +2208,7 @@ async function submitAstarPath() {
 .conflict-type {
   font-size: 13px;
   font-weight: 500;
-  color: #fca5a5;
+  color: #dc2626;
 }
 
 .conflict-item-details {
@@ -2264,13 +2230,13 @@ async function submitAstarPath() {
 }
 
 .detail-value {
-  color: #cbd5e1;
+  color: #334155;
   font-family: 'Monaco', 'Consolas', monospace;
   word-break: break-all;
 }
 
 .reason-text {
-  color: #fca5a5;
+  color: #dc2626;
   font-family: inherit;
 }
 </style>

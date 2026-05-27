@@ -1,6 +1,5 @@
 <script setup>
 import { reactive, ref } from 'vue'
-import { Loader2, Trash2, Search, MapPin, Square } from 'lucide-vue-next'
 
 const props = defineProps({
   serviceName: {
@@ -14,6 +13,25 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'showPoint', 'showGrid', 'get-view-bounds'])
+
+/** 高度快选：0–120 整十 */
+const heightPresetOptions = Array.from({ length: 13 }, (_, i) => i * 10)
+
+function onBottomPresetChange(event) {
+  const val = event.target.value
+  if (val !== '') {
+    airspaceGridForm.bottom = Number(val)
+  }
+  event.target.selectedIndex = 0
+}
+
+function onTopPresetChange(event) {
+  const val = event.target.value
+  if (val !== '') {
+    airspaceGridForm.top = Number(val)
+  }
+  event.target.selectedIndex = 0
+}
 
 const airspaceGridForm = reactive({
   level: 12,
@@ -181,487 +199,433 @@ function clearGrids() {
 </script>
 
 <template>
-  <div class="calc-content">
+  <div class="airspace-grid-query">
     <template v-if="functionName === '空域网格查询'">
-      <div class="tip">
-        根据区域范围查询空域网格数据，返回指定层级和高程范围内的格网信息。支持通过地图框选或手动输入边界参数进行查询。
-      </div>
-
-      <form class="form" @submit.prevent="submitAirspaceGridQuery">
-        <!-- 层级 -->
-        <div class="form-row">
-          <label class="form-label" for="agq-level">
-            <span class="required">*</span>层级
-          </label>
-          <input
+      <!-- 层级设置 -->
+      <div class="form-group">
+        <div class="group-title">层级设置</div>
+        <div class="level-row">
+          <select
             id="agq-level"
             v-model.number="airspaceGridForm.level"
-            type="number"
-            step="1"
-            min="0"
-            class="form-input"
-            placeholder="请输入层级"
-            required
+            class="level-select"
           >
-        </div>
-
-        <!-- 边界参数 -->
-        <div class="bounds-section">
-          <div class="bounds-title">
-            <MapPin :size="14" />
-            查询边界参数
-          </div>
-          <div class="bounds-grid">
-            <div class="bounds-row">
-              <div class="form-row">
-                <label class="form-label" for="agq-minlon">最小经度</label>
-                <input
-                  id="agq-minlon"
-                  v-model.number="airspaceGridForm.minLon"
-                  type="number"
-                  step="0.0001"
-                  class="form-input input-lon"
-                  placeholder="西边界"
-                >
-              </div>
-              <div class="form-row">
-                <label class="form-label" for="agq-maxlon">最大经度</label>
-                <input
-                  id="agq-maxlon"
-                  v-model.number="airspaceGridForm.maxLon"
-                  type="number"
-                  step="0.0001"
-                  class="form-input input-lon"
-                  placeholder="东边界"
-                >
-              </div>
-            </div>
-            <div class="bounds-row">
-              <div class="form-row">
-                <label class="form-label" for="agq-minlat">最小纬度</label>
-                <input
-                  id="agq-minlat"
-                  v-model.number="airspaceGridForm.minLat"
-                  type="number"
-                  step="0.0001"
-                  class="form-input input-lat"
-                  placeholder="南边界"
-                >
-              </div>
-              <div class="form-row">
-                <label class="form-label" for="agq-maxlat">最大纬度</label>
-                <input
-                  id="agq-maxlat"
-                  v-model.number="airspaceGridForm.maxLat"
-                  type="number"
-                  step="0.0001"
-                  class="form-input input-lat"
-                  placeholder="北边界"
-                >
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 高程参数 -->
-        <div class="bounds-section">
-          <div class="bounds-title">
-            <MapPin :size="14" />
-            高程参数
-          </div>
-          <div class="bounds-grid">
-            <div class="bounds-row">
-              <div class="form-row">
-                <label class="form-label" for="agq-bottom">底部高程</label>
-                <input
-                  id="agq-bottom"
-                  v-model.number="airspaceGridForm.bottom"
-                  type="number"
-                  step="1"
-                  class="form-input input-elev"
-                  placeholder="底部高程"
-                >
-              </div>
-              <div class="form-row">
-                <label class="form-label" for="agq-top">顶部高程</label>
-                <input
-                  id="agq-top"
-                  v-model.number="airspaceGridForm.top"
-                  type="number"
-                  step="1"
-                  class="form-input input-elev"
-                  placeholder="顶部高程"
-                >
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="form-actions-stack">
-          <div class="form-actions form-actions-primary">
-            <button
-              type="submit"
-              class="btn-primary btn-primary-block"
-              :disabled="loading"
-            >
-              <Loader2 v-if="loading" :size="14" class="spin" />
-              <Search v-else :size="14" />
-              {{ loading ? '查询中...' : '开始查询' }}
-            </button>
-          </div>
-          <div class="form-actions form-actions-selection">
-            <button
-              type="button"
-              class="btn-box-select"
-              @click="requestViewBounds"
-              :disabled="loading"
-            >
-              <Square :size="14" />
-              获取视图边界
-            </button>
-          </div>
-          <div class="form-actions form-actions-clear-grid">
-            <button
-              type="button"
-              class="btn-clear-generated-grid"
-              @click="clearGrids"
-              :disabled="!result"
-            >
-              <Trash2 :size="14" />
-              清除已生成网格
-            </button>
-          </div>
-        </div>
-      </form>
-
-      <div v-if="error" class="error">{{ error }}</div>
-
-      <!-- 查询结果统计 -->
-      <div v-if="queryStats" class="result-stats">
-        <div class="stat-card">
-          <div class="stat-value">{{ queryStats.total }}</div>
-          <div class="stat-label">网格数量</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value" :class="{ 'success': queryStats.status === 'success', 'error': queryStats.status !== 'success' }">
-            {{ queryStats.status }}
-          </div>
-          <div class="stat-label">查询状态</div>
+            <option :value="null" disabled>选择层级</option>
+            <option v-for="lvl in 22" :key="lvl - 1" :value="lvl - 1">{{ lvl - 1 }}</option>
+          </select>
         </div>
       </div>
 
-      <!-- 无数据提示 -->
-      <div v-if="result?.data && gridsData.length === 0" class="no-data">
-        <span>未查询到网格数据</span>
+      <!-- 查询边界 -->
+      <div class="form-group">
+        <div class="group-title">查询边界</div>
+        <div class="coord-grid">
+          <div class="coord-line">
+            <span class="coord-label">西</span>
+            <input
+              v-model.number="airspaceGridForm.minLon"
+              type="number"
+              step="0.0001"
+              placeholder="经度"
+            >
+            <span class="coord-label">东</span>
+            <input
+              v-model.number="airspaceGridForm.maxLon"
+              type="number"
+              step="0.0001"
+              placeholder="经度"
+            >
+          </div>
+          <div class="coord-line">
+            <span class="coord-label">南</span>
+            <input
+              v-model.number="airspaceGridForm.minLat"
+              type="number"
+              step="0.0001"
+              placeholder="纬度"
+            >
+            <span class="coord-label">北</span>
+            <input
+              v-model.number="airspaceGridForm.maxLat"
+              type="number"
+              step="0.0001"
+              placeholder="纬度"
+            >
+          </div>
+        </div>
+        <button class="btn-view" @click="requestViewBounds" :disabled="loading">
+          获取当前视图
+        </button>
+      </div>
+
+      <!-- 高程参数 -->
+      <div class="form-group">
+        <div class="group-title">高程参数</div>
+        <div class="height-grid">
+          <div class="coord-line">
+            <span class="coord-label">底</span>
+            <div class="param-input-combo">
+              <input
+                v-model.number="airspaceGridForm.bottom"
+                type="number"
+                step="10"
+                min="0"
+                max="120"
+                class="height-input"
+                placeholder="输入值"
+              >
+              <select
+                class="param-preset-select"
+                @change="onBottomPresetChange"
+              >
+                <option value="">快选</option>
+                <option v-for="h in heightPresetOptions" :key="`bottom-${h}`" :value="h">{{ h }}</option>
+              </select>
+            </div>
+          </div>
+          <div class="coord-line">
+            <span class="coord-label">顶</span>
+            <div class="param-input-combo">
+              <input
+                v-model.number="airspaceGridForm.top"
+                type="number"
+                step="10"
+                min="0"
+                max="120"
+                class="height-input"
+                placeholder="输入值"
+              >
+              <select
+                class="param-preset-select"
+                @change="onTopPresetChange"
+              >
+                <option value="">快选</option>
+                <option v-for="h in heightPresetOptions" :key="`top-${h}`" :value="h">{{ h }}</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 操作按钮 -->
+      <div class="btn-row">
+        <button class="btn-query" @click="submitAirspaceGridQuery" :disabled="loading">
+          <span>{{ loading ? '查询中...' : '查询' }}</span>
+        </button>
+        <button class="btn-clear" @click="clearGrids" :disabled="!result">
+          <span>清除网格</span>
+        </button>
+      </div>
+
+      <!-- 错误提示 -->
+      <div v-if="error" class="error-box">{{ error }}</div>
+
+      <!-- 查询结果 -->
+      <div v-if="queryStats" class="result-box">
+        <div class="result-row">
+          <span class="result-label">网格数量</span>
+          <span class="result-num">{{ queryStats.total }}</span>
+        </div>
+        <div class="result-row">
+          <span class="result-label">状态</span>
+          <span class="result-status" :class="queryStats.status === 'success' ? 'success' : ''">
+            {{ queryStats.status === 'success' ? '成功' : queryStats.status }}
+          </span>
+        </div>
+      </div>
+
+      <!-- 无数据 -->
+      <div v-if="result?.data && gridsData.length === 0" class="empty-box">
+        该区域未查询到网格数据
       </div>
     </template>
   </div>
 </template>
 
 <style scoped>
-.tip {
-  font-size: 12px;
-  color: #64748b;
-  margin-bottom: 16px;
-  padding: 10px 12px;
-  background: rgba(59, 130, 246, 0.08);
-  border-radius: 8px;
-  border: 1px solid rgba(59, 130, 246, 0.18);
-  line-height: 1.5;
+.airspace-grid-query {
+  padding: 0;
+  width: 100%;
+  box-sizing: border-box;
+  position: relative;
 }
 
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.bounds-section {
-  padding: 14px;
-  background: rgba(30, 41, 59, 0.5);
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.bounds-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  color: #60a5fa;
+/* 表单组 */
+.form-group {
   margin-bottom: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid rgba(96, 165, 250, 0.2);
 }
 
-.bounds-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.group-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #334155;
+  margin-bottom: 8px;
 }
 
-.bounds-row {
-  display: flex;
-  gap: 10px;
-}
-
-.bounds-row .form-row {
-  flex: 1;
-}
-
-.form-row {
+/* 层级选择 */
+.level-row {
   display: flex;
   align-items: center;
-  gap: 8px;
 }
 
-.form-label {
-  width: 70px;
-  font-size: 12px;
-  color: #94a3b8;
-  flex-shrink: 0;
-}
-
-.required {
-  color: #ef4444;
-  margin-right: 2px;
-}
-
-.form-input {
-  width: 100%;
-  min-width: 0;
+.level-select {
   flex: 1;
-  height: 36px;
-  line-height: 1.2;
-  padding: 8px 10px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
   border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(0, 0, 0, 0.2);
-  color: #f1f5f9;
-  font-size: 13px;
+  background: #fff;
+  color: #334155;
+  font-size: 14px;
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+.level-select:focus {
   outline: none;
-  transition: all 0.15s ease;
-  box-sizing: border-box;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
 }
 
-.form-input:focus {
-  border-color: #3b82f6;
-  background: rgba(99, 102, 241, 0.1);
-}
-
-.form-input::placeholder {
-  color: #475569;
-}
-
-.form-input.input-lon,
-.form-input.input-lat,
-.form-input.input-elev {
-  height: 36px;
-  line-height: 1.2;
-}
-
-.form-actions-stack {
+/* 坐标网格 */
+.coord-grid {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-top: 6px;
+  gap: 4px;
 }
 
-.form-actions {
+.coord-line {
   display: flex;
-  gap: 10px;
-}
-
-.form-actions-primary {
-  width: 100%;
-}
-
-.form-actions-primary .btn-primary-block {
-  width: 100%;
-  justify-content: center;
-  padding: 10px 20px;
-  border-radius: 10px;
-}
-
-.form-actions-selection {
-  width: 100%;
-  justify-content: center;
-}
-
-.form-actions-clear-grid {
-  width: 100%;
-  justify-content: flex-end;
-}
-
-.form-actions-selection .btn-box-select {
-  flex: 1;
-  display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: auto;
-  max-width: 100%;
-  box-sizing: border-box;
-  padding: 10px 14px;
-  border-radius: 10px;
-  border: 1px solid rgba(168, 85, 247, 0.65);
-  background: rgba(88, 28, 135, 0.35);
-  color: #e9d5ff;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-  white-space: nowrap;
+  gap: 4px;
 }
 
-.form-actions-selection .btn-box-select :deep(svg) {
+.coord-label {
+  width: 22px;
+  font-size: 14px;
+  color: #334155;
+  text-align: center;
   flex-shrink: 0;
 }
 
-.form-actions-selection .btn-box-select:hover:not(:disabled) {
-  background: rgba(107, 33, 168, 0.45);
-  border-color: #a855f7;
-  color: #fff;
-}
-
-.form-actions-selection .btn-box-select:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.form-actions-clear-grid {
-  width: 100%;
-  justify-content: center;
-}
-
-.form-actions-clear-grid .btn-clear-generated-grid {
+.coord-line input {
   flex: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: auto;
-  max-width: 100%;
-  box-sizing: border-box;
-  padding: 10px 14px;
-  border-radius: 10px;
-  border: 1px solid rgba(248, 113, 113, 0.65);
-  background: rgba(127, 29, 29, 0.35);
-  color: #fecaca;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
-  white-space: nowrap;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 14px;
 }
 
-.form-actions-clear-grid .btn-clear-generated-grid :deep(svg) {
-  flex-shrink: 0;
+.coord-line input::placeholder {
+  color: #999;
 }
 
-.form-actions-clear-grid .btn-clear-generated-grid:hover:not(:disabled) {
-  background: rgba(153, 27, 27, 0.45);
-  border-color: #f87171;
-  color: #fff;
+.coord-line input:focus {
+  outline: none;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
 }
 
-.form-actions-clear-grid .btn-clear-generated-grid:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
+/* 高程参数 */
+.height-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.btn-primary {
+.param-input-combo {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 22px;
-  border-radius: 8px;
-  border: none;
-  background: linear-gradient(135deg, #3b82f6, #0ea5e9);
-  color: #fff;
+}
+
+.height-input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.height-input:focus {
+  outline: none;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
+}
+
+.height-input::placeholder {
+  color: #999;
+}
+
+.param-preset-select {
+  flex: 0 0 56px;
+  height: 34px;
+  padding: 0 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f5f3f0;
+  color: #475569;
   font-size: 13px;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.param-preset-select:focus {
+  outline: none;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
+}
+
+/* 获取视图按钮 */
+.btn-view {
+  width: 100%;
+  height: 36px;
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f5f3f0;
+  color: #334155;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.btn-view:hover:not(:disabled) {
+  background: #e8e8e8;
+}
+
+.btn-view:disabled {
+  color: #999;
+  cursor: not-allowed;
+}
+
+/* 按钮行 */
+.btn-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.btn-query {
+  flex: 1;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #7db8e0, #5b9fd4);
+  border: none;
+  color: #fff;
+  font-size: 15px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
 }
 
-.btn-primary:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
+.btn-query:hover:not(:disabled) {
+  background: linear-gradient(135deg, #6aa8d4, #4a8fc4);
 }
 
-.btn-primary:disabled {
-  opacity: 0.7;
-  cursor: default;
+.btn-query:disabled {
+  background: #e2e8f0;
+  color: #94a3b8;
+  cursor: not-allowed;
 }
 
-.spin {
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.error {
-  margin-top: 14px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  background: rgba(239, 68, 68, 0.1);
-  font-size: 13px;
-  color: #fca5a5;
-}
-
-.result-stats {
+.btn-clear {
+  width: 88px;
+  white-space: nowrap;
+  height: 38px;
   display: flex;
-  gap: 12px;
-  margin-top: 16px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+  font-size: 15px;
+  cursor: pointer;
 }
 
-.stat-card {
+.btn-clear:hover:not(:disabled) {
+  background: #e8e8e8;
+}
+
+.btn-clear:disabled {
+  color: #999;
+  cursor: not-allowed;
+}
+
+/* 错误提示 */
+.error-box {
+  padding: 10px 12px;
+  border: 1px solid #fca5a5;
+  border-radius: 8px;
+  background: #fef2f2;
+  font-size: 14px;
+  color: #dc2626;
+  margin-bottom: 10px;
+}
+
+/* 结果区 */
+.result-box {
+  display: flex;
+  gap: 8px;
+}
+
+.result-row {
   flex: 1;
-  padding: 14px 16px;
-  border-radius: 10px;
-  background: rgba(30, 41, 59, 0.8);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid #ddd;
+  background: #f9f9f9;
 }
 
-.stat-value {
-  font-size: 24px;
-  font-weight: 700;
-  color: #60a5fa;
-  font-variant-numeric: tabular-nums;
-}
-
-.stat-value.success {
-  color: #34d399;
-  font-size: 14px;
-  text-transform: uppercase;
-}
-
-.stat-value.error {
-  color: #f87171;
-  font-size: 14px;
-  text-transform: uppercase;
-}
-
-.stat-label {
-  font-size: 12px;
+.result-label {
+  font-size: 13px;
   color: #64748b;
-  margin-top: 4px;
 }
 
-.no-data {
-  margin-top: 20px;
-  padding: 30px;
+.result-num {
+  font-size: 18px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.result-status {
+  font-size: 15px;
+  font-weight: 600;
+  color: #c00;
+}
+
+.result-status.success {
+  color: #060;
+}
+
+/* 空状态 */
+.empty-box {
+  padding: 16px;
   text-align: center;
   color: #64748b;
-  background: rgba(30, 41, 59, 0.5);
-  border-radius: 10px;
-  border: 1px dashed rgba(255, 255, 255, 0.1);
+  font-size: 14px;
+  border: 1px dashed #d4c9b8;
+  border-radius: 8px;
 }
 </style>
