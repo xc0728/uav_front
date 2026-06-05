@@ -19,6 +19,14 @@ const props = defineProps({
     type: Object,
     default: null,
   },
+  visibleNoFlyZones: {
+    type: Object,
+    default: () => ({}),
+  },
+  theme: {
+    type: String,
+    default: 'white',
+  },
 })
 
 const emit = defineEmits(['switch_page', 'visualize-event', 'start-event-simulation', 'stop-event-simulation', 'anomaly-triggered'])
@@ -150,58 +158,23 @@ function clearEventVisualization() {
   }
 }
 
-async function fetchGridBoundaryByCode(gridCode) {
-  if (!gridCode) return null
-  const headers = new Headers()
-  headers.append('X-API-Key', import.meta.env.VITE_API_KEY || '')
-  headers.append('Content-Type', 'application/json')
-  const resp = await fetch('/api/multiSource/basicGrid/getGridBoundaryByCode', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ gridCode }),
-  })
-  const data = await resp.json().catch(() => null)
-  if (!resp.ok || data?.status !== 'success' || !data?.data) return null
-  return data.data
-}
-
-function normalizeGridBoundary(grid) {
-  if (!grid) return null
-  return {
-    code: grid.code || grid.gridCode || '',
-    center: grid.center || null,
+function drawWarningSampleGrids(warningArea) {
+  const gridCells = warningArea?.gridCenters?.data?.cells
+  if (!Array.isArray(gridCells) || gridCells.length === 0) return
+  const cells = gridCells.map(cell => ({
     bounds: {
-      west: grid.west,
-      east: grid.east,
-      south: grid.south,
-      north: grid.north,
-      top: grid.top ?? 0,
-      bottom: grid.bottom ?? 0,
+      west: cell.minlon,
+      east: cell.maxlon,
+      south: cell.minlat,
+      north: cell.maxlat,
+      top: cell.top,
+      bottom: cell.bottom ?? 0,
     },
-  }
-}
-
-async function drawWarningSampleGrids(warningArea) {
-  const codes = Array.isArray(warningArea?.sampleGrids) ? warningArea.sampleGrids : []
-  const limit = Number(warningArea?.sampleGridCount) || codes.length
-  const sampleCells = []
-
-  for (const code of codes.slice(0, limit)) {
-    const cell = await fetchGridBoundaryByCode(code)
-    const normalized = normalizeGridBoundary(cell)
-    if (normalized) sampleCells.push(normalized)
-  }
-
-  if (sampleCells.length > 0 && cesiumMapRef.value && typeof cesiumMapRef.value.drawGridBoundary === 'function') {
-    cesiumMapRef.value.drawGridBoundary({
-      cells: sampleCells.map(cell => ({
-        code: cell.code,
-        center: cell.center,
-        bounds: cell.bounds,
-        color: '#f59e0b',
-        level: warningArea?.gridLevel,
-      }))
-    })
+    color: '#f59e0b',
+    level: warningArea?.gridLevel,
+  }))
+  if (cesiumMapRef.value && typeof cesiumMapRef.value.drawGridBoundary === 'function') {
+    cesiumMapRef.value.drawGridBoundary({ cells })
   }
 }
 
@@ -290,7 +263,7 @@ function handleDeleteFence(id) {
 function handleStartEventSimulation() {
   const routes = props.routeData || []
   if (routes.length === 0) return
-  selectedSimulationRouteIds.value = routes.map(route => route.id)
+  selectedSimulationRouteIds.value = [routes[0].id]
   isSimulationModalVisible.value = true
 }
 
@@ -309,6 +282,9 @@ function handleStopEventSimulation() {
     if (typeof cesiumMapRef.value.clearGridVisual === 'function') {
       cesiumMapRef.value.clearGridVisual()
     }
+    if (typeof cesiumMapRef.value.clearWarningGridPoints === 'function') {
+      cesiumMapRef.value.clearWarningGridPoints()
+    }
   }
 
   emit('stop-event-simulation')
@@ -319,12 +295,7 @@ function handleCloseSimulationModal() {
 }
 
 function toggleSimulationRoute(routeId) {
-  const index = selectedSimulationRouteIds.value.indexOf(routeId)
-  if (index >= 0) {
-    selectedSimulationRouteIds.value.splice(index, 1)
-  } else {
-    selectedSimulationRouteIds.value.push(routeId)
-  }
+  selectedSimulationRouteIds.value = [routeId]
 }
 
 function resetSimulationParams() {
@@ -401,15 +372,6 @@ function extractRoutePoints(route) {
 async function resolveRouteAnchorPoint(route) {
   const routePoints = extractRoutePoints(route)
   if (routePoints.length > 0) return routePoints[Math.floor(routePoints.length / 2)]
-
-  const codes = Array.isArray(route?.path) ? route.path : []
-  for (const code of codes) {
-    const boundary = await fetchGridBoundaryByCode(code)
-    const center = boundary?.center
-    if (Array.isArray(center) && center.length >= 2) {
-      return [Number(center[0]), Number(center[1]), Number(center[2] ?? 120)]
-    }
-  }
   return null
 }
 
@@ -464,6 +426,9 @@ async function handleConfirmSimulation() {
     }
     if (typeof cesiumMapRef.value.clearGridVisual === 'function') {
       cesiumMapRef.value.clearGridVisual()
+    }
+    if (typeof cesiumMapRef.value.clearWarningGridPoints === 'function') {
+      cesiumMapRef.value.clearWarningGridPoints()
     }
   }
 
@@ -577,10 +542,9 @@ async function visualizeEmergencyResponse(responseData) {
 
   const allCells = []
 
+  // 事件网格
   if (responseData.eventGrid) {
     allCells.push({
-      code: responseData.eventGrid.code,
-      center: responseData.eventGrid.center,
       bounds: {
         west: responseData.eventGrid.minlon,
         east: responseData.eventGrid.maxlon,
@@ -594,31 +558,37 @@ async function visualizeEmergencyResponse(responseData) {
     })
   }
 
+  // 警戒区网格（从 gridCenters.data.cells 获取）
   const warningArea = responseData.warningArea
-  if (warningArea && Array.isArray(warningArea.sampleGrids)) {
-    const codes = warningArea.sampleGrids
-    const limit = Number(warningArea.sampleGridCount) || codes.length
-    for (const code of codes.slice(0, limit)) {
-      const cell = await fetchGridBoundaryByCode(code)
-      const normalized = normalizeGridBoundary(cell)
-      if (normalized) {
-        allCells.push({
-          code: normalized.code,
-          center: normalized.center,
-          bounds: normalized.bounds,
-          color: '#f59e0b',
-          level: warningArea.gridLevel,
-        })
-      }
-    }
+  const gridCells = warningArea?.gridCenters?.data?.cells
+  if (Array.isArray(gridCells)) {
+    gridCells.forEach(cell => {
+      allCells.push({
+        bounds: {
+          west: cell.minlon,
+          east: cell.maxlon,
+          south: cell.minlat,
+          north: cell.maxlat,
+          top: cell.top,
+          bottom: cell.bottom ?? 0,
+        },
+        color: '#f59e0b',
+        level: warningArea?.gridLevel,
+      })
+    })
   }
 
+  console.log('[MonitoringScreen] 可视化网格总数:', allCells.length, '事件网格:', responseData.eventGrid ? 1 : 0, '警戒区网格:', Array.isArray(gridCells) ? gridCells.length : 0)
+
+  // 统一使用 drawGridBoundary 绘制所有网格
   if (allCells.length > 0 && typeof cesiumMapRef.value.drawGridBoundary === 'function') {
     cesiumMapRef.value.drawGridBoundary({ cells: allCells })
   }
 
+  // 绘制事件位置点和警戒区范围
   if (typeof cesiumMapRef.value.drawEventVisualization === 'function') {
     const eg = responseData.eventGrid
+    const waCenter = warningArea?.center
     cesiumMapRef.value.drawEventVisualization({
       eventPoint: eg?.center ? {
         lon: eg.center[0],
@@ -626,6 +596,11 @@ async function visualizeEmergencyResponse(responseData) {
         height: eg.center[2] || 0,
       } : null,
       warningArea: warningArea || null,
+      warningCenter: waCenter && Array.isArray(waCenter) ? {
+        lon: waCenter[0],
+        lat: waCenter[1],
+        height: waCenter[2] || 0,
+      } : null,
     })
   }
 }
@@ -643,17 +618,75 @@ function handleDrawFence(fence) {
 const fenceStats = computed(() => {
   const fences = fencePanelRef.value?.fences || []
   const applied = fences.filter(f => f.enabled).length
+  const noFlyZoneCount = Object.keys(props.visibleNoFlyZones).length
   return {
-    total: fences.length,
-    applied: applied,
+    total: fences.length + noFlyZoneCount,
+    applied: applied + noFlyZoneCount,
     unapplied: fences.length - applied
   }
+})
+
+function addNoFlyZoneVisualization(zone) {
+  if (!cesiumMapRef.value) return
+  const boundary = zone.boundary
+  if (!boundary || boundary.length < 3) return
+
+  cesiumMapRef.value.drawPolygon({
+    type: 'noFlyZone',
+    zoneId: zone.zone_id,
+    points: boundary.map(coord => ({
+      lon: Number(coord[0]),
+      lat: Number(coord[1]),
+    })),
+    bottom: Number(zone.bottom ?? 0),
+    top: Number(zone.top ?? 120),
+    color: '#ef4444',
+  })
+}
+
+function removeNoFlyZoneVisualization(zoneId) {
+  if (!cesiumMapRef.value) return
+  if (typeof cesiumMapRef.value.removeNoFlyZonePrism === 'function') {
+    cesiumMapRef.value.removeNoFlyZonePrism(zoneId)
+  }
+}
+
+watch(
+  () => props.visibleNoFlyZones,
+  (newVal) => {
+    if (!cesiumMapRef.value) return
+    if (typeof cesiumMapRef.value.removeNoFlyZonePrism !== 'function') return
+    const entityIds = cesiumMapRef.value.viewer?.entities?.values?.map(e => e.id) || []
+    const activeZoneIds = new Set(Object.keys(newVal))
+    const renderedZoneIds = new Set()
+    entityIds.forEach(id => {
+      if (id && id.startsWith('noflyzone-prism-')) {
+        renderedZoneIds.add(id.replace('noflyzone-prism-', ''))
+      }
+    })
+    renderedZoneIds.forEach(zoneId => {
+      if (!activeZoneIds.has(zoneId)) {
+        cesiumMapRef.value.removeNoFlyZonePrism(zoneId)
+      }
+    })
+    Object.values(newVal).forEach(zone => {
+      if (!renderedZoneIds.has(zone.zone_id)) {
+        addNoFlyZoneVisualization(zone)
+      }
+    })
+  },
+  { deep: true },
+)
+
+defineExpose({
+  addNoFlyZoneVisualization,
+  removeNoFlyZoneVisualization,
 })
 
 </script>
 
 <template>
-  <div class="app-root">
+  <div class="app-root" :class="`theme-${props.theme}`">
     <CesiumMap ref="cesiumMapRef" :show3-d-toggle="false" />
 
     <!-- 顶部导航 -->
@@ -688,9 +721,10 @@ const fenceStats = computed(() => {
       <div class="control-panel-fence">
         <div class="fence-panel-wrapper">
           <ElectronicFence
-            ref="fencePanelRef"
-            :map-ready="!!cesiumMapRef"
-            @draw-sphere-fence="handleDrawSphereFence"
+    ref="fencePanelRef"
+    :map-ready="!!cesiumMapRef"
+    :no-fly-zones="visibleNoFlyZones"
+    @draw-sphere-fence="handleDrawSphereFence"
             @draw-line-fence="handleDrawLineFence"
             @complete-sphere-fence="handleCompleteSphereFence"
             @complete-line-fence="handleCompleteLineFence"
@@ -704,7 +738,7 @@ const fenceStats = computed(() => {
 
         <!-- 电子围栏统计信息 -->
         <div class="fence-stats">
-          <div class="stats-title">电子围栏统计</div>
+          <div class="stats-title">禁飞区统计</div>
           <div class="stats-grid">
             <div class="stat-item">
               <div class="stat-value">{{ fenceStats.total }}</div>
@@ -790,7 +824,8 @@ const fenceStats = computed(() => {
                 :class="{ selected: selectedSimulationRouteIds.includes(route.id) }"
               >
                 <input
-                  type="checkbox"
+                  type="radio"
+                  name="simulation-route"
                   :checked="selectedSimulationRouteIds.includes(route.id)"
                   @change="toggleSimulationRoute(route.id)"
                 />
@@ -800,7 +835,7 @@ const fenceStats = computed(() => {
                 </div>
               </label>
             </div>
-            <div class="param-tip">支持选择一条或多条航线参与异常模拟；没有航线时模拟按钮不可执行。</div>
+            <div class="param-tip">请选择一条航线参与异常模拟；没有航线时模拟按钮不可执行。</div>
           </div>
 
           <div class="simulation-section">
@@ -850,6 +885,123 @@ const fenceStats = computed(() => {
   width: 100%;
   height: 100vh;
   overflow: hidden;
+  --monitor-topbar-bg: #1a365d;
+  --monitor-topbar-border: #2c5282;
+  --monitor-nav-bg: #2c5282;
+  --monitor-nav-border: #3182ce;
+  --monitor-nav-text: #fff;
+  --monitor-nav-hover-bg: #3182ce;
+  --monitor-nav-active-bg: #c05621;
+  --monitor-nav-active-border: #dd6b20;
+  --monitor-title-text: #fff;
+  --monitor-status-label: #a0aec0;
+  --monitor-time-bg: #2d3748;
+  --monitor-time-border: #4a5568;
+  --monitor-time-text: #e2e8f0;
+  --monitor-fence-overlay: linear-gradient(to right, rgba(180, 200, 220, 0.92) 0%, rgba(255, 255, 255, 0.5) 50%, rgba(255, 255, 255, 0.25) 100%);
+  --monitor-route-overlay: linear-gradient(to left, rgba(180, 200, 220, 0.92) 0%, rgba(255, 255, 255, 0.5) 50%, rgba(255, 255, 255, 0.25) 100%);
+  --monitor-panel-surface: linear-gradient(to right, rgba(180, 200, 220, 0.92) 0%, rgba(255, 255, 255, 0.5) 50%);
+  --monitor-panel-divider: rgba(226, 232, 240, 0.6);
+  --monitor-stats-title: #2d3748;
+  --monitor-stat-card-bg: rgba(247, 250, 252, 0.3);
+  --monitor-stat-card-border: rgba(226, 232, 240, 0.4);
+  --monitor-stat-value: #2d3748;
+  --monitor-stat-label: #718096;
+  --monitor-panel-title: #2d3748;
+  --monitor-action-btn-bg: rgba(255, 255, 255, 0.9);
+  --monitor-action-btn-border: rgba(90, 150, 200, 0.7);
+  --monitor-action-btn-text: #1e4a6e;
+  --monitor-action-btn-hover-bg: #ffffff;
+  --monitor-action-btn-hover-border: #4a90c2;
+  --monitor-action-btn-hover-shadow: 0 2px 6px rgba(60, 120, 180, 0.15);
+  --monitor-panel-count: #2b6cb0;
+  --monitor-route-item-bg: rgba(255, 255, 255, 0.58);
+  --monitor-route-item-border: rgba(148, 163, 184, 0.28);
+  --monitor-route-name: #1e293b;
+  --monitor-route-meta: #64748b;
+  --monitor-grid-count: #2563eb;
+  --monitor-grid-label: #64748b;
+  --monitor-empty-text: #64748b;
+}
+
+.app-root.theme-tech-blue {
+  --monitor-topbar-bg: linear-gradient(180deg, rgba(3, 21, 44, 0.98), rgba(7, 43, 92, 0.95));
+  --monitor-topbar-border: rgba(77, 189, 255, 0.45);
+  --monitor-nav-bg: linear-gradient(180deg, rgba(10, 45, 90, 0.9), rgba(8, 31, 70, 0.96));
+  --monitor-nav-border: rgba(73, 182, 255, 0.65);
+  --monitor-nav-text: #ddf8ff;
+  --monitor-nav-hover-bg: linear-gradient(180deg, rgba(19, 94, 165, 0.95), rgba(9, 54, 104, 0.98));
+  --monitor-nav-active-bg: linear-gradient(180deg, rgba(0, 180, 216, 0.96), rgba(0, 119, 182, 0.98));
+  --monitor-nav-active-border: rgba(128, 244, 255, 0.9);
+  --monitor-title-text: #effcff;
+  --monitor-status-label: #9fdcff;
+  --monitor-time-bg: linear-gradient(180deg, rgba(10, 37, 74, 0.92), rgba(4, 24, 52, 0.96));
+  --monitor-time-border: rgba(83, 202, 255, 0.52);
+  --monitor-time-text: #dcf7ff;
+  --monitor-fence-overlay: linear-gradient(to right, rgba(5, 35, 78, 0.9) 0%, rgba(10, 66, 118, 0.54) 55%, rgba(10, 66, 118, 0.16) 100%);
+  --monitor-route-overlay: linear-gradient(to left, rgba(4, 34, 76, 0.92) 0%, rgba(10, 66, 118, 0.55) 55%, rgba(10, 66, 118, 0.16) 100%);
+  --monitor-panel-surface: linear-gradient(to right, rgba(5, 35, 78, 0.92) 0%, rgba(10, 66, 118, 0.56) 50%);
+  --monitor-panel-divider: rgba(110, 214, 255, 0.22);
+  --monitor-stats-title: #c8f4ff;
+  --monitor-stat-card-bg: rgba(10, 52, 96, 0.52);
+  --monitor-stat-card-border: rgba(116, 224, 255, 0.22);
+  --monitor-stat-value: #f1fdff;
+  --monitor-stat-label: #8fd2ee;
+  --monitor-panel-title: #e5fbff;
+  --monitor-action-btn-bg: rgba(7, 39, 79, 0.92);
+  --monitor-action-btn-border: rgba(78, 198, 255, 0.62);
+  --monitor-action-btn-text: #d8f7ff;
+  --monitor-action-btn-hover-bg: rgba(11, 87, 151, 0.92);
+  --monitor-action-btn-hover-border: rgba(128, 244, 255, 0.84);
+  --monitor-action-btn-hover-shadow: 0 6px 18px rgba(0, 112, 201, 0.24);
+  --monitor-panel-count: #7deaff;
+  --monitor-route-item-bg: rgba(8, 39, 79, 0.48);
+  --monitor-route-item-border: rgba(109, 214, 255, 0.18);
+  --monitor-route-name: #effcff;
+  --monitor-route-meta: #97d9ef;
+  --monitor-grid-count: #7cecff;
+  --monitor-grid-label: #9fdcff;
+  --monitor-empty-text: #97d9ef;
+}
+
+.app-root.theme-fresh-green {
+  --monitor-topbar-bg: linear-gradient(180deg, rgba(236, 249, 241, 0.98), rgba(219, 244, 228, 0.95));
+  --monitor-topbar-border: rgba(122, 197, 150, 0.42);
+  --monitor-nav-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(240, 250, 244, 0.96));
+  --monitor-nav-border: rgba(122, 197, 150, 0.56);
+  --monitor-nav-text: #35624a;
+  --monitor-nav-hover-bg: linear-gradient(180deg, rgba(255, 255, 255, 1), rgba(232, 248, 238, 0.98));
+  --monitor-nav-active-bg: linear-gradient(180deg, rgba(245, 253, 247, 1), rgba(225, 246, 233, 0.98));
+  --monitor-nav-active-border: rgba(94, 172, 125, 0.82);
+  --monitor-title-text: #315d46;
+  --monitor-status-label: #5d8b70;
+  --monitor-time-bg: rgba(255, 255, 255, 0.9);
+  --monitor-time-border: rgba(122, 197, 150, 0.42);
+  --monitor-time-text: #3c6d53;
+  --monitor-fence-overlay: linear-gradient(to right, rgba(245, 252, 247, 0.94) 0%, rgba(232, 248, 238, 0.7) 55%, rgba(232, 248, 238, 0.18) 100%);
+  --monitor-route-overlay: linear-gradient(to left, rgba(245, 252, 247, 0.94) 0%, rgba(232, 248, 238, 0.7) 55%, rgba(232, 248, 238, 0.18) 100%);
+  --monitor-panel-surface: linear-gradient(to right, rgba(245, 252, 247, 0.96) 0%, rgba(232, 248, 238, 0.78) 50%);
+  --monitor-panel-divider: rgba(167, 214, 184, 0.28);
+  --monitor-stats-title: #4a7f60;
+  --monitor-stat-card-bg: rgba(255, 255, 255, 0.72);
+  --monitor-stat-card-border: rgba(167, 214, 184, 0.34);
+  --monitor-stat-value: #2f5d45;
+  --monitor-stat-label: #6b8d79;
+  --monitor-panel-title: #315d46;
+  --monitor-action-btn-bg: rgba(255, 255, 255, 0.9);
+  --monitor-action-btn-border: rgba(126, 198, 152, 0.56);
+  --monitor-action-btn-text: #466c56;
+  --monitor-action-btn-hover-bg: rgba(245, 253, 247, 0.98);
+  --monitor-action-btn-hover-border: rgba(94, 172, 125, 0.76);
+  --monitor-action-btn-hover-shadow: 0 6px 18px rgba(126, 198, 152, 0.16);
+  --monitor-panel-count: #5fae7b;
+  --monitor-route-item-bg: rgba(255, 255, 255, 0.64);
+  --monitor-route-item-border: rgba(167, 214, 184, 0.3);
+  --monitor-route-name: #315d46;
+  --monitor-route-meta: #6b8d79;
+  --monitor-grid-count: #5fae7b;
+  --monitor-grid-label: #6b8d79;
+  --monitor-empty-text: #6b8d79;
 }
 
 /* 顶部导航 */
@@ -863,8 +1015,8 @@ const fenceStats = computed(() => {
   align-items: center;
   justify-content: space-between;
   padding: 0 20px;
-  background: #1a365d;
-  border-bottom: 2px solid #2c5282;
+  background: var(--monitor-topbar-bg);
+  border-bottom: 2px solid var(--monitor-topbar-border);
   z-index: 100;
 }
 
@@ -876,20 +1028,20 @@ const fenceStats = computed(() => {
 
 .nav-btn {
   padding: 6px 16px;
-  background: #2c5282;
-  border: 1px solid #3182ce;
-  color: #fff;
+  background: var(--monitor-nav-bg);
+  border: 1px solid var(--monitor-nav-border);
+  color: var(--monitor-nav-text);
   font-size: 13px;
   cursor: pointer;
 }
 
 .nav-btn:hover {
-  background: #3182ce;
+  background: var(--monitor-nav-hover-bg);
 }
 
 .nav-btn.active {
-  background: #c05621;
-  border-color: #dd6b20;
+  background: var(--monitor-nav-active-bg);
+  border-color: var(--monitor-nav-active-border);
 }
 
 /* 中间标题区域 */
@@ -902,7 +1054,7 @@ const fenceStats = computed(() => {
 .main-title {
   font-size: 18px;
   font-weight: bold;
-  color: #fff;
+  color: var(--monitor-title-text);
   margin: 0;
   letter-spacing: 2px;
 }
@@ -916,7 +1068,7 @@ const fenceStats = computed(() => {
 
 .status-box {
   font-size: 12px;
-  color: #a0aec0;
+  color: var(--monitor-status-label);
 }
 
 .status-value {
@@ -933,9 +1085,9 @@ const fenceStats = computed(() => {
 
 .time-box {
   padding: 4px 12px;
-  background: #2d3748;
-  border: 1px solid #4a5568;
-  color: #e2e8f0;
+  background: var(--monitor-time-bg);
+  border: 1px solid var(--monitor-time-border);
+  color: var(--monitor-time-text);
   font-size: 12px;
   font-family: monospace;
 }
@@ -980,7 +1132,7 @@ const fenceStats = computed(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: linear-gradient(to right, rgba(180, 200, 220, 0.92) 0%, rgba(255, 255, 255, 0.5) 50%, rgba(255, 255, 255, 0.25) 100%);
+  background: var(--monitor-fence-overlay);
   border-radius: 0;
   pointer-events: none;
   z-index: 0;
@@ -998,7 +1150,7 @@ const fenceStats = computed(() => {
   display: flex;
   flex-direction: column;
   position: relative;
-  background: linear-gradient(to right, rgba(180, 200, 220, 0.92) 0%, rgba(255, 255, 255, 0.5) 50%);
+  background: var(--monitor-panel-surface);
   border-radius: 0;
   margin: 0;
   box-shadow: none;
@@ -1012,10 +1164,10 @@ const fenceStats = computed(() => {
 .stats-title {
   font-size: 13px;
   font-weight: 600;
-  color: #2d3748;
+  color: var(--monitor-stats-title);
   margin-bottom: 10px;
   padding-bottom: 8px;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+  border-bottom: 1px solid var(--monitor-panel-divider);
 }
 
 .stats-grid {
@@ -1030,22 +1182,22 @@ const fenceStats = computed(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: rgba(247, 250, 252, 0.3);
+  background: var(--monitor-stat-card-bg);
   border-radius: 8px;
   padding: 8px 4px;
-  border: 1px solid rgba(226, 232, 240, 0.4);
+  border: 1px solid var(--monitor-stat-card-border);
 }
 
 .stat-value {
   font-size: 20px;
   font-weight: bold;
-  color: #2d3748;
+  color: var(--monitor-stat-value);
   font-family: monospace;
 }
 
 .stat-label {
   font-size: 11px;
-  color: #718096;
+  color: var(--monitor-stat-label);
   margin-top: 4px;
 }
 
@@ -1081,7 +1233,7 @@ const fenceStats = computed(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: linear-gradient(to left, rgba(180, 200, 220, 0.92) 0%, rgba(255, 255, 255, 0.5) 50%, rgba(255, 255, 255, 0.25) 100%);
+  background: var(--monitor-route-overlay);
   border-radius: 0;
   pointer-events: none;
   z-index: 0;
@@ -1097,7 +1249,7 @@ const fenceStats = computed(() => {
   align-items: center;
   justify-content: space-between;
   padding: 12px;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+  border-bottom: 1px solid var(--monitor-panel-divider);
   background: transparent;
   border-radius: 0;
 }
@@ -1105,7 +1257,7 @@ const fenceStats = computed(() => {
 .panel-title {
   font-size: 14px;
   font-weight: 600;
-  color: #2d3748;
+  color: var(--monitor-panel-title);
   flex-shrink: 0;
 }
 
@@ -1119,10 +1271,10 @@ const fenceStats = computed(() => {
 
 .action-btn {
   padding: 5px 10px;
-  border: 1px solid rgba(90, 150, 200, 0.7);
+  border: 1px solid var(--monitor-action-btn-border);
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.9);
-  color: #1e4a6e;
+  background: var(--monitor-action-btn-bg);
+  color: var(--monitor-action-btn-text);
   font-size: 12px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -1131,9 +1283,9 @@ const fenceStats = computed(() => {
 }
 
 .action-btn:hover {
-  background: #ffffff;
-  border-color: #4a90c2;
-  box-shadow: 0 2px 6px rgba(60, 120, 180, 0.15);
+  background: var(--monitor-action-btn-hover-bg);
+  border-color: var(--monitor-action-btn-hover-border);
+  box-shadow: var(--monitor-action-btn-hover-shadow);
 }
 
 .simulate-btn {
@@ -1147,7 +1299,7 @@ const fenceStats = computed(() => {
 .panel-count {
   font-size: 16px;
   font-weight: bold;
-  color: #2b6cb0;
+  color: var(--monitor-panel-count);
   font-family: monospace;
 }
 
@@ -1376,7 +1528,7 @@ const fenceStats = computed(() => {
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #a0aec0;
+  color: var(--monitor-empty-text);
   font-size: 12px;
 }
 
@@ -1386,14 +1538,14 @@ const fenceStats = computed(() => {
   justify-content: space-between;
   padding: 10px;
   margin-bottom: 6px;
-  background: rgba(247, 250, 252, 0.3);
+  background: var(--monitor-route-item-bg);
   border-radius: 8px;
-  border: 1px solid rgba(226, 232, 240, 0.4);
+  border: 1px solid var(--monitor-route-item-border);
   transition: all 0.2s ease;
 }
 
 .route-item:hover {
-  background: rgba(247, 250, 252, 0.5);
+  background: color-mix(in srgb, var(--monitor-route-item-bg) 78%, white 22%);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
@@ -1405,13 +1557,13 @@ const fenceStats = computed(() => {
 
 .route-name {
   font-size: 13px;
-  color: #2d3748;
+  color: var(--monitor-route-name);
   font-weight: 500;
 }
 
 .route-id {
   font-size: 11px;
-  color: #718096;
+  color: var(--monitor-route-meta);
 }
 
 .route-grids {
@@ -1424,13 +1576,13 @@ const fenceStats = computed(() => {
 .grid-count {
   font-size: 16px;
   font-weight: bold;
-  color: #2b6cb0;
+  color: var(--monitor-panel-count);
   font-family: monospace;
 }
 
 .grid-label {
   font-size: 10px;
-  color: #718096;
+  color: var(--monitor-grid-label);
 }
 
 .route-stats-section {
@@ -1440,7 +1592,7 @@ const fenceStats = computed(() => {
   display: flex;
   flex-direction: column;
   position: relative;
-  background: linear-gradient(to left, rgba(180, 200, 220, 0.92) 0%, rgba(255, 255, 255, 0.5) 50%);
+  background: var(--monitor-panel-surface);
   border-radius: 0;
   margin: 0;
   box-shadow: none;
@@ -1473,22 +1625,22 @@ const fenceStats = computed(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: rgba(247, 250, 252, 0.3);
+  background: var(--monitor-stat-card-bg);
   border-radius: 8px;
   padding: 8px 4px;
-  border: 1px solid rgba(226, 232, 240, 0.4);
+  border: 1px solid var(--monitor-stat-card-border);
 }
 
 .route-stats-section .stat-value {
   font-size: 18px;
   font-weight: bold;
-  color: #2b6cb0;
+  color: var(--monitor-panel-count);
   font-family: monospace;
 }
 
 .route-stats-section .stat-label {
   font-size: 11px;
-  color: #718096;
+  color: var(--monitor-stat-label);
   margin-top: 4px;
 }
 </style>

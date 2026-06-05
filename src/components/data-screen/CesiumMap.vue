@@ -281,13 +281,21 @@ function drawLinePath(linePoints) {
 
 function drawPolygon(polygonPoints) {
   if (!viewer) return
-  clearPolygonVisual()
 
-  // 处理新格式：{ outer: [...], holes: [...], currentHole: [...], drawingMode: 'outer'|'hole' }
-  // 或旧格式：Array of points
+  // 禁飞区类型不清除其他多边形，由 drawNoFlyZonePrism 自行管理
+  const isNoFlyZone = polygonPoints && typeof polygonPoints === 'object'
+    && !Array.isArray(polygonPoints) && polygonPoints.type === 'noFlyZone'
 
-  // 如果是对象格式（新格式带洞）
+  if (!isNoFlyZone) {
+    clearPolygonVisual()
+  }
+
   if (polygonPoints && typeof polygonPoints === 'object' && !Array.isArray(polygonPoints)) {
+    if (polygonPoints.type === 'noFlyZone' && Array.isArray(polygonPoints.points)) {
+      drawNoFlyZonePrism(polygonPoints)
+      return
+    }
+
     const { outer, holes, currentHole, drawingMode } = polygonPoints
 
     console.log('[CesiumMap] drawPolygon 接收到的数据:', {
@@ -685,6 +693,82 @@ function drawPolygonShape(pts, color, idPrefix, isDashed = false) {
   }
 }
 
+function drawNoFlyZonePrism(data) {
+  if (!viewer) return
+
+  const pts = data.points
+  if (!pts || pts.length < 3) return
+
+  const bottom = Number(data.bottom ?? 0)
+  const top = Number(data.top ?? 120)
+  const color = data.color || '#ef4444'
+  const zoneId = data.zoneId || 'default'
+
+  removeNoFlyZonePrism(zoneId)
+
+  const positions = Cesium.Cartesian3.fromDegreesArrayHeights(
+    pts.flatMap(p => [Number(p.lon), Number(p.lat), bottom]),
+  )
+
+  viewer.entities.add({
+    id: `noflyzone-prism-${zoneId}`,
+    polygon: {
+      hierarchy: positions,
+      material: Cesium.Color.fromCssColorString(color).withAlpha(0.35),
+      outline: true,
+      outlineColor: Cesium.Color.fromCssColorString(color).withAlpha(0.9),
+      outlineWidth: 2,
+      height: bottom,
+      extrudedHeight: top,
+      closeTop: true,
+      closeBottom: true,
+    },
+  })
+
+  pts.forEach((p, idx) => {
+    viewer.entities.add({
+      id: `noflyzone-point-${zoneId}-${idx}`,
+      position: Cesium.Cartesian3.fromDegrees(Number(p.lon), Number(p.lat), top),
+      point: {
+        pixelSize: 8,
+        color: Cesium.Color.fromCssColorString(color),
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 2,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+      label: {
+        text: String(idx + 1),
+        font: '11px sans-serif',
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        pixelOffset: new Cesium.Cartesian2(0, -10),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    })
+  })
+
+  const centerLon = pts.reduce((s, p) => s + Number(p.lon), 0) / pts.length
+  const centerLat = pts.reduce((s, p) => s + Number(p.lat), 0) / pts.length
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, top + 2000),
+    duration: 1.5,
+  })
+}
+
+function removeNoFlyZonePrism(zoneId) {
+  if (!viewer) return
+  const entityIds = viewer.entities.values.map(e => e.id)
+  entityIds.forEach(id => {
+    if (!id) return
+    if (id === `noflyzone-prism-${zoneId}` || id.startsWith(`noflyzone-point-${zoneId}-`)) {
+      viewer.entities.removeById(id)
+    }
+  })
+}
+
 function clearLineVisual() {
   if (!viewer) return
 
@@ -717,6 +801,10 @@ function clearPolygonVisual() {
     }
     // 新格式：洞
     if (id.startsWith('hole-outline-') || id.startsWith('hole-point-') || id.startsWith('current-hole-')) {
+      viewer.entities.removeById(id)
+    }
+    // 禁飞区立方体
+    if (id.startsWith('noflyzone-prism-') || id.startsWith('noflyzone-point-')) {
       viewer.entities.removeById(id)
     }
   })
@@ -1972,6 +2060,8 @@ function drawEventVisualization(payload) {
     'event-visual-point-label',
     'event-visual-grid',
     'event-visual-warning-area',
+    'event-visual-warning-center',
+    'event-visual-warning-center-label',
   ]
   removeIds.forEach((id) => {
     const entity = viewer.entities.getById(id)
@@ -2044,13 +2134,87 @@ function drawEventVisualization(payload) {
       },
     })
   }
+
+  // 绘制 warningArea 中心点
+  const wc = payload.warningCenter || {}
+  const wcLon = Number(wc.lon)
+  const wcLat = Number(wc.lat)
+  const wcHeight = Number(wc.height || 0)
+  if (Number.isFinite(wcLon) && Number.isFinite(wcLat)) {
+    viewer.entities.add({
+      id: 'event-visual-warning-center',
+      position: Cesium.Cartesian3.fromDegrees(wcLon, wcLat, Number.isFinite(wcHeight) ? wcHeight : 0),
+      point: {
+        pixelSize: 10,
+        color: Cesium.Color.fromCssColorString('#f59e0b'),
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 2,
+      },
+    })
+    viewer.entities.add({
+      id: 'event-visual-warning-center-label',
+      position: Cesium.Cartesian3.fromDegrees(wcLon, wcLat, Number.isFinite(wcHeight) ? wcHeight : 0),
+      label: {
+        text: '事件位置点',
+        font: '14px sans-serif',
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        pixelOffset: new Cesium.Cartesian2(0, -16),
+      },
+    })
+  }
 }
 
 function clearEventVisualization() {
   if (!viewer) return
-  ;['event-visual-point', 'event-visual-point-label', 'event-visual-grid', 'event-visual-warning-area'].forEach((id) => {
+  ;['event-visual-point', 'event-visual-point-label', 'event-visual-grid', 'event-visual-warning-area', 'event-visual-warning-center', 'event-visual-warning-center-label'].forEach((id) => {
     const entity = viewer.entities.getById(id)
     if (entity) viewer.entities.remove(entity)
+  })
+}
+
+// ==================== 警戒区网格可视化 ====================
+
+function drawWarningGridPoints(cells) {
+  if (!viewer || !Array.isArray(cells)) return
+  clearWarningGridPoints()
+
+  cells.forEach((cell, index) => {
+    const minlon = Number(cell.minlon)
+    const maxlon = Number(cell.maxlon)
+    const minlat = Number(cell.minlat)
+    const maxlat = Number(cell.maxlat)
+    const bottom = Number(cell.bottom ?? 0)
+    const top = Number(cell.top ?? 0)
+
+    if (Number.isFinite(minlon) && Number.isFinite(maxlon) && Number.isFinite(minlat) && Number.isFinite(maxlat)) {
+      viewer.entities.add({
+        id: `warning-grid-cell-${index}`,
+        rectangle: {
+          coordinates: Cesium.Rectangle.fromDegrees(minlon, minlat, maxlon, maxlat),
+          material: Cesium.Color.fromCssColorString('#f59e0b').withAlpha(0.5),
+          outline: true,
+          outlineColor: Cesium.Color.fromCssColorString('#f59e0b'),
+          outlineWidth: 2,
+          height: bottom,
+          extrudedHeight: top,
+        },
+      })
+    }
+  })
+  console.log('[CesiumMap] 已绘制警戒区网格:', cells.length, '个')
+}
+
+function clearWarningGridPoints() {
+  if (!viewer) return
+  const entityIds = viewer.entities.values.map(e => e.id)
+  entityIds.forEach(id => {
+    if (id && id.startsWith('warning-grid-cell-')) {
+      viewer.entities.removeById(id)
+    }
   })
 }
 
@@ -2252,6 +2416,7 @@ defineExpose({
   drawPolygon,
   clearLineVisual,
   clearPolygonVisual,
+  removeNoFlyZonePrism,
   clearGridVisual,
   toggle3DTiles,
   startDrawSphereFence,
@@ -2274,6 +2439,8 @@ defineExpose({
   getViewBounds,
   drawEventVisualization,
   clearEventVisualization,
+  drawWarningGridPoints,
+  clearWarningGridPoints,
   startUavAnimation,
   stopUavAnimation,
   stopUavAnimationByRouteId,

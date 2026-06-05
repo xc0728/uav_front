@@ -1,8 +1,8 @@
 ﻿<script setup>
 import { ref, onMounted, watch } from 'vue'
-import { ChevronLeft, Plane, AlertTriangle, FileCheck, Route, RefreshCw, Loader2, Shield, X } from 'lucide-vue-next'
+import { ChevronLeft, Plane, AlertTriangle, FileCheck, Route, RefreshCw, Loader2, Shield, X, Trash2, Database } from 'lucide-vue-next'
 
-const emit = defineEmits(['switch-view', 'route-monitor-start', 'route-monitor-stop', 'visualize-event'])
+const emit = defineEmits(['switch-view', 'route-monitor-start', 'route-monitor-stop', 'visualize-event', 'show-no-fly-zone', 'hide-no-fly-zone'])
 
 // 接收外部传入的监控状态
 const props = defineProps({
@@ -48,8 +48,8 @@ const infoModules = [
   },
   {
     id: 'fence-info',
-    name: '电子围栏管理',
-    shortName: '电子围栏管理',
+    name: '禁飞区管理',
+    shortName: '禁飞区管理',
     icon: Shield,
     status: 'developing',
   },
@@ -94,6 +94,10 @@ const aircraftPaginatedList = ref([])
 // 电子围栏数据
 const fenceList = ref([])
 const fenceError = ref('')
+const fenceTypeCode = ref('electronic_fence')
+const noFlyZoneVisibleMap = ref({})
+const selectedFenceIds = ref(new Set())
+const isSyncing = ref(false)
 
 // 分页
 const currentPage = ref(1)
@@ -840,15 +844,20 @@ function viewDetail(route) {
   currentView.value = 'detail'
 }
 
-// 获取电子围栏列表
+// 获取禁飞区列表
 async function fetchFences() {
   isLoading.value = true
   fenceError.value = ''
 
   try {
-    const resp = await fetch('/api/airRoute/fenceManagement/listFences', {
-      method: 'GET',
+    const resp = await fetch('/api/multiSource/airSpace/noFlyZone/list', {
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        typeCode: fenceTypeCode.value,
+        page: fenceCurrentPage.value,
+        pageSize: fencePageSize.value,
+      }),
     })
 
     if (!resp.ok) {
@@ -857,49 +866,159 @@ async function fetchFences() {
     }
 
     const data = await resp.json()
-    console.log('[电子围栏列表] 返回数据:', data)
+    console.log('[禁飞区列表] 返回数据:', data)
 
-    if (data?.status === 'success' && Array.isArray(data?.data)) {
-      fenceList.value = data.data
-      fenceTotalCount.value = data.data.length
-      updateFencePagination()
+    if (data?.status === 'success' && data?.data) {
+      fenceList.value = data.data.items || []
+      fenceTotalCount.value = data.data.count || 0
+      fenceTotalPages.value = Math.max(1, Math.ceil(fenceTotalCount.value / fencePageSize.value))
+      paginatedFences.value = fenceList.value
     } else {
       fenceList.value = []
       fenceTotalCount.value = 0
-      updateFencePagination()
+      fenceTotalPages.value = 1
+      paginatedFences.value = []
     }
   } catch (err) {
-    console.error('[电子围栏列表] 请求错误:', err)
-    fenceError.value = err?.message || '获取电子围栏列表失败'
+    console.error('[禁飞区列表] 请求错误:', err)
+    fenceError.value = err?.message || '获取禁飞区列表失败'
   } finally {
     isLoading.value = false
   }
 }
 
-// 查看电子围栏详情
-function viewFenceDetail(fence) {
-  selectedFence.value = fence
-  currentView.value = 'fence-detail'
+async function toggleNoFlyZoneVisibility(zone) {
+  const zoneId = zone.zone_id
+  if (!zoneId) return
+
+  if (noFlyZoneVisibleMap.value[zoneId]) {
+    noFlyZoneVisibleMap.value[zoneId] = false
+    emit('hide-no-fly-zone', { zoneId, typeCode: zone.type_code })
+  } else {
+    noFlyZoneVisibleMap.value[zoneId] = true
+    try {
+      const resp = await fetch('/api/multiSource/airSpace/noFlyZone/detail', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          typeCode: zone.type_code || 'electronic_fence',
+          zoneId: zoneId,
+        }),
+      })
+      const data = await resp.json()
+      console.log('[禁飞区详情] 返回:', data)
+      if (data?.status === 'success' && data?.data?.zone) {
+        emit('show-no-fly-zone', data.data.zone)
+      } else {
+        noFlyZoneVisibleMap.value[zoneId] = false
+        console.error('[禁飞区详情] 查询失败:', data)
+      }
+    } catch (err) {
+      noFlyZoneVisibleMap.value[zoneId] = false
+      console.error('[禁飞区详情] 请求错误:', err)
+    }
+  }
 }
 
-// 电子围栏分页
-function updateFencePagination() {
-  fenceTotalPages.value = Math.max(1, Math.ceil(fenceTotalCount.value / fencePageSize.value))
-  const start = (fenceCurrentPage.value - 1) * fencePageSize.value
-  paginatedFences.value = fenceList.value.slice(start, start + fencePageSize.value)
+async function syncNoFlyZoneToRedis() {
+  isSyncing.value = true
+  try {
+    const resp = await fetch('/api/multiSource/redisSync/syncNoFlyZoneToRedis', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    const data = await resp.json()
+    if (data?.status === 'success') {
+      const d = data.data || {}
+      alert(`同步完成：共 ${d.totalGroups || 0} 组，${d.totalRecords || 0} 条记录，成功 ${d.syncedCount || 0}，失败 ${d.failedCount || 0}，跳过 ${d.skippedCount || 0}`)
+    } else {
+      alert('同步失败：' + (data?.message || '未知错误'))
+    }
+  } catch (err) {
+    console.error('[禁飞区同步] 请求错误:', err)
+    alert('同步请求失败')
+  } finally {
+    isSyncing.value = false
+  }
+}
+
+async function deleteSelectedFences() {
+  const ids = [...selectedFenceIds.value]
+  if (ids.length === 0) return
+
+  const confirmed = window.confirm(`确定要删除选中的 ${ids.length} 个禁飞区吗？`)
+  if (!confirmed) return
+
+  let successCount = 0
+  for (const zoneId of ids) {
+    const zone = fenceList.value.find(z => z.zone_id === zoneId)
+    if (!zone) continue
+    try {
+      const resp = await fetch('/api/multiSource/airSpace/noFlyZone/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          typeCode: zone.type_code || 'electronic_fence',
+          zoneId: zoneId,
+          cleanupRedis: true,
+        }),
+      })
+      const data = await resp.json()
+      if (data?.status === 'success') {
+        successCount++
+        // 如果该禁飞区正在显示，先隐藏
+        if (noFlyZoneVisibleMap.value[zoneId]) {
+          noFlyZoneVisibleMap.value[zoneId] = false
+          emit('hide-no-fly-zone', { zoneId, typeCode: zone.type_code })
+        }
+      } else {
+        console.error('[禁飞区删除] 失败:', zoneId, data?.message)
+      }
+    } catch (err) {
+      console.error('[禁飞区删除] 请求错误:', zoneId, err)
+    }
+  }
+
+  if (successCount > 0) {
+    selectedFenceIds.value = new Set()
+    fetchFences()
+  }
+}
+
+function toggleFenceSelection(zoneId) {
+  const newSet = new Set(selectedFenceIds.value)
+  if (newSet.has(zoneId)) {
+    newSet.delete(zoneId)
+  } else {
+    newSet.add(zoneId)
+  }
+  selectedFenceIds.value = newSet
+}
+
+function toggleAllFenceSelection() {
+  const pageIds = paginatedFences.value.map(z => z.zone_id)
+  const allSelected = pageIds.length > 0 && pageIds.every(id => selectedFenceIds.value.has(id))
+  const newSet = new Set(selectedFenceIds.value)
+  if (allSelected) {
+    pageIds.forEach(id => newSet.delete(id))
+  } else {
+    pageIds.forEach(id => newSet.add(id))
+  }
+  selectedFenceIds.value = newSet
 }
 
 function prevFencePage() {
   if (fenceCurrentPage.value > 1) {
     fenceCurrentPage.value--
-    updateFencePagination()
+    fetchFences()
   }
 }
 
 function nextFencePage() {
   if (fenceCurrentPage.value < fenceTotalPages.value) {
     fenceCurrentPage.value++
-    updateFencePagination()
+    fetchFences()
   }
 }
 
@@ -1399,27 +1518,43 @@ defineExpose({
             </div>
           </div>
         </div>
+      </template>
 
-        <!-- 电子围栏管理视图 -->
-        <template v-else-if="activeModuleId === 'fence-info'">
+      <!-- 禁飞区管理视图 -->
+      <template v-if="activeModuleId === 'fence-info'">
           <!-- 面包屑导航 -->
           <div class="breadcrumb">
             <span class="breadcrumb-item">智绘平台</span>
             <span class="breadcrumb-separator">/</span>
             <span class="breadcrumb-item">信息管理系统</span>
             <span class="breadcrumb-separator">/</span>
-            <span class="breadcrumb-item current">电子围栏管理</span>
+            <span class="breadcrumb-item current">禁飞区管理</span>
           </div>
 
-          <!-- 电子围栏列表视图 -->
+          <!-- 禁飞区列表视图 -->
           <div v-if="currentView === 'list'" class="fence-list-view">
             <div class="view-header">
-              <h3>电子围栏列表</h3>
-              <button class="btn-refresh" @click="fetchFences" :disabled="isLoading">
-                <Loader2 v-if="isLoading" :size="14" class="spin" />
-                <RefreshCw v-else :size="14" />
-                刷新
-              </button>
+              <h3>禁飞区列表</h3>
+              <div class="view-header-actions">
+                <select v-model="fenceTypeCode" class="type-select" @change="fenceCurrentPage = 1; fetchFences()">
+                  <option value="electronic_fence">电子围栏</option>
+                  <option value="risk_area">风险区域</option>
+                </select>
+                <button class="btn-refresh" @click="fetchFences" :disabled="isLoading">
+                  <Loader2 v-if="isLoading" :size="14" class="spin" />
+                  <RefreshCw v-else :size="14" />
+                  刷新
+                </button>
+                <button class="btn-sync" @click="syncNoFlyZoneToRedis" :disabled="isSyncing">
+                  <Loader2 v-if="isSyncing" :size="14" class="spin" />
+                  <Database v-else :size="14" />
+                  同步
+                </button>
+                <button class="btn-delete" @click="deleteSelectedFences" :disabled="selectedFenceIds.size === 0">
+                  <Trash2 :size="14" />
+                  删除
+                </button>
+              </div>
             </div>
 
             <!-- 加载状态 -->
@@ -1436,7 +1571,7 @@ defineExpose({
             <!-- 空状态 -->
             <div v-else-if="fenceList.length === 0" class="empty-state">
               <Shield :size="48" class="empty-icon" />
-              <p>暂无电子围栏数据</p>
+              <p>暂无禁飞区数据</p>
             </div>
 
             <!-- 数据表格 -->
@@ -1444,31 +1579,58 @@ defineExpose({
               <table class="data-table">
                 <thead>
                   <tr>
+                    <th class="col-checkbox">
+                      <input
+                        type="checkbox"
+                        :checked="paginatedFences.length > 0 && paginatedFences.every(z => selectedFenceIds.has(z.zone_id))"
+                        @change="toggleAllFenceSelection"
+                      />
+                    </th>
                     <th>序号</th>
-                    <th>围栏ID</th>
-                    <th>围栏名称</th>
-                    <th>围栏类型</th>
-                    <th>中心坐标</th>
-                    <th>半径/范围</th>
-                    <th>操作</th>
+                    <th>区域ID</th>
+                    <th>名称</th>
+                    <th>类型</th>
+                    <th>底面高(m)</th>
+                    <th>顶面高(m)</th>
+                    <th>边界范围</th>
+                    <th>显示</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="(fence, index) in paginatedFences" :key="fence.id">
+                  <tr v-for="(zone, index) in paginatedFences" :key="zone.zone_id">
+                    <td class="col-checkbox">
+                      <input
+                        type="checkbox"
+                        :checked="selectedFenceIds.has(zone.zone_id)"
+                        @change="toggleFenceSelection(zone.zone_id)"
+                      />
+                    </td>
                     <td class="col-index">{{ (fenceCurrentPage - 1) * fencePageSize + index + 1 }}</td>
-                    <td class="col-id">{{ fence.id }}</td>
-                    <td class="col-name">{{ fence.name || '-' }}</td>
+                    <td class="col-id">{{ zone.zone_id }}</td>
+                    <td class="col-name">{{ zone.name || '-' }}</td>
                     <td class="col-type">
-                      <span class="type-badge" :class="fence.type === 'circle' ? 'type-circle' : 'type-polygon'">
-                        {{ fence.type === 'circle' ? '圆形' : '多边形' }}
+                      <span class="type-badge" :class="zone.type_code === 'electronic_fence' ? 'type-circle' : 'type-polygon'">
+                        {{ zone.type_name || (zone.type_code === 'electronic_fence' ? '电子围栏' : '风险区域') }}
                       </span>
                     </td>
-                    <td class="col-coord">{{ fence.center ? `${fence.center[0].toFixed(6)}, ${fence.center[1].toFixed(6)}` : '-' }}</td>
-                    <td class="col-radius">
-                      {{ fence.type === 'circle' ? `${fence.radius || 0}m` : fence.points?.length ? `${fence.points.length}个点` : '-' }}
+                    <td class="col-coord">{{ zone.bottom ?? '-' }}</td>
+                    <td class="col-coord">{{ zone.top ?? '-' }}</td>
+                    <td class="col-coord">
+                      <template v-if="zone.bbox">
+                        {{ Number(zone.bbox.minlon).toFixed(4) }}, {{ Number(zone.bbox.minlat).toFixed(4) }} ~
+                        {{ Number(zone.bbox.maxlon).toFixed(4) }}, {{ Number(zone.bbox.maxlat).toFixed(4) }}
+                      </template>
+                      <template v-else>-</template>
                     </td>
-                    <td class="col-actions">
-                      <button class="btn-action view" @click="viewFenceDetail(fence)">查看</button>
+                    <td class="col-toggle">
+                      <label class="toggle-switch">
+                        <input
+                          type="checkbox"
+                          :checked="!!noFlyZoneVisibleMap[zone.zone_id]"
+                          @change="toggleNoFlyZoneVisibility(zone)"
+                        >
+                        <span class="toggle-slider"></span>
+                      </label>
                     </td>
                   </tr>
                 </tbody>
@@ -1486,71 +1648,7 @@ defineExpose({
               </div>
             </div>
           </div>
-
-          <!-- 电子围栏详情视图 -->
-          <div v-else-if="currentView === 'fence-detail' && selectedFence" class="fence-detail-view">
-            <div class="view-header">
-              <button class="btn-back" @click="goBack">
-                <ChevronLeft :size="18" />
-                返回列表
-              </button>
-              <h3>电子围栏详情</h3>
-            </div>
-
-            <div class="detail-content">
-              <div class="detail-section">
-                <h4>基本信息</h4>
-                <div class="detail-grid">
-                  <div class="detail-item">
-                    <label>围栏ID</label>
-                    <span>{{ selectedFence.id }}</span>
-                  </div>
-                  <div class="detail-item">
-                    <label>围栏名称</label>
-                    <span>{{ selectedFence.name || '未命名' }}</span>
-                  </div>
-                  <div class="detail-item">
-                    <label>围栏类型</label>
-                    <span>
-                      <span class="type-badge" :class="selectedFence.type === 'circle' ? 'type-circle' : 'type-polygon'">
-                        {{ selectedFence.type === 'circle' ? '圆形' : '多边形' }}
-                      </span>
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div class="detail-section" v-if="selectedFence.type === 'circle'">
-                <h4>圆形围栏参数</h4>
-                <div class="detail-grid">
-                  <div class="detail-item">
-                    <label>中心经度</label>
-                    <span>{{ selectedFence.center?.[0]?.toFixed(6) || '-' }}</span>
-                  </div>
-                  <div class="detail-item">
-                    <label>中心纬度</label>
-                    <span>{{ selectedFence.center?.[1]?.toFixed(6) || '-' }}</span>
-                  </div>
-                  <div class="detail-item">
-                    <label>半径</label>
-                    <span>{{ selectedFence.radius || 0 }} 米</span>
-                  </div>
-                </div>
-              </div>
-
-              <div class="detail-section" v-else>
-                <h4>多边形围栏坐标</h4>
-                <div class="polygon-points">
-                  <div class="point-item" v-for="(point, idx) in selectedFence.points" :key="idx">
-                    <span class="point-index">{{ idx + 1 }}</span>
-                    <span class="point-coord">{{ point[0].toFixed(6) }}, {{ point[1].toFixed(6) }}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
         </template>
-      </template>
 
       <!-- 异常事件管理视图 -->
       <template v-else-if="activeModuleId === 'event-management'">
@@ -1896,6 +1994,28 @@ defineExpose({
   color: #1e293b;
 }
 
+.view-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.type-select {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.type-select:focus {
+  outline: none;
+  border-color: #7db8e0;
+}
+
 .panel-actions {
   display: flex;
   align-items: center;
@@ -1962,6 +2082,66 @@ defineExpose({
 .btn-refresh:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.btn-delete {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #dc2626;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-delete:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #f87171;
+}
+
+.btn-delete:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-sync {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #2563eb;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-sync:hover:not(:disabled) {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+.btn-sync:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.col-checkbox {
+  width: 36px;
+  text-align: center;
+}
+
+.col-checkbox input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: #dc2626;
 }
 
 .aircraft-view {
@@ -2414,6 +2594,7 @@ defineExpose({
   border-radius: 4px;
   font-size: 12px;
   font-weight: 500;
+  white-space: nowrap;
 }
 
 .type-circle {
@@ -3004,5 +3185,55 @@ defineExpose({
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  cursor: pointer;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #cbd5e1;
+  border-radius: 22px;
+  transition: background-color 0.25s ease;
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  height: 18px;
+  width: 18px;
+  left: 2px;
+  bottom: 2px;
+  background-color: #fff;
+  border-radius: 50%;
+  transition: transform 0.25s ease;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background-color: #5b9fd4;
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(18px);
+}
+
+.col-toggle {
+  text-align: center;
+  vertical-align: middle;
 }
 </style>

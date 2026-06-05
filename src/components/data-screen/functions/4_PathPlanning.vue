@@ -26,8 +26,32 @@ const astarForm = reactive({
   planeRadius: 0.75, // 默认无人机半径
   speed: 15.0, // 默认飞行速度
   workHeight: 100, // 默认工作面高度
-  useGdConstraint: true, // 默认启用实景三维障碍校验
 })
+
+// 规则库开关状态
+const astarConstraints = reactive({
+  hl: { enabled: false, label: '航路校验', desc: '路径点必须存在于航路' },
+  hlz: { enabled: false, label: '航路障碍物', desc: '航路作为障碍物（与航路校验互斥）' },
+  fx: { enabled: false, label: '风险区域', desc: '风险区域不可通行' },
+  gd: { enabled: true, label: '实景三维障碍', desc: '存在三维障碍即不可通行' },
+  dt: { enabled: false, label: '无人机实时占用', desc: '存在占用即不可通行' },
+  dz: { enabled: false, label: '禁飞区', desc: '存在禁飞区即不可通行' },
+  za: { enabled: false, label: '障碍物', desc: '存在障碍物即不可通行' },
+  dc: { enabled: false, label: '电磁环境', desc: '电磁值超过阈值不可通行', value: 10 },
+  ad: { enabled: false, label: '空域类型', desc: '指定禁止通行的空域类型', value: 'G' },
+  dp: { enabled: false, label: '实时占用', desc: '指定禁止的占用类型', value: '' },
+  wdh: {
+    enabled: false, label: '气象约束（阈值）', desc: '小时天气阈值校验',
+    visibility: 3, tem: -10, humidity: 80, rainPcpn: 0, pressure: 1000, windSpeed: 5.0,
+  },
+  wdd: {
+    enabled: false, label: '气象约束（区间）', desc: '日天气区间校验',
+    visibility: 3, humidity: 80, pressure: 5, tem1: 50, tem2: -10,
+  },
+})
+
+// 天气约束使用的网格层级
+const weatherLevel = ref(11)
 
 // 加载状态和结果
 const astarLoading = ref(false)
@@ -94,7 +118,22 @@ function resetForm() {
     astarForm.planeRadius = 0.75
     astarForm.speed = 15.0
     astarForm.workHeight = 100
-    astarForm.useGdConstraint = true
+    // 重置规则库开关
+    const simpleKeys = ['hl', 'hlz', 'fx', 'gd', 'dt', 'dz', 'za']
+    for (const key of simpleKeys) {
+      astarConstraints[key].enabled = key === 'gd'
+    }
+    astarConstraints.dc.enabled = false; astarConstraints.dc.value = 10
+    astarConstraints.ad.enabled = false; astarConstraints.ad.value = 'G'
+    astarConstraints.dp.enabled = false; astarConstraints.dp.value = ''
+    astarConstraints.wdh.enabled = false
+    astarConstraints.wdh.visibility = 3; astarConstraints.wdh.tem = -10
+    astarConstraints.wdh.humidity = 80; astarConstraints.wdh.rainPcpn = 0
+    astarConstraints.wdh.pressure = 1000; astarConstraints.wdh.windSpeed = 5.0
+    astarConstraints.wdd.enabled = false
+    astarConstraints.wdd.visibility = 3; astarConstraints.wdd.humidity = 80
+    astarConstraints.wdd.pressure = 5; astarConstraints.wdd.tem1 = 50; astarConstraints.wdd.tem2 = -10
+    weatherLevel.value = 11
     closeStoreModal()
   }
 
@@ -670,11 +709,55 @@ async function submitAstarPath() {
   astarLoading.value = true
 
   try {
-    // 构建请求参数
+    // 构建约束条件
     const condition = {}
-    // 只有勾选了启用实景三维障碍校验，才传入 gd_9 参数
-    if (astarForm.useGdConstraint) {
-      condition.gd_9 = ""
+    const level = Number(astarForm.level)
+    const wLevel = Number(weatherLevel.value)
+
+    // 简单开关型约束（值为空字符串）
+    const simpleKeys = ['hl', 'hlz', 'fx', 'gd', 'dt', 'dz', 'za']
+    for (const key of simpleKeys) {
+      if (astarConstraints[key].enabled) {
+        condition[`${key}_${level}`] = ""
+      }
+    }
+
+    // 电磁环境（数值阈值）
+    if (astarConstraints.dc.enabled) {
+      condition[`dc_${level}`] = Number(astarConstraints.dc.value) || 10
+    }
+
+    // 空域类型（字符串）
+    if (astarConstraints.ad.enabled) {
+      condition[`ad_${level}`] = String(astarConstraints.ad.value || 'G')
+    }
+
+    // 实时占用（字符串）
+    if (astarConstraints.dp.enabled) {
+      condition[`dp_${level}`] = String(astarConstraints.dp.value || '')
+    }
+
+    // 气象约束-阈值型
+    if (astarConstraints.wdh.enabled) {
+      condition[`wdh_${wLevel}`] = {
+        visibility: Number(astarConstraints.wdh.visibility) || 3,
+        tem: Number(astarConstraints.wdh.tem) || -10,
+        humidity: Number(astarConstraints.wdh.humidity) || 80,
+        rainPcpn: Number(astarConstraints.wdh.rainPcpn) || 0,
+        pressure: Number(astarConstraints.wdh.pressure) || 1000,
+        windSpeed: Number(astarConstraints.wdh.windSpeed) || 5.0,
+      }
+    }
+
+    // 气象约束-区间型
+    if (astarConstraints.wdd.enabled) {
+      condition[`wdd_${wLevel}`] = {
+        visibility: Number(astarConstraints.wdd.visibility) || 3,
+        humidity: Number(astarConstraints.wdd.humidity) || 80,
+        pressure: Number(astarConstraints.wdd.pressure) || 5,
+        tem1: Number(astarConstraints.wdd.tem1) || 50,
+        tem2: Number(astarConstraints.wdd.tem2) || -10,
+      }
     }
 
     const payload = {
@@ -883,18 +966,200 @@ async function submitAstarPath() {
         </div>
       </div>
 
-      <!-- 约束条件 -->
+      <!-- 约束条件（规则库开关） -->
       <div class="form-group">
         <div class="group-title">约束条件</div>
-        <div class="param-line-checkbox">
-          <label class="checkbox-label">
+
+        <!-- 简单开关型 -->
+        <div class="rule-row" v-for="key in ['hl', 'hlz', 'fx', 'gd', 'dt', 'dz', 'za']" :key="key">
+          <div class="rule-info">
+            <span class="rule-label">{{ astarConstraints[key].label }}</span>
+            <span class="rule-desc">{{ astarConstraints[key].desc }}</span>
+          </div>
+          <label class="toggle-switch">
             <input
               type="checkbox"
-              v-model="astarForm.useGdConstraint"
-              class="checkbox-input"
-            >
-            <span class="checkbox-text">启用实景三维障碍校验</span>
+              :checked="astarConstraints[key].enabled"
+              @change="astarConstraints[key].enabled = $event.target.checked"
+            />
+            <span class="toggle-slider"></span>
           </label>
+        </div>
+
+        <!-- 电磁环境（阈值输入） -->
+        <div class="rule-row">
+          <div class="rule-info">
+            <span class="rule-label">{{ astarConstraints.dc.label }}</span>
+            <span class="rule-desc">{{ astarConstraints.dc.desc }}</span>
+          </div>
+          <label class="toggle-switch">
+            <input
+              type="checkbox"
+              :checked="astarConstraints.dc.enabled"
+              @change="astarConstraints.dc.enabled = $event.target.checked"
+            />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div v-if="astarConstraints.dc.enabled" class="rule-expand">
+          <div class="rule-param-line">
+            <span class="rule-param-label">电磁阈值</span>
+            <input
+              v-model.number="astarConstraints.dc.value"
+              type="number"
+              step="any"
+              class="rule-param-input"
+              placeholder="最大电磁阈值"
+            />
+          </div>
+        </div>
+
+        <!-- 空域类型（字符串输入） -->
+        <div class="rule-row">
+          <div class="rule-info">
+            <span class="rule-label">{{ astarConstraints.ad.label }}</span>
+            <span class="rule-desc">{{ astarConstraints.ad.desc }}</span>
+          </div>
+          <label class="toggle-switch">
+            <input
+              type="checkbox"
+              :checked="astarConstraints.ad.enabled"
+              @change="astarConstraints.ad.enabled = $event.target.checked"
+            />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div v-if="astarConstraints.ad.enabled" class="rule-expand">
+          <div class="rule-param-line">
+            <span class="rule-param-label">空域类型</span>
+            <input
+              v-model="astarConstraints.ad.value"
+              type="text"
+              class="rule-param-input"
+              placeholder="禁止通行的空域类型，如 G"
+            />
+          </div>
+        </div>
+
+        <!-- 实时占用（字符串输入） -->
+        <div class="rule-row">
+          <div class="rule-info">
+            <span class="rule-label">{{ astarConstraints.dp.label }}</span>
+            <span class="rule-desc">{{ astarConstraints.dp.desc }}</span>
+          </div>
+          <label class="toggle-switch">
+            <input
+              type="checkbox"
+              :checked="astarConstraints.dp.enabled"
+              @change="astarConstraints.dp.enabled = $event.target.checked"
+            />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div v-if="astarConstraints.dp.enabled" class="rule-expand">
+          <div class="rule-param-line">
+            <span class="rule-param-label">占用类型</span>
+            <input
+              v-model="astarConstraints.dp.value"
+              type="text"
+              class="rule-param-input"
+              placeholder="禁止的占用类型，如 A1"
+            />
+          </div>
+        </div>
+
+        <!-- 气象约束-阈值型 -->
+        <div class="rule-row">
+          <div class="rule-info">
+            <span class="rule-label">{{ astarConstraints.wdh.label }}</span>
+            <span class="rule-desc">{{ astarConstraints.wdh.desc }}</span>
+          </div>
+          <label class="toggle-switch">
+            <input
+              type="checkbox"
+              :checked="astarConstraints.wdh.enabled"
+              @change="astarConstraints.wdh.enabled = $event.target.checked"
+            />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div v-if="astarConstraints.wdh.enabled" class="rule-expand">
+          <div class="rule-param-line">
+            <span class="rule-param-label">气象层级</span>
+            <input
+              v-model.number="weatherLevel"
+              type="number"
+              step="1"
+              class="rule-param-input"
+              placeholder="网格层级"
+            />
+          </div>
+          <div class="rule-param-grid">
+            <div class="rule-param-item">
+              <span class="rule-param-sm-label">能见度</span>
+              <input v-model.number="astarConstraints.wdh.visibility" type="number" step="any" class="rule-param-sm-input" />
+            </div>
+            <div class="rule-param-item">
+              <span class="rule-param-sm-label">温度</span>
+              <input v-model.number="astarConstraints.wdh.tem" type="number" step="any" class="rule-param-sm-input" />
+            </div>
+            <div class="rule-param-item">
+              <span class="rule-param-sm-label">湿度</span>
+              <input v-model.number="astarConstraints.wdh.humidity" type="number" step="any" class="rule-param-sm-input" />
+            </div>
+            <div class="rule-param-item">
+              <span class="rule-param-sm-label">降雨量</span>
+              <input v-model.number="astarConstraints.wdh.rainPcpn" type="number" step="any" class="rule-param-sm-input" />
+            </div>
+            <div class="rule-param-item">
+              <span class="rule-param-sm-label">气压</span>
+              <input v-model.number="astarConstraints.wdh.pressure" type="number" step="any" class="rule-param-sm-input" />
+            </div>
+            <div class="rule-param-item">
+              <span class="rule-param-sm-label">风速</span>
+              <input v-model.number="astarConstraints.wdh.windSpeed" type="number" step="any" class="rule-param-sm-input" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 气象约束-区间型 -->
+        <div class="rule-row">
+          <div class="rule-info">
+            <span class="rule-label">{{ astarConstraints.wdd.label }}</span>
+            <span class="rule-desc">{{ astarConstraints.wdd.desc }}</span>
+          </div>
+          <label class="toggle-switch">
+            <input
+              type="checkbox"
+              :checked="astarConstraints.wdd.enabled"
+              @change="astarConstraints.wdd.enabled = $event.target.checked"
+            />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div v-if="astarConstraints.wdd.enabled" class="rule-expand">
+          <div class="rule-param-grid">
+            <div class="rule-param-item">
+              <span class="rule-param-sm-label">能见度</span>
+              <input v-model.number="astarConstraints.wdd.visibility" type="number" step="any" class="rule-param-sm-input" />
+            </div>
+            <div class="rule-param-item">
+              <span class="rule-param-sm-label">湿度</span>
+              <input v-model.number="astarConstraints.wdd.humidity" type="number" step="any" class="rule-param-sm-input" />
+            </div>
+            <div class="rule-param-item">
+              <span class="rule-param-sm-label">气压</span>
+              <input v-model.number="astarConstraints.wdd.pressure" type="number" step="any" class="rule-param-sm-input" />
+            </div>
+            <div class="rule-param-item">
+              <span class="rule-param-sm-label">最高温度</span>
+              <input v-model.number="astarConstraints.wdd.tem1" type="number" step="any" class="rule-param-sm-input" />
+            </div>
+            <div class="rule-param-item">
+              <span class="rule-param-sm-label">最低温度</span>
+              <input v-model.number="astarConstraints.wdd.tem2" type="number" step="any" class="rule-param-sm-input" />
+            </div>
+          </div>
         </div>
       </div>
 
@@ -2238,5 +2503,166 @@ async function submitAstarPath() {
 .reason-text {
   color: #dc2626;
   font-family: inherit;
+}
+
+/* 规则库开关 */
+.rule-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid #f1f0ed;
+}
+
+.rule-row:last-of-type {
+  border-bottom: none;
+}
+
+.rule-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.rule-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #334155;
+}
+
+.rule-desc {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #cbd5e1;
+  border-radius: 22px;
+  transition: 0.2s;
+}
+
+.toggle-slider::before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  border-radius: 50%;
+  transition: 0.2s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background-color: #5b9fd4;
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(18px);
+}
+
+.rule-expand {
+  padding: 8px 0 8px 12px;
+  border-bottom: 1px solid #f1f0ed;
+  background: #faf8f5;
+  border-radius: 0 0 6px 6px;
+}
+
+.rule-param-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.rule-param-line:last-child {
+  margin-bottom: 0;
+}
+
+.rule-param-label {
+  width: 64px;
+  font-size: 13px;
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.rule-param-input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.rule-param-input:focus {
+  outline: none;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 2px rgba(91, 159, 212, 0.12);
+}
+
+.rule-param-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.rule-param-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rule-param-sm-label {
+  font-size: 12px;
+  color: #64748b;
+  white-space: nowrap;
+  min-width: 48px;
+}
+
+.rule-param-sm-input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+  background: #fff;
+  color: #334155;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.rule-param-sm-input:focus {
+  outline: none;
+  border-color: #7db8e0;
+  box-shadow: 0 0 0 2px rgba(91, 159, 212, 0.12);
 }
 </style>

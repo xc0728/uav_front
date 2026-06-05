@@ -22,7 +22,7 @@ export default defineConfig({
       '/api': {
                //target: 'http://192.168.3.26:9997',/
                //target: 'http://localhost:9990',/
-               target: 'http://10.20.79.62:9997',
+               target: 'http://3480yfkj9405.vicp.fun:14210',
         changeOrigin: true,
       }
     }

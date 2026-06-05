@@ -5,6 +5,10 @@ const props = defineProps({
   mapReady: {
     type: Boolean,
     default: false
+  },
+  noFlyZones: {
+    type: Object,
+    default: () => ({})
   }
 })
 
@@ -38,6 +42,20 @@ const lineForm = reactive({
 
 const fenceList = ref([])
 const isDrawing = ref(false)
+
+const noFlyZoneList = computed(() => {
+  return Object.values(props.noFlyZones).map(zone => ({
+    id: `noflyzone-${zone.zone_id}`,
+    name: zone.name || '未命名禁飞区',
+    type: 'noflyzone',
+    typeCode: zone.type_code,
+    typeName: zone.type_name || (zone.type_code === 'electronic_fence' ? '电子围栏' : '风险区域'),
+    enabled: true,
+    bottom: zone.bottom,
+    top: zone.top,
+    createdAt: zone.create_time ? new Date(zone.create_time * 1000).toISOString() : '',
+  }))
+})
 
 const sphereColor = '#f59e0b'
 const lineColor = '#22d3ee'
@@ -191,7 +209,7 @@ defineExpose({
 <template>
   <div class="electronic-fence-panel">
     <div class="panel-title">
-      <span>电子围栏</span>
+      <span>禁飞区</span>
     </div>
 
     <div v-if="currentMode" class="draw-form-section">
@@ -281,8 +299,8 @@ defineExpose({
 
     <div v-else class="fence-list-section">
       <div class="section-header">
-        <span class="section-label">已绘制围栏 ({{ fenceList.length }})</span>
-        <div class="section-actions">
+        <span class="section-label">已绘制禁飞区 ({{ fenceList.length + noFlyZoneList.length }})</span>
+        <!-- <div class="section-actions">
           <button
             class="action-btn"
             @click="clearAllFences"
@@ -299,14 +317,39 @@ defineExpose({
           >
             保存
           </button>
-        </div>
+        </div> -->
       </div>
 
-      <div v-if="fenceList.length === 0" class="empty-list">
-        暂无围栏
+      <div v-if="fenceList.length === 0 && noFlyZoneList.length === 0" class="empty-list">
+        暂无禁飞区
       </div>
 
       <div v-else class="fence-items">
+        <div
+          v-for="zone in noFlyZoneList"
+          :key="zone.id"
+          class="fence-item"
+        >
+          <div class="fence-item-header">
+            <span class="fence-icon" style="color: #ef4444">
+              ⛔
+            </span>
+            <span class="fence-name">{{ zone.name }}</span>
+            <span
+              class="fence-type-tag"
+              :style="{
+                background: zone.typeCode === 'electronic_fence' ? '#5b9fd433' : '#a855f733',
+                color: zone.typeCode === 'electronic_fence' ? '#5b9fd4' : '#a855f7'
+              }"
+            >
+              {{ zone.typeName }}
+            </span>
+          </div>
+          <div class="fence-item-info">
+            <span>底: {{ zone.bottom }}m | 顶: {{ zone.top }}m</span>
+          </div>
+        </div>
+
         <div
           v-for="fence in fenceList"
           :key="fence.id"

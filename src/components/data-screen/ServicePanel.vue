@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, defineProps } from 'vue'
-import { ChevronRight, ChevronLeft, ChevronDown, X, Grid3X3, Navigation, Map, Calculator, Box, Boxes, Settings2, Database } from 'lucide-vue-next'
+import { ChevronRight, ChevronLeft, ChevronDown, X, Grid3X3, Navigation, Map, Calculator, Box, Boxes, Settings2, Database, ShieldBan } from 'lucide-vue-next'
 import InteropFusion from './functions/1_GridInterop.vue'
 import TiltPhotogrammetry from './functions/2_Osgb_Grid.vue'
 import GridSplit from './functions/3_1PointGrid.vue'
@@ -12,11 +12,16 @@ import SpatialRelation from './functions/5_SpatialRelation.vue'
 import AirspaceGridQuery from './functions/6_AirspaceGridQuery.vue'
 import GridAggregation from './functions/7_Aggregation.vue'
 import DemGrid from './functions/8_DemGrid.vue'
+import NoFlyZone from './functions/8_ElectronicFence.vue'
 
 const props = defineProps({
   panelType: {
     type: String,
     default: 'both'
+  },
+  theme: {
+    type: String,
+    default: 'white'
   }
 })
 
@@ -118,6 +123,16 @@ const services = [
       'DEM网格查询',
     ],
   },
+  {
+    id: 'no-fly-zone',
+    name: '禁飞区设置服务',
+    shortName: '禁飞区设置',
+    icon: ShieldBan,
+    component: NoFlyZone,
+    functions: [
+      '保存禁飞区',
+    ],
+  },
 ]
 
 // 控制面板状态
@@ -217,6 +232,9 @@ const activeComponent = computed(() => {
   if (activeServiceId.value === 'dem-grid-query') {
     return DemGrid
   }
+  if (activeServiceId.value === 'no-fly-zone') {
+    return NoFlyZone
+  }
   return activeService.value?.component
 })
 
@@ -259,6 +277,12 @@ function applyMapPointToActiveService(lon, lat, height) {
   }
 
   if (activeServiceId.value === 'dem-grid-query') {
+    if (typeof activeComponentRef.value.setPointFromMap === 'function') {
+      activeComponentRef.value.setPointFromMap(lon, lat, height)
+    }
+  }
+
+  if (activeServiceId.value === 'no-fly-zone') {
     if (typeof activeComponentRef.value.setPointFromMap === 'function') {
       activeComponentRef.value.setPointFromMap(lon, lat, height)
     }
@@ -332,7 +356,7 @@ defineExpose({
 </script>
 
 <template>
-  <div class="service-panel-container">
+  <div class="service-panel-container" :class="`theme-${props.theme}`">
     <!-- 左侧控制面板 -->
     <div class="control-panel" :class="{ collapsed: isControlPanelCollapsed }">
         <!-- 面板头部 -->
@@ -461,6 +485,7 @@ defineExpose({
               ref="activeComponentRef"
               :service-name="activeServiceName"
               :function-name="activeFunctionName"
+              :theme="props.theme"
               @close="closeCalcPanel"
               @show-point="handleShowPoint"
               @show-grid="handleShowGrid"
@@ -501,6 +526,216 @@ defineExpose({
   display: flex;
   justify-content: space-between;
   pointer-events: none;
+  --panel-surface: rgba(253, 251, 247, 0.97);
+  --panel-border: rgba(0, 0, 0, 0.06);
+  --panel-shadow: 4px 0 24px rgba(0, 0, 0, 0.06);
+  --panel-header-bg: linear-gradient(180deg, #faf8f4 0%, rgba(253, 251, 247, 0) 100%);
+  --panel-primary: #5b9fd4;
+  --panel-primary-soft: #eef6fc;
+  --panel-primary-soft-border: #7db8e0;
+  --panel-title: #334155;
+  --panel-text: #475569;
+  --panel-text-strong: #334155;
+  --panel-muted: #64748b;
+  --panel-muted-soft: #94a3b8;
+  --panel-card-bg: #ffffff;
+  --panel-card-border: #ebe6df;
+  --panel-card-hover-bg: #faf8f4;
+  --panel-card-hover-border: #d4c9b8;
+  --panel-dropdown-bg: #ffffff;
+  --panel-dropdown-hover-bg: #f5f3f0;
+  --panel-scrollbar: rgba(0, 0, 0, 0.12);
+  --panel-form-section-bg: #ffffff;
+  --panel-form-section-border: #ebe6df;
+  --panel-form-label: #64748b;
+  --panel-form-title: #4a7eb0;
+  --panel-form-title-border: #e8e4df;
+  --panel-input-bg: #ffffff;
+  --panel-input-border: #d7dee8;
+  --panel-input-focus-border: #7db8e0;
+  --panel-input-focus-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
+  --panel-tip-bg: #eef6fc;
+  --panel-tip-border: #bfdbfe;
+  --panel-tip-text: #3b82f6;
+  --panel-btn-primary-bg: linear-gradient(135deg, #7db8e0, #5b9fd4);
+  --panel-btn-primary-hover-bg: linear-gradient(135deg, #6aa8d4, #4a8fc4);
+  --panel-btn-primary-shadow: 0 2px 8px rgba(91, 159, 212, 0.25);
+  --panel-btn-primary-hover-shadow: 0 4px 12px rgba(91, 159, 212, 0.3);
+  --panel-btn-secondary-bg: #ffffff;
+  --panel-btn-secondary-border: #e2e8f0;
+  --panel-btn-secondary-text: #475569;
+  --panel-btn-secondary-hover-bg: #f8fafc;
+  --panel-btn-secondary-hover-border: #cbd5e1;
+  --panel-result-bg: rgba(16, 185, 129, 0.1);
+  --panel-result-border: rgba(16, 185, 129, 0.3);
+  --panel-result-label: #64748b;
+  --panel-result-value: #34d399;
+  --panel-danger-bg: rgba(239, 68, 68, 0.15);
+  --panel-danger-hover-bg: rgba(239, 68, 68, 0.25);
+  --panel-danger-border: rgba(239, 68, 68, 0.3);
+  --panel-danger-color: #fca5a5;
+  --panel-point-item-bg: rgba(248, 250, 252, 0.92);
+}
+
+.service-panel-container.theme-techBlue {
+  --panel-surface: rgba(5, 23, 49, 0.92);
+  --panel-border: rgba(77, 189, 255, 0.18);
+  --panel-shadow: 8px 0 28px rgba(2, 12, 26, 0.38);
+  --panel-header-bg: linear-gradient(180deg, rgba(8, 43, 86, 0.96) 0%, rgba(5, 23, 49, 0) 100%);
+  --panel-primary: #7cecff;
+  --panel-primary-soft: rgba(12, 63, 118, 0.7);
+  --panel-primary-soft-border: rgba(111, 223, 255, 0.72);
+  --panel-title: #ecfbff;
+  --panel-text: #c8f1ff;
+  --panel-text-strong: #ecfbff;
+  --panel-muted: #98d8ef;
+  --panel-muted-soft: #75b9d4;
+  --panel-card-bg: rgba(10, 41, 82, 0.72);
+  --panel-card-border: rgba(90, 193, 255, 0.2);
+  --panel-card-hover-bg: rgba(15, 63, 118, 0.82);
+  --panel-card-hover-border: rgba(120, 230, 255, 0.46);
+  --panel-dropdown-bg: rgba(7, 31, 64, 0.96);
+  --panel-dropdown-hover-bg: rgba(13, 73, 134, 0.88);
+  --panel-scrollbar: rgba(125, 236, 255, 0.3);
+  --panel-form-section-bg: rgba(9, 39, 78, 0.84);
+  --panel-form-section-border: rgba(88, 199, 255, 0.22);
+  --panel-form-label: #d7f5ff;
+  --panel-form-title: #b8f6ff;
+  --panel-form-title-border: rgba(106, 220, 255, 0.34);
+  --panel-field-title: #ecfbff;
+  --panel-input-bg: rgba(4, 24, 52, 0.9);
+  --panel-input-border: rgba(86, 191, 255, 0.28);
+  --panel-input-focus-border: rgba(124, 236, 255, 0.82);
+  --panel-input-focus-shadow: 0 0 0 3px rgba(64, 196, 255, 0.16);
+  --panel-tip-bg: rgba(10, 48, 92, 0.82);
+  --panel-tip-border: rgba(97, 218, 251, 0.26);
+  --panel-tip-text: #80edff;
+  --panel-btn-primary-bg: linear-gradient(135deg, #1fb6ff, #0b79d0);
+  --panel-btn-primary-hover-bg: linear-gradient(135deg, #36c6ff, #1190e8);
+  --panel-btn-primary-shadow: 0 6px 18px rgba(7, 138, 219, 0.28);
+  --panel-btn-primary-hover-shadow: 0 10px 24px rgba(11, 145, 232, 0.34);
+  --panel-btn-secondary-bg: rgba(6, 33, 67, 0.92);
+  --panel-btn-secondary-border: rgba(90, 193, 255, 0.26);
+  --panel-btn-secondary-text: #dff8ff;
+  --panel-btn-secondary-hover-bg: rgba(12, 63, 118, 0.88);
+  --panel-btn-secondary-hover-border: rgba(124, 236, 255, 0.54);
+  --panel-result-bg: rgba(22, 163, 74, 0.16);
+  --panel-result-border: rgba(74, 222, 128, 0.28);
+  --panel-result-label: #9ed8ef;
+  --panel-result-value: #6ee7b7;
+  --panel-danger-bg: rgba(239, 68, 68, 0.18);
+  --panel-danger-hover-bg: rgba(239, 68, 68, 0.26);
+  --panel-danger-border: rgba(248, 113, 113, 0.38);
+  --panel-danger-color: #fecaca;
+  --panel-point-item-bg: rgba(7, 31, 64, 0.86);
+}
+
+.service-panel-container.theme-freshGreen {
+  --panel-surface: rgba(245, 252, 247, 0.94);
+  --panel-border: rgba(128, 200, 155, 0.22);
+  --panel-shadow: 8px 0 28px rgba(122, 197, 150, 0.14);
+  --panel-header-bg: linear-gradient(180deg, rgba(235, 248, 239, 0.98) 0%, rgba(245, 252, 247, 0) 100%);
+  --panel-primary: #66b784;
+  --panel-primary-soft: rgba(227, 245, 233, 0.9);
+  --panel-primary-soft-border: rgba(126, 198, 152, 0.64);
+  --panel-title: #2f5d45;
+  --panel-text: #466c56;
+  --panel-text-strong: #2f5d45;
+  --panel-muted: #5f8670;
+  --panel-muted-soft: #89aa96;
+  --panel-card-bg: rgba(255, 255, 255, 0.82);
+  --panel-card-border: rgba(167, 214, 184, 0.38);
+  --panel-card-hover-bg: rgba(244, 252, 247, 0.96);
+  --panel-card-hover-border: rgba(126, 198, 152, 0.5);
+  --panel-dropdown-bg: rgba(249, 253, 250, 0.98);
+  --panel-dropdown-hover-bg: rgba(238, 249, 242, 0.95);
+  --panel-scrollbar: rgba(126, 198, 152, 0.24);
+  --panel-form-section-bg: rgba(255, 255, 255, 0.84);
+  --panel-form-section-border: rgba(167, 214, 184, 0.38);
+  --panel-form-label: #5a7d68;
+  --panel-form-title: #4e8d68;
+  --panel-form-title-border: rgba(167, 214, 184, 0.46);
+  --panel-field-title: #2f5d45;
+  --panel-input-bg: rgba(255, 255, 255, 0.92);
+  --panel-input-border: rgba(167, 214, 184, 0.64);
+  --panel-input-focus-border: rgba(102, 183, 132, 0.9);
+  --panel-input-focus-shadow: 0 0 0 3px rgba(126, 198, 152, 0.18);
+  --panel-tip-bg: rgba(236, 248, 240, 0.96);
+  --panel-tip-border: rgba(167, 214, 184, 0.52);
+  --panel-tip-text: #4a8b65;
+  --panel-btn-primary-bg: linear-gradient(135deg, #8fd0a6, #66b784);
+  --panel-btn-primary-hover-bg: linear-gradient(135deg, #9bdab1, #74c18f);
+  --panel-btn-primary-shadow: 0 6px 18px rgba(126, 198, 152, 0.22);
+  --panel-btn-primary-hover-shadow: 0 10px 24px rgba(126, 198, 152, 0.28);
+  --panel-btn-secondary-bg: rgba(255, 255, 255, 0.9);
+  --panel-btn-secondary-border: rgba(167, 214, 184, 0.5);
+  --panel-btn-secondary-text: #466c56;
+  --panel-btn-secondary-hover-bg: rgba(244, 252, 247, 0.98);
+  --panel-btn-secondary-hover-border: rgba(126, 198, 152, 0.72);
+  --panel-result-bg: rgba(143, 208, 166, 0.14);
+  --panel-result-border: rgba(126, 198, 152, 0.34);
+  --panel-result-label: #5f8670;
+  --panel-result-value: #4fa56f;
+  --panel-danger-bg: rgba(239, 68, 68, 0.12);
+  --panel-danger-hover-bg: rgba(239, 68, 68, 0.18);
+  --panel-danger-border: rgba(248, 113, 113, 0.28);
+  --panel-danger-color: #dc2626;
+  --panel-point-item-bg: rgba(250, 253, 251, 0.92);
+}
+
+.service-panel-container.theme-freshGreen .calc-view :deep(.group-title),
+.service-panel-container.theme-freshGreen .calc-view :deep(.group-title-row .group-title),
+.service-panel-container.theme-freshGreen .calc-view :deep(.param-label),
+.service-panel-container.theme-freshGreen .calc-view :deep(.coord-label),
+.service-panel-container.theme-freshGreen .calc-view :deep(.height-label),
+.service-panel-container.theme-freshGreen .calc-view :deep(.result-section-title),
+.service-panel-container.theme-freshGreen .calc-view :deep(.form-title),
+.service-panel-container.theme-freshGreen .calc-view :deep(label),
+.service-panel-container.theme-freshGreen .calc-view :deep(.detail-value),
+.service-panel-container.theme-freshGreen .calc-view :deep(.result-v),
+.service-panel-container.theme-freshGreen .calc-view :deep(.store-info-value),
+.service-panel-container.theme-freshGreen .calc-view :deep(.result-num),
+.service-panel-container.theme-freshGreen .calc-view :deep(.result-status),
+.service-panel-container.theme-freshGreen .calc-view :deep(.point-name),
+.service-panel-container.theme-freshGreen .calc-view :deep(.coord-value),
+.service-panel-container.theme-freshGreen .calc-view :deep(.height-value),
+.service-panel-container.theme-freshGreen .calc-view :deep(.info-row strong),
+.service-panel-container.theme-freshGreen .calc-view :deep(.breadcrumb-item.current),
+.service-panel-container.theme-freshGreen .calc-view :deep(.rule-label) {
+  color: var(--panel-field-title) !important;
+  text-shadow: 0 0 10px rgba(104, 255, 168, 0.18);
+}
+
+.service-panel-container.theme-freshGreen .calc-view :deep(.group-sub),
+.service-panel-container.theme-freshGreen .calc-view :deep(.result-label),
+.service-panel-container.theme-freshGreen .calc-view :deep(.coord-range-label),
+.service-panel-container.theme-freshGreen .calc-view :deep(.point-count-label),
+.service-panel-container.theme-freshGreen .calc-view :deep(.hint-box),
+.service-panel-container.theme-freshGreen .calc-view :deep(.tip-text),
+.service-panel-container.theme-freshGreen .calc-view :deep(.empty-tip),
+.service-panel-container.theme-freshGreen .calc-view :deep(.detail-label),
+.service-panel-container.theme-freshGreen .calc-view :deep(.result-k),
+.service-panel-container.theme-freshGreen .calc-view :deep(.store-info-label),
+.service-panel-container.theme-freshGreen .calc-view :deep(.point-coord),
+.service-panel-container.theme-freshGreen .calc-view :deep(.path-tip),
+.service-panel-container.theme-freshGreen .calc-view :deep(.info-row span),
+.service-panel-container.theme-freshGreen .calc-view :deep(.breadcrumb-item),
+.service-panel-container.theme-freshGreen .calc-view :deep(.field-tip),
+.service-panel-container.theme-freshGreen .calc-view :deep(.empty-state),
+.service-panel-container.theme-freshGreen .calc-view :deep(.help-text),
+.service-panel-container.theme-freshGreen .calc-view :deep(.rule-desc),
+.service-panel-container.theme-freshGreen .calc-view :deep(.rule-param-label),
+.service-panel-container.theme-freshGreen .calc-view :deep(.rule-param-sm-label),
+.service-panel-container.theme-freshGreen .calc-view :deep(.checkbox-text) {
+  color: var(--panel-form-label) !important;
+}
+
+.service-panel-container.theme-freshGreen .calc-view :deep(.hint-box),
+.service-panel-container.theme-freshGreen .calc-view :deep(.tip-box),
+.service-panel-container.theme-freshGreen .calc-view :deep(.store-tips),
+.service-panel-container.theme-freshGreen .calc-view :deep(.empty-state) {
+  background: var(--panel-tip-bg) !important;
+  border-color: var(--panel-tip-border) !important;
 }
 
 /* 所有子元素启用 pointer-events */
@@ -513,9 +748,9 @@ defineExpose({
   width: 360px;
   max-width: 360px;
   height: 100%;
-  background: rgba(253, 251, 247, 0.97);
-  border-right: 1px solid rgba(0, 0, 0, 0.06);
-  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.06);
+  background: var(--panel-surface);
+  border-right: 1px solid var(--panel-border);
+  box-shadow: var(--panel-shadow);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -532,8 +767,8 @@ defineExpose({
   align-items: center;
   justify-content: space-between;
   padding: 16px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  background: linear-gradient(180deg, #faf8f4 0%, rgba(253, 251, 247, 0) 100%);
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel-header-bg);
   flex-shrink: 0;
 }
 
@@ -544,7 +779,7 @@ defineExpose({
 }
 
 .header-icon {
-  color: #5b9fd4;
+  color: var(--panel-primary);
 }
 
 /* 返回按钮 */
@@ -552,9 +787,9 @@ defineExpose({
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  border: 1px solid #e2e8f0;
-  background: #ffffff;
-  color: #5b9fd4;
+  border: 1px solid var(--panel-btn-secondary-border);
+  background: var(--panel-btn-secondary-bg);
+  color: var(--panel-primary);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -563,8 +798,8 @@ defineExpose({
 }
 
 .back-btn:hover {
-  background: #eef6fc;
-  border-color: #7db8e0;
+  background: var(--panel-primary-soft);
+  border-color: var(--panel-primary-soft-border);
 }
 
 /* 服务信息标题 */
@@ -576,7 +811,7 @@ defineExpose({
 .header-function-name {
   font-size: 17px;
   font-weight: 600;
-  color: #334155;
+  color: var(--panel-title);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -586,7 +821,7 @@ defineExpose({
 .panel-title {
   font-size: 18px;
   font-weight: 600;
-  color: #334155;
+  color: var(--panel-title);
 }
 
 .header-actions {
@@ -598,9 +833,9 @@ defineExpose({
   width: 32px;
   height: 32px;
   border-radius: 8px;
-  border: 1px solid #e2e8f0;
-  background: #ffffff;
-  color: #64748b;
+  border: 1px solid var(--panel-btn-secondary-border);
+  background: var(--panel-btn-secondary-bg);
+  color: var(--panel-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -609,9 +844,9 @@ defineExpose({
 }
 
 .icon-btn:hover {
-  background: #eef6fc;
-  border-color: #7db8e0;
-  color: #5b9fd4;
+  background: var(--panel-primary-soft);
+  border-color: var(--panel-primary-soft-border);
+  color: var(--panel-primary);
 }
 
 .icon-btn.close-btn:hover {
@@ -635,7 +870,7 @@ defineExpose({
 }
 
 .panel-content::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.12);
+  background: var(--panel-scrollbar);
   border-radius: 2px;
 }
 
@@ -657,9 +892,9 @@ defineExpose({
   gap: 12px;
   padding: 14px 16px;
   border-radius: 12px;
-  border: 1px solid #ebe6df;
-  background: #ffffff;
-  color: #475569;
+  border: 1px solid var(--panel-card-border);
+  background: var(--panel-card-bg);
+  color: var(--panel-text);
   font-size: 16px;
   text-align: left;
   cursor: pointer;
@@ -667,9 +902,9 @@ defineExpose({
 }
 
 .service-btn:hover {
-  background: #faf8f4;
-  border-color: #d4c9b8;
-  color: #334155;
+  background: var(--panel-card-hover-bg);
+  border-color: var(--panel-card-hover-border);
+  color: var(--panel-title);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
@@ -691,13 +926,13 @@ defineExpose({
 }
 
 .service-arrow {
-  color: #64748b;
+  color: var(--panel-muted);
   transition: transform 0.2s ease;
 }
 
 .service-arrow.active {
   transform: rotate(90deg);
-  color: #5b9fd4;
+  color: var(--panel-primary);
 }
 
 /* 下拉菜单 */
@@ -706,8 +941,8 @@ defineExpose({
   margin-top: 8px;
   padding: 8px;
   border-radius: 12px;
-  border: 1px solid #ebe6df;
-  background: #ffffff;
+  border: 1px solid var(--panel-card-border);
+  background: var(--panel-dropdown-bg);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
   z-index: 100;
 }
@@ -721,7 +956,7 @@ defineExpose({
   border-radius: 8px;
   border: none;
   background: transparent;
-  color: #64748b;
+  color: var(--panel-muted);
   font-size: 15px;
   text-align: left;
   cursor: pointer;
@@ -729,8 +964,8 @@ defineExpose({
 }
 
 .service-dropdown-item:hover {
-  background: #f5f3f0;
-  color: #334155;
+  background: var(--panel-dropdown-hover-bg);
+  color: var(--panel-title);
 }
 
 .service-dropdown-item .dot {
@@ -765,7 +1000,7 @@ defineExpose({
   font-size: 18px;
   font-family: "SimHei", "Microsoft YaHei", sans-serif;
   font-weight: bold;
-  color: #475569;
+  color: var(--panel-text);
   flex-shrink: 0;
 }
 
@@ -776,7 +1011,7 @@ defineExpose({
 }
 
 .collapsed-calc-title-wrap:hover .collapsed-calc-char {
-  color: #5b9fd4;
+  color: var(--panel-primary);
 }
 
 /* 折叠时的图标列表 */
@@ -794,9 +1029,9 @@ defineExpose({
   width: 40px;
   height: 32px;
   border-radius: 8px;
-  border: 1px solid #e2e8f0;
-  background: #ffffff;
-  color: #5b9fd4;
+  border: 1px solid var(--panel-btn-secondary-border);
+  background: var(--panel-btn-secondary-bg);
+  color: var(--panel-primary);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -806,15 +1041,15 @@ defineExpose({
 }
 
 .collapsed-expand-btn:hover {
-  background: #eef6fc;
-  border-color: #7db8e0;
+  background: var(--panel-primary-soft);
+  border-color: var(--panel-primary-soft-border);
 }
 
 .collapsed-function-name {
   writing-mode: vertical-lr;
   text-orientation: upright;
   font-size: 14px;
-  color: #64748b;
+  color: var(--panel-muted);
   padding: 8px 4px;
   cursor: pointer;
   letter-spacing: 2px;
@@ -825,21 +1060,21 @@ defineExpose({
 }
 
 .collapsed-function-name:hover {
-  color: #5b9fd4;
+  color: var(--panel-primary);
 }
 
 .calc-collapsed-icon {
-  background: #eef6fc;
-  color: #5b9fd4;
+  background: var(--panel-primary-soft);
+  color: var(--panel-primary);
 }
 
 .collapsed-item {
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  border: 1px solid #ebe6df;
-  background: #ffffff;
-  color: #64748b;
+  border: 1px solid var(--panel-card-border);
+  background: var(--panel-card-bg);
+  color: var(--panel-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -848,9 +1083,9 @@ defineExpose({
 }
 
 .collapsed-item:hover {
-  background: #eef6fc;
-  border-color: #7db8e0;
-  color: #5b9fd4;
+  background: var(--panel-primary-soft);
+  border-color: var(--panel-primary-soft-border);
+  color: var(--panel-primary);
 }
 
 /* ==================== 展开/收起按钮 ==================== */
@@ -864,9 +1099,9 @@ defineExpose({
   gap: 8px;
   padding: 12px 16px;
   border-radius: 12px;
-  border: 1px solid #ebe6df;
-  background: rgba(253, 251, 247, 0.98);
-  color: #5b9fd4;
+  border: 1px solid var(--panel-card-border);
+  background: color-mix(in srgb, var(--panel-surface) 92%, transparent 8%);
+  color: var(--panel-primary);
   font-size: 16px;
   font-weight: 500;
   cursor: pointer;
@@ -884,8 +1119,8 @@ defineExpose({
 
 .expand-control-btn:hover,
 .expand-calc-btn:hover {
-  background: #ffffff;
-  border-color: #7db8e0;
+  background: var(--panel-card-bg);
+  border-color: var(--panel-primary-soft-border);
 }
 
 /* ==================== 右侧计算面板（备用） ==================== */
@@ -893,7 +1128,7 @@ defineExpose({
   width: 400px;
   max-width: 400px;
   height: 100%;
-  background: rgba(253, 251, 247, 0.97);
+  background: var(--panel-surface);
   border-radius: 16px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
   display: flex;
@@ -906,8 +1141,8 @@ defineExpose({
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  background: linear-gradient(180deg, #faf8f4 0%, transparent 100%);
+  border-bottom: 1px solid var(--panel-border);
+  background: var(--panel-header-bg);
   flex-shrink: 0;
 }
 
@@ -943,12 +1178,12 @@ defineExpose({
 .calc-function-name {
   font-size: 17px;
   font-weight: 600;
-  color: #334155;
+  color: var(--panel-title);
 }
 
 .calc-service-name {
   font-size: 14px;
-  color: #64748b;
+  color: var(--panel-muted);
 }
 
 .calc-minimize,
@@ -956,9 +1191,9 @@ defineExpose({
   width: 34px;
   height: 34px;
   border-radius: 10px;
-  border: 1px solid #e2e8f0;
-  background: #ffffff;
-  color: #64748b;
+  border: 1px solid var(--panel-btn-secondary-border);
+  background: var(--panel-btn-secondary-bg);
+  color: var(--panel-muted);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -967,9 +1202,9 @@ defineExpose({
 }
 
 .calc-minimize:hover {
-  border-color: #7db8e0;
-  background: #eef6fc;
-  color: #5b9fd4;
+  border-color: var(--panel-primary-soft-border);
+  background: var(--panel-primary-soft);
+  color: var(--panel-primary);
 }
 
 .calc-close:hover {
@@ -1015,7 +1250,7 @@ defineExpose({
 }
 
 .calc-content::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.12);
+  background: var(--panel-scrollbar);
   border-radius: 2px;
 }
 
@@ -1023,21 +1258,22 @@ defineExpose({
 .calc-content :deep(.form-section) {
   margin-bottom: 20px;
   padding: 16px;
-  background: #ffffff;
+  background: var(--panel-form-section-bg);
   border-radius: 12px;
-  border: 1px solid #ebe6df;
+  border: 1px solid var(--panel-form-section-border);
 }
 
 .calc-content :deep(.form-section-title) {
   font-size: 15px;
-  font-weight: 600;
-  color: #4a7eb0;
+  font-weight: 700;
+  color: var(--panel-form-title);
   margin-bottom: 14px;
   padding-bottom: 10px;
-  border-bottom: 1px solid #e8e4df;
+  border-bottom: 1px solid var(--panel-form-title-border);
   display: flex;
   align-items: center;
   gap: 8px;
+  text-shadow: 0 0 10px color-mix(in srgb, var(--panel-form-title) 32%, transparent 68%);
 }
 
 .calc-content :deep(.form-row) {
@@ -1054,7 +1290,7 @@ defineExpose({
 .calc-content :deep(.form-label) {
   font-size: 15px;
   font-weight: 500;
-  color: #64748b;
+  color: var(--panel-form-label);
 }
 
 .calc-content :deep(.form-input),
@@ -1063,10 +1299,10 @@ defineExpose({
   height: 36px;
   line-height: 1.2;
   padding: 8px 14px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
+  background: var(--panel-input-bg);
+  border: 1px solid var(--panel-input-border);
   border-radius: 8px;
-  color: #334155;
+  color: var(--panel-text-strong);
   font-size: 14px;
   transition: all 0.2s ease;
   box-sizing: border-box;
@@ -1075,20 +1311,20 @@ defineExpose({
 .calc-content :deep(.form-input:focus),
 .calc-content :deep(.form-select:focus) {
   outline: none;
-  border-color: #7db8e0;
-  box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
+  border-color: var(--panel-input-focus-border);
+  box-shadow: var(--panel-input-focus-shadow);
 }
 
 .calc-content :deep(.form-input::placeholder) {
-  color: #94a3b8;
+  color: var(--panel-muted-soft);
 }
 
 .calc-content :deep(.tip) {
   padding: 12px 14px;
-  background: #eef6fc;
-  border: 1px solid #bfdbfe;
+  background: var(--panel-tip-bg);
+  border: 1px solid var(--panel-tip-border);
   border-radius: 8px;
-  color: #2563eb;
+  color: var(--panel-tip-text);
   font-size: 15px;
   line-height: 1.5;
   margin-bottom: 16px;
@@ -1110,16 +1346,16 @@ defineExpose({
 
 .calc-content :deep(.btn-primary) {
   width: 100%;
-  background: linear-gradient(135deg, #7db8e0, #5b9fd4);
+  background: var(--panel-btn-primary-bg);
   border: none;
   color: #ffffff;
-  box-shadow: 0 2px 8px rgba(91, 159, 212, 0.25);
+  box-shadow: var(--panel-btn-primary-shadow);
 }
 
 .calc-content :deep(.btn-primary:hover) {
   transform: translateY(-1px);
-  background: linear-gradient(135deg, #6aa8d4, #4a8fc4);
-  box-shadow: 0 4px 12px rgba(91, 159, 212, 0.3);
+  background: var(--panel-btn-primary-hover-bg);
+  box-shadow: var(--panel-btn-primary-hover-shadow);
 }
 
 .calc-content :deep(.btn-primary:disabled) {
@@ -1128,7 +1364,7 @@ defineExpose({
   transform: none;
   background: #e2e8f0;
   border: none;
-  color: #94a3b8;
+  color: var(--panel-muted-soft);
   box-shadow: none;
 }
 
@@ -1144,14 +1380,14 @@ defineExpose({
 }
 
 .calc-content :deep(.btn-secondary) {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  color: #475569;
+  background: var(--panel-btn-secondary-bg);
+  border: 1px solid var(--panel-btn-secondary-border);
+  color: var(--panel-btn-secondary-text);
 }
 
 .calc-content :deep(.btn-secondary:hover) {
-  background: #f8fafc;
-  border-color: #cbd5e1;
+  background: var(--panel-btn-secondary-hover-bg);
+  border-color: var(--panel-btn-secondary-hover-border);
 }
 
 /* 加载状态 */
@@ -1162,7 +1398,7 @@ defineExpose({
   justify-content: center;
   gap: 12px;
   padding: 40px;
-  color: #5b9fd4;
+  color: var(--panel-primary);
 }
 
 .calc-content :deep(.loading-spinner) {
@@ -1209,13 +1445,13 @@ defineExpose({
 
 .calc-content :deep(.result-stat-label) {
   font-size: 13px;
-  color: #64748b;
+  color: var(--panel-result-label);
 }
 
 .calc-content :deep(.result-stat-value) {
   font-size: 18px;
   font-weight: 600;
-  color: #34d399;
+  color: var(--panel-result-value);
 }
 
 /* 点列表 */
@@ -1233,8 +1469,8 @@ defineExpose({
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  background: #ffffff;
-  border: 1px solid #ebe6df;
+  background: var(--panel-point-item-bg);
+  border: 1px solid var(--panel-form-section-border);
   border-radius: 8px;
 }
 
@@ -1243,18 +1479,18 @@ defineExpose({
   flex-direction: column;
   gap: 2px;
   font-size: 15px;
-  color: #475569;
+  color: var(--panel-text);
 }
 
 .calc-content :deep(.point-index) {
   font-weight: 600;
-  color: #5b9fd4;
+  color: var(--panel-primary);
 }
 
 .calc-content :deep(.point-coord) {
   font-family: 'Monaco', 'Consolas', monospace;
   font-size: 13px;
-  color: #94a3b8;
+  color: var(--panel-muted-soft);
 }
 
 .calc-content :deep(.point-delete) {
@@ -1276,11 +1512,59 @@ defineExpose({
   color: #ef4444;
 }
 
-/* 操作按钮组 */
-.calc-content :deep(.form-actions) {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 16px;
+.service-panel-container.theme-techBlue .calc-view :deep(.group-title),
+.service-panel-container.theme-techBlue .calc-view :deep(.group-title-row .group-title),
+.service-panel-container.theme-techBlue .calc-view :deep(.param-label),
+.service-panel-container.theme-techBlue .calc-view :deep(.coord-label),
+.service-panel-container.theme-techBlue .calc-view :deep(.height-label),
+.service-panel-container.theme-techBlue .calc-view :deep(.result-section-title),
+.service-panel-container.theme-techBlue .calc-view :deep(.form-title),
+.service-panel-container.theme-techBlue .calc-view :deep(label),
+.service-panel-container.theme-techBlue .calc-view :deep(.detail-value),
+.service-panel-container.theme-techBlue .calc-view :deep(.result-v),
+.service-panel-container.theme-techBlue .calc-view :deep(.store-info-value),
+.service-panel-container.theme-techBlue .calc-view :deep(.result-num),
+.service-panel-container.theme-techBlue .calc-view :deep(.result-status),
+.service-panel-container.theme-techBlue .calc-view :deep(.point-name),
+.service-panel-container.theme-techBlue .calc-view :deep(.coord-value),
+.service-panel-container.theme-techBlue .calc-view :deep(.height-value),
+.service-panel-container.theme-techBlue .calc-view :deep(.info-row strong),
+.service-panel-container.theme-techBlue .calc-view :deep(.breadcrumb-item.current),
+.service-panel-container.theme-techBlue .calc-view :deep(.rule-label) {
+  color: var(--panel-field-title) !important;
+  text-shadow: 0 0 10px rgba(184, 246, 255, 0.18);
+}
+
+.service-panel-container.theme-techBlue .calc-view :deep(.group-sub),
+.service-panel-container.theme-techBlue .calc-view :deep(.result-label),
+.service-panel-container.theme-techBlue .calc-view :deep(.coord-range-label),
+.service-panel-container.theme-techBlue .calc-view :deep(.point-count-label),
+.service-panel-container.theme-techBlue .calc-view :deep(.hint-box),
+.service-panel-container.theme-techBlue .calc-view :deep(.tip-text),
+.service-panel-container.theme-techBlue .calc-view :deep(.empty-tip),
+.service-panel-container.theme-techBlue .calc-view :deep(.detail-label),
+.service-panel-container.theme-techBlue .calc-view :deep(.result-k),
+.service-panel-container.theme-techBlue .calc-view :deep(.store-info-label),
+.service-panel-container.theme-techBlue .calc-view :deep(.point-coord),
+.service-panel-container.theme-techBlue .calc-view :deep(.path-tip),
+.service-panel-container.theme-techBlue .calc-view :deep(.info-row span),
+.service-panel-container.theme-techBlue .calc-view :deep(.breadcrumb-item),
+.service-panel-container.theme-techBlue .calc-view :deep(.field-tip),
+.service-panel-container.theme-techBlue .calc-view :deep(.empty-state),
+.service-panel-container.theme-techBlue .calc-view :deep(.help-text),
+.service-panel-container.theme-techBlue .calc-view :deep(.rule-desc),
+.service-panel-container.theme-techBlue .calc-view :deep(.rule-param-label),
+.service-panel-container.theme-techBlue .calc-view :deep(.rule-param-sm-label),
+.service-panel-container.theme-techBlue .calc-view :deep(.checkbox-text) {
+  color: var(--panel-form-label) !important;
+}
+
+.service-panel-container.theme-techBlue .calc-view :deep(.hint-box),
+.service-panel-container.theme-techBlue .calc-view :deep(.tip-box),
+.service-panel-container.theme-techBlue .calc-view :deep(.store-tips),
+.service-panel-container.theme-techBlue .calc-view :deep(.empty-state) {
+  background: var(--panel-tip-bg) !important;
+  border-color: var(--panel-tip-border) !important;
 }
 
 .calc-content :deep(.form-actions .btn) {

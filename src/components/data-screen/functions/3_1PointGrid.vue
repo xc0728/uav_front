@@ -1,5 +1,5 @@
 ﻿<script setup>
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { Loader2, Trash2 } from 'lucide-vue-next'
 import LineGrid from './3_2LineGrid.vue'
 
@@ -11,10 +11,16 @@ const props = defineProps({
   functionName: {
     type: String,
     required: true
+  },
+  theme: {
+    type: String,
+    default: 'white'
   }
 })
 
 const emit = defineEmits(['close', 'showPoint', 'showGrid', 'show-line'])
+
+const isTechBlueTheme = computed(() => props.theme === 'techBlue')
 
 // 清除已生成的格网和中心点
 function clearGrids() {
@@ -215,7 +221,7 @@ async function submitPointBufferGrid() {
 </script>
 
 <template>
-  <div class="point-grid-query">
+  <div class="point-grid-query techblue-aware" :class="{ 'theme-tech-blue': isTechBlueTheme }">
     <!-- 点网格化 -->
     <template v-if="functionName === '点网格化'">
       <div class="hint-box">
@@ -438,6 +444,23 @@ async function submitPointBufferGrid() {
   width: 100%;
   box-sizing: border-box;
   position: relative;
+}
+
+/* 科技蓝主题下的参数标题增强 */
+.point-grid-query.theme-tech-blue .group-title,
+.point-grid-query.theme-tech-blue .param-label {
+  color: #ecfbff;
+  text-shadow: 0 0 10px rgba(184, 246, 255, 0.18);
+}
+
+.point-grid-query.theme-tech-blue .group-title {
+  font-weight: 700;
+}
+
+.point-grid-query.theme-tech-blue .hint-box {
+  color: #d7f5ff;
+  background: rgba(10, 48, 92, 0.82);
+  border-color: rgba(97, 218, 251, 0.26);
 }
 
 /* 提示框 */
