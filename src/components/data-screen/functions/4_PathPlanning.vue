@@ -98,10 +98,10 @@ function onConflictFirstHeightPresetChange(event, pointIndex) {
   event.target.selectedIndex = 0
 }
 
-// 标准化点数据
+// 标准化点数据 - 经纬度保留6位小数，高度保留1位小数
 function normalizePoint(p) {
-  const lon = Number(Number(p.lon).toFixed(10))
-  const lat = Number(Number(p.lat).toFixed(10))
+  const lon = Number(Number(p.lon).toFixed(6))
+  const lat = Number(Number(p.lat).toFixed(6))
   const height = Number(Number(p.height ?? 0).toFixed(1))
   return { lon, lat, height }
 }
@@ -1224,13 +1224,13 @@ async function submitAstarPath() {
                 <div class="store-info-item">
                   <span class="store-info-label">起点：</span>
                   <span class="store-info-value" v-if="pathPoints.length >= 2">
-                    {{ pathPoints[0].lon.toFixed(6) }}, {{ pathPoints[0].lat.toFixed(6) }}, {{ pathPoints[0].height }}m
+                    {{ pathPoints[0].lon.toFixed(6) }}, {{ pathPoints[0].lat.toFixed(6) }}, {{ pathPoints[0].height.toFixed(1) }}m
                   </span>
                 </div>
                 <div class="store-info-item">
                   <span class="store-info-label">终点：</span>
                   <span class="store-info-value" v-if="pathPoints.length >= 2">
-                    {{ pathPoints[pathPoints.length - 1].lon.toFixed(6) }}, {{ pathPoints[pathPoints.length - 1].lat.toFixed(6) }}, {{ pathPoints[pathPoints.length - 1].height }}m
+                    {{ pathPoints[pathPoints.length - 1].lon.toFixed(6) }}, {{ pathPoints[pathPoints.length - 1].lat.toFixed(6) }}, {{ pathPoints[pathPoints.length - 1].height.toFixed(1) }}m
                   </span>
                 </div>
                 <div class="store-info-item">
