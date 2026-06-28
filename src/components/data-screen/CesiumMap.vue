@@ -1,9 +1,18 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import * as Cesium from 'cesium'
+import {
+  loadDeqingBuildings,
+  drawBuildingModelsOnMap,
+} from '../../utils/buildingModel.js'
 
 // 模块级别的存储（持久化，不随组件销毁而丢失）
 const routeGridEntities = {}
+let buildingModels = []       // 建筑白膜数据
+let buildingEntityIds = []    // Cesium 实体 ID 列表
+let buildingsLoaded = false   // 是否已加载数据
+let buildingsVisible = true  // 当前可见性
+let buildingsLoading = false // 加载中标识
 
 const cesiumEl = ref(null)
 let viewer = null
@@ -14,6 +23,7 @@ const lon = ref(null)
 const lat = ref(null)
 const height = ref(null)
 const show3DTiles = ref(true)
+const showBuildings = ref(false) // 建筑白膜开关
 const isMapReady = ref(false) // 地图是否准备就绪
 
 // 电子围栏绘制状态
@@ -272,8 +282,7 @@ function drawLinePath(linePoints) {
         positions,
         width: 3,
         material: lineColor,
-        depthFailMaterial: lineColor,
-        clampToGround: false,
+        clampToGround: true,
       },
     })
   }
@@ -852,6 +861,21 @@ function toggle3DTiles() {
   if (!tileset) return
   show3DTiles.value = !show3DTiles.value
   tileset.show = show3DTiles.value
+}
+
+function toggleBuildingsOnMap() {
+  if (!buildingsLoaded) {
+    loadBuildingModels().then(() => {
+      showBuildings.value = true
+    })
+    return
+  }
+  showBuildings.value = !showBuildings.value
+  buildingsVisible = showBuildings.value
+  buildingEntityIds.forEach(id => {
+    const entity = viewer.entities.getById(id)
+    if (entity) entity.show = showBuildings.value
+  })
 }
 
 // ==================== 电子围栏绘制功能 ====================
@@ -2218,6 +2242,55 @@ function clearWarningGridPoints() {
   })
 }
 
+// ==================== 建筑白膜模型 ====================
+
+async function loadBuildingModels() {
+  if (buildingsLoaded && buildingModels.length > 0) {
+    console.log('[CesiumMap] 建筑数据已加载，跳过重复加载')
+    return { buildings: buildingModels, summary: {} }
+  }
+  if (buildingsLoading) {
+    console.log('[CesiumMap] 建筑数据正在加载中...')
+    return null
+  }
+  if (!viewer) {
+    console.error('[CesiumMap] viewer 未初始化')
+    return null
+  }
+
+  buildingsLoading = true
+  console.log('[CesiumMap] 开始加载建筑白膜数据...')
+
+  try {
+    const result = await loadDeqingBuildings({
+      shpUrl: '/deqing/deqing2.shp',
+      dbfUrl: '/deqing/deqing2.dbf',
+    })
+
+    buildingModels = result.buildings
+    buildingsLoaded = true
+    buildingsVisible = true
+
+    console.log('[CesiumMap] 建筑白膜数据加载完成:', result.summary)
+
+    // 立即绘制（白色不透明）
+    buildingEntityIds = drawBuildingModelsOnMap(viewer, buildingModels, {
+      color: Cesium.Color.WHITE,
+      opacity: 1,
+      outline: false,
+      showLabels: false,
+    })
+
+    return result
+  } catch (err) {
+    console.error('[CesiumMap] 建筑白膜加载失败:', err)
+    buildingsLoaded = false
+    return null
+  } finally {
+    buildingsLoading = false
+  }
+}
+
 // ==================== UAV 飞行动画 ====================
 
 const uavAnimState = {
@@ -2445,49 +2518,52 @@ defineExpose({
   stopUavAnimation,
   stopUavAnimationByRouteId,
   getUavCurrentPosition,
+  // 建筑白膜模型
+  loadBuildingModels,
+  toggleBuildingsOnMap,
 })
 
 onMounted(async () => {
-  // 配置 Cesium Ion Token
-  Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJmZDBhNDFhZi1iZDZiLTQxOTItODBmNy0wNTM5MzNkNDE1MjciLCJpZCI6MzgzMjUyLCJpYXQiOjE3Njk0MDI3NjN9.Z7q5n75AghS4cysQLhuLx2_70MrUJLjgGTgrqEtcnyo'
-
-  // 使用 Cesium 默认配置
-  viewer = new Cesium.Viewer(cesiumEl.value, {
-    animation: false,
-    baseLayerPicker: false,
-    fullscreenButton: false,
-    geocoder: false,
-    homeButton: false,
-    infoBox: false,
-    sceneModePicker: false,
-    selectionIndicator: false,
-    timeline: false,
-    navigationHelpButton: false,
-    shouldAnimate: true,
-    requestRenderMode: false,      // 禁用请求渲染模式
-    maximumRenderTimeChange: Infinity, // 允许无限时间变化
-  })
-
-  // 确保启用持续渲染
-  viewer.scene.enableAutoRenderLoop = true
-  viewer.scene.render()  // 初始渲染
-
-  // 隐藏 Cesium 标志
-  viewer.cesiumWidget.creditContainer.style.display = 'none'
-
-  // 设置初始视角（中国区域）
-  viewer.camera.setView({
-    destination: Cesium.Cartesian3.fromDegrees(120.0, 30.0, 5000000)
-  })
-
-  viewer.scene.globe.depthTestAgainstTerrain = false
-
   try {
+    // 配置 Cesium Ion Token
+    Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJmZDBhNDFhZi1iZDZiLTQxOTItODBmNy0wNTM5MzNkNDE1MjciLCJpZCI6MzgzMjUyLCJpYXQiOjE3Njk0MDI3NjN9.Z7q5n75AghS4cysQLhuLx2_70MrUJLjgGTgrqEtcnyo'
+
+    // 使用 Cesium 默认配置
+    viewer = new Cesium.Viewer(cesiumEl.value, {
+      animation: false,
+      baseLayerPicker: false,
+      fullscreenButton: false,
+      geocoder: false,
+      homeButton: false,
+      infoBox: false,
+      sceneModePicker: false,
+      selectionIndicator: false,
+      timeline: false,
+      navigationHelpButton: false,
+      shouldAnimate: true,
+      requestRenderMode: false,      // 禁用请求渲染模式
+      maximumRenderTimeChange: Infinity, // 允许无限时间变化
+    })
+
+    // 确保启用持续渲染
+    viewer.scene.enableAutoRenderLoop = true
+    viewer.scene.render()  // 初始渲染
+
+    // 隐藏 Cesium 标志
+    viewer.cesiumWidget.creditContainer.style.display = 'none'
+
+    // 设置初始视角（中国区域）
+    viewer.camera.setView({
+      destination: Cesium.Cartesian3.fromDegrees(120.0, 30.0, 5000000)
+    })
+
+    viewer.scene.globe.depthTestAgainstTerrain = false
+
     tileset = await Cesium.Cesium3DTileset.fromUrl('/dq3dtiles/tileset.json')
     viewer.scene.primitives.add(tileset)
     await viewer.zoomTo(tileset)
   } catch (error) {
-    console.error('Failed to load local 3D Tiles:', error)
+    console.error('[CesiumMap] 初始化错误:', error)
   }
 
   handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas)
@@ -2598,11 +2674,37 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- 3D底图开关 -->
-    <div v-if="props.show3DToggle" class="tileset-toggle" @click="toggle3DTiles">
-      <span class="toggle-label">3D底图</span>
-      <div class="toggle-switch" :class="{ active: show3DTiles }">
-        <div class="toggle-slider" />
+    <!-- 底图开关卡片（位于鼠标信息条右侧） -->
+    <div class="bottom-bar">
+      <div class="mouse-info">
+        <div class="mouse-info-item">
+          <span class="label">经度</span>
+          <span class="value">{{ formatNum(lon, 6) }}</span>
+        </div>
+        <div class="mouse-info-item">
+          <span class="label">纬度</span>
+          <span class="value">{{ formatNum(lat, 6) }}</span>
+        </div>
+        <div class="mouse-info-item">
+          <span class="label">高程</span>
+          <span class="value">{{ formatNum(height, 2) }} m</span>
+        </div>
+      </div>
+
+      <!-- 建筑白膜单行开关 -->
+      <div class="single-toggle-card" @click="toggleBuildingsOnMap">
+        <span class="layer-label">建筑白膜</span>
+        <div class="toggle-switch" :class="{ active: showBuildings }">
+          <div class="toggle-slider" />
+        </div>
+      </div>
+
+      <!-- 3D底图单行开关 -->
+      <div v-if="props.show3DToggle" class="single-toggle-card" @click="toggle3DTiles">
+        <span class="layer-label">3D底图</span>
+        <div class="toggle-switch" :class="{ active: show3DTiles }">
+          <div class="toggle-slider" />
+        </div>
       </div>
     </div>
   </section>
@@ -2624,10 +2726,6 @@ onBeforeUnmount(() => {
 }
 
 .mouse-info {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: 20px;
   display: flex;
   gap: 16px;
   padding: 10px 16px;
@@ -2635,7 +2733,37 @@ onBeforeUnmount(() => {
   backdrop-filter: blur(10px);
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-}.mouse-info-item {
+}
+
+.bottom-bar {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.single-toggle-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(10px);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.single-toggle-card:hover {
+  background: rgba(15, 23, 42, 0.95);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.mouse-info-item {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -2653,32 +2781,12 @@ onBeforeUnmount(() => {
   color: #fff;
 }
 
-/* 3D底图滑动开关 */
-.tileset-toggle {
-  position: absolute;
-  right: 20px;
-  bottom: 20px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 14px;
-  background: rgba(15, 23, 42, 0.85);
-  backdrop-filter: blur(10px);
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  cursor: pointer;
-  user-select: none;
-  transition: all 0.2s ease;
-}
+/* 底图开关卡片 */
+/* 已废弃，保持兼容 */
 
-.tileset-toggle:hover {
-  background: rgba(15, 23, 42, 0.95);
-  border-color: rgba(59, 130, 246, 0.4);
-}
-
-.toggle-label {
+.layer-label {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.7);
+  color: rgba(255, 255, 255, 0.8);
 }
 
 .toggle-switch {

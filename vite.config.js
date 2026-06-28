@@ -20,12 +20,12 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-               //target: 'http://192.168.3.26:9997',/
-               //target: 'http://localhost:9990',/
-               //target: 'http://3480yfkj9405.vicp.fun:14210',/
-               target: 'https://idiocy-rerun-spooky.ngrok-free.dev',
-        changeOrigin: true,
-      }
+  target: 'https://idiocy-rerun-spooky.ngrok-free.dev',
+  changeOrigin: true,
+  headers: {
+    'ngrok-skip-browser-warning': 'true',
+  },
+},
     }
   }
   
