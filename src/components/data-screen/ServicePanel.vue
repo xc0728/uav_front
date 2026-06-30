@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, defineProps } from 'vue'
-import { ChevronRight, ChevronLeft, ChevronDown, X, Grid3X3, Navigation, Map, Calculator, Box, Boxes, Settings2, Database, ShieldBan } from 'lucide-vue-next'
+import { ChevronRight, ChevronLeft, ChevronDown, X, Grid3X3, Navigation, Map, Calculator, Boxes, Settings2, Database, ShieldBan } from 'lucide-vue-next'
 import InteropFusion from './functions/1_GridInterop.vue'
 import TiltPhotogrammetry from './functions/2_Osgb_Grid.vue'
 import GridSplit from './functions/3_1PointGrid.vue'
@@ -8,11 +8,10 @@ import LineGrid from './functions/3_2LineGrid.vue'
 import PolygonGrid from './functions/3_3PolygonGrid.vue'
 import RangeGrid from './functions/3_4RangeGrid.vue'
 import PathPlanning from './functions/4_PathPlanning.vue'
-import SpatialRelation from './functions/5_SpatialRelation.vue'
 import AirspaceGridQuery from './functions/6_AirspaceGridQuery.vue'
 import GridAggregation from './functions/7_Aggregation.vue'
 import DemGrid from './functions/8_DemGrid.vue'
-import NoFlyZone from './functions/8_ElectronicFence.vue'
+import NoFlyZone from './functions/9_NoFlyZone.vue'
 
 const props = defineProps({
   panelType: {
@@ -82,17 +81,6 @@ const services = [
     ],
   },
   {
-    id: 'spatial-relation',
-    name: '立体导航网格空间关系计算服务',
-    shortName: '空间关系',
-    icon: Box,
-    component: SpatialRelation,
-    functions: [
-      '点缓冲区网格冲突检测',
-      '航路平滑处理控件',
-    ],
-  },
-  {
     id: 'airspace-grid-query',
     name: '空域网格化入库/查询服务',
     shortName: '空域网格',
@@ -125,12 +113,12 @@ const services = [
   },
   {
     id: 'no-fly-zone',
-    name: '禁飞区设置服务',
-    shortName: '禁飞区设置',
+    name: '电子围栏服务',
+    shortName: '电子围栏',
     icon: ShieldBan,
     component: NoFlyZone,
     functions: [
-      '保存禁飞区',
+      '电子围栏设置',
     ],
   },
 ]

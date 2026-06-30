@@ -2263,8 +2263,8 @@ async function loadBuildingModels() {
 
   try {
     const result = await loadDeqingBuildings({
-      shpUrl: '/deqing/deqing2.shp',
-      dbfUrl: '/deqing/deqing2.dbf',
+      shpUrl: '/deqing/deqing4.shp',
+      dbfUrl: '/deqing/deqing4.dbf',
     })
 
     buildingModels = result.buildings
@@ -2274,11 +2274,17 @@ async function loadBuildingModels() {
     console.log('[CesiumMap] 建筑白膜数据加载完成:', result.summary)
 
     // 立即绘制（白色不透明）
+    // 医院建筑（type===1）用浅红色半透明白膜，普通建筑为白色
     buildingEntityIds = drawBuildingModelsOnMap(viewer, buildingModels, {
       color: Cesium.Color.WHITE,
       opacity: 1,
       outline: false,
       showLabels: false,
+      // 医院特殊样式：深红色不透明
+      hospitalColor: Cesium.Color.fromCssColorString('#FF7788'),
+      hospitalOpacity: 1,
+      hospitalLabelFont: 'bold 14px sans-serif',
+      hospitalLabelColor: Cesium.Color.YELLOW,
     })
 
     return result

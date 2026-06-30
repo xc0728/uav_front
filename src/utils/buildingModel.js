@@ -40,6 +40,10 @@ function readCString(buffer, offset, maxLen) {
   return new TextDecoder('utf-8').decode(buffer.slice(offset, end))
 }
 
+function decodeText(raw, fieldName) {
+  return new TextDecoder('utf-8', { fatal: false }).decode(raw).trim()
+}
+
 // ====================== SHP 解析 ======================
 
 /**
@@ -134,12 +138,22 @@ async function parseShapefile(shpBuffer) {
  * 解析 DBF 文件，返回字段定义 + 记录数组
  */
 async function parseDBF(dbfBuffer) {
-  const buffer = dbfBuffer
+  const originalBuffer = dbfBuffer
 
-  const version = buffer[0]       // 0x03
-  const numRecords = readInt32LE(buffer, 4)
-  const headerSize = buffer[8] | (buffer[9] << 8)
-  const recordSize = buffer[10] | (buffer[11] << 8)
+  // 检测 UTF-8 BOM (0xEF 0xBB 0xBF)，DBF 文件通常不带 BOM，
+  // 但某些 GIS 工具导出的文件会附加 BOM，需跳过
+  const hasBOM = dbfBuffer[0] === 0xEF && dbfBuffer[1] === 0xBB && dbfBuffer[2] === 0xBF
+  const bomOffset = hasBOM ? 3 : 0
+
+  if (hasBOM) {
+    console.log('[BuildingModel] 检测到 UTF-8 BOM，已跳过前3字节')
+  }
+
+  // 头部字段从 bomOffset 之后开始读取
+  const version = originalBuffer[bomOffset]       // 0x03
+  const numRecords = readInt32LE(originalBuffer, bomOffset + 4)
+  const headerSize = originalBuffer[bomOffset + 8] | (originalBuffer[bomOffset + 9] << 8)
+  const recordSize = originalBuffer[bomOffset + 10] | (originalBuffer[bomOffset + 11] << 8)
 
   console.log(`[BuildingModel] DBF: version=${version}, records=${numRecords}, headerSize=${headerSize}, recordSize=${recordSize}`)
 
@@ -148,11 +162,11 @@ async function parseDBF(dbfBuffer) {
   const fields = []
   let recordOffset = 1 // 删除标记占 1 字节
   for (let i = 0; i < numFields; i++) {
-    const fieldOffset = 32 + i * 32
-    const name = readCString(buffer, fieldOffset, 11).replace(/\x00/g, '').trim()
-    const type = String.fromCharCode(buffer[fieldOffset + 11])
-    const len = buffer[fieldOffset + 16]
-    const decimal = buffer[fieldOffset + 17]
+    const fieldOffset = bomOffset + 32 + i * 32
+    const name = readCString(originalBuffer, fieldOffset, 11).replace(/\x00/g, '').trim()
+    const type = String.fromCharCode(originalBuffer[fieldOffset + 11])
+    const len = originalBuffer[fieldOffset + 16]
+    const decimal = originalBuffer[fieldOffset + 17]
 
     fields.push({ name, type, len, decimal, offset: recordOffset })
     recordOffset += len
@@ -189,17 +203,17 @@ async function parseDBF(dbfBuffer) {
   // 解析记录（从 headerSize 开始，每条记录以 0x20 开头）
   const records = []
   for (let r = 0; r < numRecords; r++) {
-    const recordOffset = headerSize + r * recordSize
-    if (recordOffset + recordSize > buffer.length) break
+    const recordOffset = bomOffset + headerSize + r * recordSize
+    if (recordOffset + recordSize > originalBuffer.length) break
 
     // 删除标记 (0x20=正常, 0x2A=删除)
-    const deleted = buffer[recordOffset] === 0x2A
+    const deleted = originalBuffer[recordOffset] === 0x2A
     if (deleted) continue
 
     const record = {}
     for (const field of fields) {
-      const raw = buffer.slice(recordOffset + 1 + field.offset, recordOffset + 1 + field.offset + field.len)
-      let value = new TextDecoder('utf-8', { fatal: false }).decode(raw).trim()
+      const raw = originalBuffer.slice(recordOffset + 1 + field.offset, recordOffset + 1 + field.offset + field.len)
+      let value = decodeText(raw, field.name)
 
       if (field.name === heightField.name) {
         // 高度字段：尝试解析为数值
@@ -217,6 +231,7 @@ async function parseDBF(dbfBuffer) {
   }
 
   console.log(`[BuildingModel] DBF 解析完成，${records.length} 条记录`)
+  console.log(`[BuildingModel] DBF 字段列表:`, fields.map(f => f.name))
   return { fields, records, heightField, defaultHeight: 0 }
 }
 
@@ -274,9 +289,46 @@ function generateBuildingModels(geometries, attributes, heightField, options = {
     // 计算基底高程（地表高程，Cesium 会自动处理）
     const baseHeight = 0
 
+    // 从 DBF 属性中提取 type 和 name
+    let buildingType = 0
+    let buildingName = null
+    if (attributes && attributes.length > 0) {
+      const attr = attributes[idx % attributes.length]
+      if (attr) {
+        buildingType = parseInt(attr['type'] || attr['TYPE'] || attr['Type'] || 0) || 0
+        let raw = attr['name_poi'] || attr['NAME_POI'] || attr['Name_Poi'] || null
+        // 去掉开头的乱码替换字符（U+FFFD），通常是编码问题导致
+        if (raw) {
+          raw = raw.replace(/^\uFFFD+/, '').trim()
+          // DBF 编码导致医院名称第一个字丢失，根据截断后的名称补全
+          const hospitalNamePatch = {
+            '丰社区卫生服务站': '新丰社区卫生服务站',
+            '阳社区卫生服务站': '舞阳社区卫生服务站',
+            '康路街道春晖社区卫生服务站': '武康路街道春晖社区卫生服务站',
+            '康街道祥和永兴社区卫生服务站': '武康街道祥和永兴社区卫生服务站',
+            '山社区卫生服务站': '狮山社区卫生服务站',
+            '琳安宁疗护医院': '福琳安宁疗护医院',
+            '桥社区卫生服务站': '丰桥社区卫生服务站',
+            '清长德医院': '德清长德医院',
+            '清友好医院': '德清友好医院',
+            '清县中医院': '德清县中医院',
+            '清县武康街道社区卫生服务中心': '德清县武康街道社区卫生服务中心',
+            '清县人民医院': '德清县人民医院',
+            '清康富医院': '德清康富医院',
+          }
+          if (hospitalNamePatch[raw]) {
+            raw = hospitalNamePatch[raw]
+          }
+          buildingName = raw || null
+        }
+      }
+    }
+
     buildingModels.push({
       id: `building_${idx}`,
       index: idx,
+      type: buildingType,      // 1=医院
+      name: buildingName,      // 医院名称
       height: Math.round(height * 100) / 100,  // 保留2位小数
       baseHeight,
       center: [
@@ -331,6 +383,10 @@ function drawBuildingModelsOnMap(viewer, buildingModels, options = {}) {
     showLabels = false,
     minHeightToShow = 0,
     maxHeightToShow = Infinity,
+    hospitalColor = Cesium.Color.RED,
+    hospitalOpacity = 0.7,
+    hospitalLabelFont = '13px sans-serif',
+    hospitalLabelColor = Cesium.Color.YELLOW,
   } = options
 
   const entityIds = []
@@ -345,15 +401,18 @@ function drawBuildingModelsOnMap(viewer, buildingModels, options = {}) {
       Cesium.Cartesian3.fromDegrees(coord[0], coord[1], building.baseHeight)
     )
 
+    // 区分医院（type===1）和普通建筑
+    const isHospital = building.type === 1
+    const fillColor = isHospital ? hospitalColor : color
+    const fillOpacity = isHospital ? hospitalOpacity : opacity
+
     const entityId = `building_model_${idx}`
     const entity = viewer.entities.add({
       id: entityId,
       polygon: {
         hierarchy: new Cesium.PolygonHierarchy(positions),
-        material: color.withAlpha(opacity),
-        outline,
-        outlineColor: outlineColor.withAlpha(outlineOpacity),
-        outlineWidth,
+        material: fillColor.withAlpha(fillOpacity),
+        outline: false,
         height: building.baseHeight,
         extrudedHeight: building.height,
         closeTop: true,
@@ -362,12 +421,38 @@ function drawBuildingModelsOnMap(viewer, buildingModels, options = {}) {
       properties: {
         buildingId: building.id,
         height: building.height,
+        type: building.type,
+        name: building.name,
       },
     })
     entityIds.push(entityId)
 
-    // 标签
-    if (showLabels && building.height > 20) {
+    // 标签：普通建筑高度标签 / 医院名称标签
+    if (isHospital && building.name) {
+      // 医院：显示医院名称
+      viewer.entities.add({
+        id: `${entityId}_hospital_label`,
+        position: Cesium.Cartesian3.fromDegrees(
+          building.center[0],
+          building.center[1],
+          building.height + 5
+        ),
+        label: {
+          text: building.name,
+          font: 'bold 18px Microsoft YaHei',
+          fillColor: Cesium.Color.YELLOW,
+          outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 3,
+          style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          pixelOffset: new Cesium.Cartesian2(0, -8),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          scaleByDistance: new Cesium.NearFarScalar(1000, 1.0, 8000, 0.5),
+        },
+      })
+      entityIds.push(`${entityId}_hospital_label`)
+    } else if (showLabels && building.height > 20) {
+      // 普通建筑：显示高度
       viewer.entities.add({
         id: `${entityId}_label`,
         position: Cesium.Cartesian3.fromDegrees(
@@ -403,8 +488,8 @@ function drawBuildingModelsOnMap(viewer, buildingModels, options = {}) {
  * @returns {Promise<{ buildings: Array, summary: Object }>}
  */
 export async function loadDeqingBuildings(options = {}) {
-  const shpUrl = options.shpUrl || '/deqing/deqing2.shp'
-  const dbfUrl = options.dbfUrl || '/deqing/deqing2.dbf'
+  const shpUrl = options.shpUrl || '/deqing/deqing4.shp'
+  const dbfUrl = options.dbfUrl || '/deqing/deqing4.dbf'
 
   console.log('[BuildingModel] 开始加载德清建筑数据...')
   console.log('[BuildingModel] SHP URL:', shpUrl)
