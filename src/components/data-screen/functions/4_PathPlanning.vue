@@ -69,7 +69,7 @@ const storeError = ref('')
 const storeSuccess = ref(false)
 
 // 层级选项
-const levelOptions = [9]
+const levelOptions = [9, 14]
 
 /** 高度快选：10–50 整十 */
 const heightPresetOptions = Array.from({ length: 5 }, (_, i) => (i + 1) * 10)
@@ -1387,7 +1387,7 @@ async function submitAstarPath() {
         <div class="param-line">
           <span class="param-label">网格层级</span>
           <select v-model.number="conflictForm.level" class="param-select">
-            <option :value="9">第 9 级</option>
+            <option v-for="lvl in levelOptions" :key="lvl" :value="lvl">第 {{ lvl }} 级</option>
           </select>
         </div>
         <div class="param-line">
@@ -1620,7 +1620,7 @@ async function submitAstarPath() {
         <div class="param-line">
           <span class="param-label">网格层级</span>
           <select v-model.number="conflictFirstForm.level" class="param-select">
-            <option :value="9">第 9 级</option>
+            <option v-for="lvl in levelOptions" :key="lvl" :value="lvl">第 {{ lvl }} 级</option>
           </select>
         </div>
         <div class="param-line">

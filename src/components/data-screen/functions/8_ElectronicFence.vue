@@ -27,6 +27,15 @@ const emit = defineEmits([
 const FENCE_TYPE_SPHERE = 'sphere'
 const FENCE_TYPE_LINE = 'line'
 
+const typeCodeNameMap = {
+  unit_organization: '单位机构',
+  airport_airspace: '机场空域',
+  transportation_hub: '交通枢纽',
+  hazardous_materials: '危险品',
+  major_event: '重要活动',
+  other_no_fly_zone: '其他禁飞区',
+}
+
 const currentMode = ref(null)
 
 const sphereForm = reactive({
@@ -49,7 +58,7 @@ const noFlyZoneList = computed(() => {
     name: zone.name || '未命名禁飞区',
     type: 'noflyzone',
     typeCode: zone.type_code,
-    typeName: zone.type_name || (zone.type_code === 'electronic_fence' ? '电子围栏' : '风险区域'),
+    typeName: zone.type_name || (typeCodeNameMap[zone.type_code] || '其他禁飞区'),
     enabled: true,
     bottom: zone.bottom,
     top: zone.top,
@@ -338,8 +347,8 @@ defineExpose({
             <span
               class="fence-type-tag"
               :style="{
-                background: zone.typeCode === 'electronic_fence' ? '#5b9fd433' : '#a855f733',
-                color: zone.typeCode === 'electronic_fence' ? '#5b9fd4' : '#a855f7'
+                background: (TYPE_COLORS[zone.typeCode] || '#5b9fd4') + '33',
+                color: TYPE_COLORS[zone.typeCode] || '#5b9fd4'
               }"
             >
               {{ zone.typeName }}

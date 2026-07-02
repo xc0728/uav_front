@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import * as Cesium from 'cesium'
 import {
   loadDeqingBuildings,
@@ -36,7 +36,7 @@ let sphereGridCells = [] // 球形围栏网格数据
 let lineGridCells = [] // 线状围栏网格数据
 const onFenceConfirmCallback = ref(null)
 
-const emit = defineEmits(['point-selected', 'fence-confirm', 'box-select-start', 'box-select-end', 'get-view-bounds'])
+const emit = defineEmits(['point-selected', 'fence-confirm', 'box-select-start', 'box-select-end', 'get-view-bounds', 'flight-start', 'flight-end'])
 
 const props = defineProps({
   show3DToggle: {
@@ -50,6 +50,30 @@ let isBoxSelecting = false
 let boxSelectHandler = null
 let boxSelectStartPos = null
 let boxSelectEntity = null
+
+// ==================== 一键场景演示 ====================
+// 场景演示常量
+const SCENARIO_CENTER = { lon: 119.9725, lat: 30.5449 }
+const SCENARIO_RADIUS_KM = 3
+
+// 场景演示状态
+const scenarioState = reactive({
+  active: false,
+  step: 0,
+  showDialog: false,
+  dialogType: 'intro', // 'intro' | 'location' | 'result' | 'conflict'
+  incidentLocation: null,
+  nearestHospital: null,
+  lineRoute: null,
+  astarRoute: null,
+  conflictResult: null,
+  planningLoading: false,
+  flightActive: false,
+})
+
+// 场景演示实体ID列表
+const scenarioEntityIds = []
+let scenarioCircleEntity = null
 
 function formatNum(v, digits) {
   if (v === null || v === undefined) return '--'
@@ -733,49 +757,11 @@ function drawNoFlyZonePrism(data) {
       closeBottom: true,
     },
   })
-
-  pts.forEach((p, idx) => {
-    viewer.entities.add({
-      id: `noflyzone-point-${zoneId}-${idx}`,
-      position: Cesium.Cartesian3.fromDegrees(Number(p.lon), Number(p.lat), top),
-      point: {
-        pixelSize: 8,
-        color: Cesium.Color.fromCssColorString(color),
-        outlineColor: Cesium.Color.WHITE,
-        outlineWidth: 2,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      },
-      label: {
-        text: String(idx + 1),
-        font: '11px sans-serif',
-        fillColor: Cesium.Color.WHITE,
-        outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 2,
-        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-        pixelOffset: new Cesium.Cartesian2(0, -10),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      },
-    })
-  })
-
-  const centerLon = pts.reduce((s, p) => s + Number(p.lon), 0) / pts.length
-  const centerLat = pts.reduce((s, p) => s + Number(p.lat), 0) / pts.length
-  viewer.camera.flyTo({
-    destination: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, top + 2000),
-    duration: 1.5,
-  })
 }
 
 function removeNoFlyZonePrism(zoneId) {
   if (!viewer) return
-  const entityIds = viewer.entities.values.map(e => e.id)
-  entityIds.forEach(id => {
-    if (!id) return
-    if (id === `noflyzone-prism-${zoneId}` || id.startsWith(`noflyzone-point-${zoneId}-`)) {
-      viewer.entities.removeById(id)
-    }
-  })
+  viewer.entities.removeById(`noflyzone-prism-${zoneId}`)
 }
 
 function clearLineVisual() {
@@ -875,6 +861,1056 @@ function toggleBuildingsOnMap() {
   buildingEntityIds.forEach(id => {
     const entity = viewer.entities.getById(id)
     if (entity) entity.show = showBuildings.value
+  })
+}
+
+// ==================== 一键场景演示功能 ====================
+
+/** 打开场景演示 */
+function openScenarioDemo() {
+  currentStartToken++
+  scenarioState.active = true
+  scenarioState.step = 1
+  scenarioState.showDialog = true
+  scenarioState.dialogType = 'intro'
+  scenarioState.incidentLocation = null
+  scenarioState.nearestHospital = null
+  scenarioState.lineRoute = null
+  scenarioState.astarRoute = null
+  scenarioState.conflictResult = null
+
+  // 在地图上绘制3km圆形区域
+  drawScenarioCircle()
+}
+
+/** 关闭/取消场景演示（通用全量重置） */
+function closeScenarioDemo() {
+  if (currentFlightAnim) {
+    if (currentFlightAnim.rafId) cancelAnimationFrame(currentFlightAnim.rafId)
+    if (currentFlightAnim.entity && viewer) viewer.entities.remove(currentFlightAnim.entity)
+    currentFlightAnim = null
+  }
+  currentPlanningToken++
+  currentStartToken++
+  scenarioState.active = false
+  scenarioState.step = 0
+  scenarioState.showDialog = false
+  scenarioState.dialogType = 'intro'
+  scenarioState.incidentLocation = null
+  scenarioState.nearestHospital = null
+  scenarioState.lineRoute = null
+  scenarioState.astarRoute = null
+  scenarioState.conflictResult = null
+  scenarioState.planningLoading = false
+  scenarioState.flightActive = false
+  clearScenarioVisualization()
+  emit('flight-end')
+}
+
+/** 下一步 */
+function nextScenarioStep() {
+  if (scenarioState.dialogType === 'intro') {
+    scenarioState.dialogType = 'location'
+  } else if (scenarioState.dialogType === 'location' && scenarioState.incidentLocation) {
+    scenarioState.step = 3
+    scenarioState.dialogType = 'planning'
+    scenarioState.planningLoading = true
+    executeRoutePlanning()
+  }
+}
+
+/** 上一步 */
+function prevScenarioStep() {
+  if (scenarioState.dialogType === 'location') {
+    scenarioState.dialogType = 'intro'
+  }
+}
+
+/** 重置场景演示 */
+function resetScenarioDemo() {
+  closeScenarioDemo()
+}
+
+let currentFlightAnim = null
+let currentPlanningToken = 0
+let currentStartToken = 0
+
+/** 放飞无人机：沿A*路径飞行（医院 → 事故地点） */
+function releaseDrone() {
+  const pathData = scenarioState.astarRoute
+  if (!pathData || pathData.length === 0) {
+    alert('无航线数据')
+    return
+  }
+
+  // 隐藏弹窗
+  scenarioState.showDialog = false
+  scenarioState.flightActive = true
+
+  // 反转路径：从医院飞往事故地点
+  const centers = []
+  const reversedPath = [...pathData].reverse()
+  for (const grid of reversedPath) {
+    if (grid.center && Array.isArray(grid.center) && grid.center.length >= 2) {
+      const h = Number(grid.center[2])
+        || ((Number(grid.top) || 0) + (Number(grid.bottom) || 0)) / 2
+        || 120
+      centers.push({
+        lon: Number(grid.center[0]),
+        lat: Number(grid.center[1]),
+        height: h,
+      })
+    }
+  }
+
+  if (centers.length < 2) {
+    alert('航线数据不足')
+    scenarioState.flightActive = false
+    return
+  }
+
+  // 发射飞行开始事件，通知监控屏开始模拟
+  emit('flight-start')
+
+  // 加载无人机图标
+  const img = new Image()
+  img.onload = () => {
+    doFlightAnimation(img, centers)
+  }
+  img.onerror = () => {
+    doFlightAnimation(null, centers)
+  }
+  img.src = '/webicon1.png'
+}
+
+function doFlightAnimation(droneImg, centers) {
+  const entityId = 'scenario-drone-flight'
+  const start = centers[0]
+
+  // 计算格网尺寸，用于缩放图标
+  const g0 = centers[0]
+  const g1 = centers[1] || centers[0]
+  const dLon = Math.abs(g1.lon - g0.lon) || 0.001
+  const dLat = Math.abs(g1.lat - g0.lat) || 0.001
+  const midLatRad = ((g0.lat + g1.lat) / 2) * Math.PI / 180
+  const cellW = dLon * 111320 * Math.cos(midLatRad)
+  const cellH = dLat * 110540
+  const cellSize = Math.max(cellW, cellH, 1)
+  const scale = Math.max(0.08, cellSize * 0.006)
+
+  const entity = viewer.entities.add({
+    id: entityId,
+    position: Cesium.Cartesian3.fromDegrees(start.lon, start.lat, start.height),
+    billboard: droneImg ? {
+      image: droneImg,
+      scale,
+    } : undefined,
+    model: droneImg ? undefined : {
+      uri: '/DXY1.glb',
+      scale,
+      minimumPixelSize: 32,
+      maximumScale: 50000,
+    },
+  })
+
+  const anim = {
+    centers,
+    idx: 0,
+    t: 0,
+    pos: Cesium.Cartesian3.fromDegrees(start.lon, start.lat, start.height),
+    ori: Cesium.Quaternion.IDENTITY,
+    lastTime: performance.now(),
+    secondsPerGrid: 2,
+    done: false,
+    rafId: null,
+    entity,
+  }
+  currentFlightAnim = anim
+
+  const FRAME_RATE = 60
+  const INTERVAL = 1000 / FRAME_RATE
+  let lastFrameTime = performance.now()
+
+  function flightLoop() {
+    if (!currentFlightAnim || currentFlightAnim !== anim || currentFlightAnim.done) return
+
+    const now = performance.now()
+    if (now - lastFrameTime < INTERVAL) {
+      currentFlightAnim.rafId = requestAnimationFrame(flightLoop)
+      return
+    }
+    lastFrameTime = now
+
+    const dt = (now - anim.lastTime) / 1000
+    anim.lastTime = now
+
+    anim.t += dt / anim.secondsPerGrid
+
+    while (anim.t >= 1 && anim.idx < anim.centers.length - 1) {
+      anim.t -= 1
+      anim.idx++
+    }
+
+    if (anim.idx >= anim.centers.length - 1) {
+      const last = anim.centers[anim.centers.length - 1]
+      anim.pos = Cesium.Cartesian3.fromDegrees(last.lon, last.lat, last.height)
+      const hpr = new Cesium.HeadingPitchRoll(0, 0, 0)
+      anim.ori = Cesium.Transforms.headingPitchRollQuaternion(anim.pos, hpr)
+      entity.position = new Cesium.ConstantPositionProperty(anim.pos)
+      entity.orientation = new Cesium.ConstantProperty(anim.ori)
+      anim.done = true
+
+      finishFlight()
+      return
+    }
+
+    const from = anim.centers[anim.idx]
+    const to = anim.centers[anim.idx + 1]
+    const easeT = anim.t * anim.t * (3 - 2 * anim.t)
+    const lon = from.lon + (to.lon - from.lon) * easeT
+    const lat = from.lat + (to.lat - from.lat) * easeT
+    const h = from.height + (to.height - from.height) * easeT
+
+    anim.pos = Cesium.Cartesian3.fromDegrees(lon, lat, h)
+
+    const dLonRad = (to.lon - from.lon) * Math.PI / 180
+    const fromLatRad = from.lat * Math.PI / 180
+    const toLatRad = to.lat * Math.PI / 180
+    const heading = Math.atan2(
+      Math.sin(dLonRad) * Math.cos(toLatRad),
+      Math.cos(fromLatRad) * Math.sin(toLatRad)
+        - Math.sin(fromLatRad) * Math.cos(toLatRad) * Math.cos(dLonRad)
+    )
+    const hpr = new Cesium.HeadingPitchRoll(heading, 0, 0)
+    anim.ori = Cesium.Transforms.headingPitchRollQuaternion(anim.pos, hpr)
+
+    entity.position = new Cesium.ConstantPositionProperty(anim.pos)
+    entity.orientation = new Cesium.ConstantProperty(anim.ori)
+
+    currentFlightAnim.rafId = requestAnimationFrame(flightLoop)
+  }
+
+  currentFlightAnim.rafId = requestAnimationFrame(flightLoop)
+}
+
+function cancelFlight() {
+  // 停止飞行动画
+  if (currentFlightAnim) {
+    if (currentFlightAnim.rafId) {
+      cancelAnimationFrame(currentFlightAnim.rafId)
+    }
+    if (currentFlightAnim.entity && viewer) {
+      viewer.entities.remove(currentFlightAnim.entity)
+    }
+    currentFlightAnim = null
+  }
+
+  // 废弃旧规划请求
+  currentPlanningToken++
+
+  // 完全重置场景演示状态，像没演示过一样
+  scenarioState.active = false
+  scenarioState.step = 0
+  scenarioState.showDialog = false
+  scenarioState.dialogType = 'intro'
+  scenarioState.incidentLocation = null
+  scenarioState.nearestHospital = null
+  scenarioState.lineRoute = null
+  scenarioState.astarRoute = null
+  scenarioState.conflictResult = null
+  scenarioState.planningLoading = false
+  scenarioState.flightActive = false
+
+  clearScenarioVisualization()
+  emit('flight-end')
+}
+
+function finishFlight() {
+  if (currentFlightAnim) {
+    if (currentFlightAnim.entity && viewer) {
+      viewer.entities.remove(currentFlightAnim.entity)
+    }
+    currentFlightAnim = null
+  }
+  scenarioState.flightActive = false
+  emit('flight-end')
+  resetScenarioDemo()
+}
+
+/** 绘制3km圆形区域 */
+function drawScenarioCircle() {
+  if (!viewer) return
+
+  // 清除旧的可视化
+  clearScenarioVisualization()
+
+  const centerLon = SCENARIO_CENTER.lon
+  const centerLat = SCENARIO_CENTER.lat
+
+  // 创建圆形
+  scenarioCircleEntity = viewer.entities.add({
+    id: 'scenario-circle',
+    position: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, 0),
+    ellipse: {
+      semiMajorAxis: SCENARIO_RADIUS_KM * 1000,
+      semiMinorAxis: SCENARIO_RADIUS_KM * 1000,
+      height: 0.1,
+      material: Cesium.Color.fromCssColorString('#ff4444').withAlpha(0.15),
+      outline: true,
+      outlineColor: Cesium.Color.fromCssColorString('#ff4444'),
+      outlineWidth: 2,
+      fill: true,
+    }
+  })
+
+  // 添加中心点标记
+  const centerMarkerId = 'scenario-center-marker'
+  scenarioEntityIds.push(centerMarkerId)
+  viewer.entities.add({
+    id: centerMarkerId,
+    position: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, 10),
+    point: {
+      pixelSize: 10,
+      color: Cesium.Color.fromCssColorString('#ff4444'),
+      outlineColor: Cesium.Color.WHITE,
+      outlineWidth: 2,
+    },
+    label: {
+      text: '演示中心点',
+      font: '12px sans-serif',
+      fillColor: Cesium.Color.RED,
+      outlineColor: Cesium.Color.WHITE,
+      outlineWidth: 2,
+      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+      verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+      pixelOffset: new Cesium.Cartesian2(0, -15),
+    }
+  })
+
+  // 飞向该区域
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, 3000),
+    duration: 1.5
+  })
+}
+
+/** 清除场景可视化 */
+function clearScenarioVisualization() {
+  if (scenarioCircleEntity) {
+    viewer.entities.remove(scenarioCircleEntity)
+    scenarioCircleEntity = null
+  }
+
+  // 清除所有场景实体
+  scenarioEntityIds.forEach(id => {
+    viewer.entities.removeById(id)
+  })
+  scenarioEntityIds.length = 0
+
+  // 清除其他场景相关实体
+  const entityIdsToRemove = [
+    'scenario-circle',
+    'scenario-center-marker',
+    'incident-marker',
+    'scenario-hospital-marker',
+    'scenario-line-route',
+    'scenario-grid-route',
+    'scenario-astar-route',
+    'scenario-conflict-cell',
+    'scenario-conflict-marker',
+    'scenario-incident-marker',
+  ]
+  entityIdsToRemove.forEach(id => {
+    viewer.entities.removeById(id)
+  })
+}
+
+/** 计算两点间距离（km）- Haversine公式 */
+function getDistanceFromCenter(lon, lat) {
+  const R = 6371
+  const dLat = (lat - SCENARIO_CENTER.lat) * Math.PI / 180
+  const dLon = (lon - SCENARIO_CENTER.lon) * Math.PI / 180
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(SCENARIO_CENTER.lat * Math.PI / 180) * Math.cos(lat * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return R * c
+}
+
+/** 添加事故标记 */
+function addIncidentMarker(lon, lat) {
+  // 移除旧的事故标记
+  viewer.entities.removeById('incident-marker')
+
+  const markerId = 'incident-marker'
+  scenarioEntityIds.push(markerId)
+
+  viewer.entities.add({
+    id: markerId,
+    position: Cesium.Cartesian3.fromDegrees(lon, lat, 50),
+    billboard: {
+      image: createRedMarkerImage(),
+      scale: 0.8,
+    },
+    label: {
+      text: '事故地点',
+      font: '14px sans-serif',
+      fillColor: Cesium.Color.RED,
+      outlineColor: Cesium.Color.WHITE,
+      outlineWidth: 2,
+      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+      pixelOffset: new Cesium.Cartesian2(0, -20),
+    }
+  })
+}
+
+/** 创建红色标记图片 */
+function createRedMarkerImage() {
+  const canvas = document.createElement('canvas')
+  canvas.width = 64
+  canvas.height = 64
+  const ctx = canvas.getContext('2d')
+
+  // 绘制红色标记
+  ctx.fillStyle = '#ff4444'
+  ctx.beginPath()
+  ctx.moveTo(32, 4)
+  ctx.lineTo(58, 58)
+  ctx.lineTo(6, 58)
+  ctx.closePath()
+  ctx.fill()
+
+  // 绘制白色边框
+  ctx.strokeStyle = '#ffffff'
+  ctx.lineWidth = 3
+  ctx.stroke()
+
+  // 绘制内部白色圆点
+  ctx.fillStyle = '#ffffff'
+  ctx.beginPath()
+  ctx.arc(32, 36, 8, 0, Math.PI * 2)
+  ctx.fill()
+
+  return canvas.toDataURL()
+}
+
+/** 场景演示地图点击处理 */
+function handleScenarioMapClick(movement) {
+  if (!scenarioState.active || scenarioState.dialogType !== 'location') return
+
+  const cartesian = viewer.scene.pickPosition(movement.position)
+  if (!cartesian) return
+
+  const cartographic = Cesium.Cartographic.fromCartesian(cartesian)
+  const clickLon = Cesium.Math.toDegrees(cartographic.longitude)
+  const clickLat = Cesium.Math.toDegrees(cartographic.latitude)
+
+  // 计算距离中心的距离（km）
+  const distance = getDistanceFromCenter(clickLon, clickLat)
+
+  if (distance > SCENARIO_RADIUS_KM) {
+    // 提示用户
+    alert(`请在${SCENARIO_RADIUS_KM}km范围内选择位置，当前距离：${distance.toFixed(2)}km`)
+    return
+  }
+
+  // 保存位置
+  scenarioState.incidentLocation = {
+    lon: clickLon,
+    lat: clickLat,
+    height: cartographic.height || 0
+  }
+
+  // 在地图上标记
+  addIncidentMarker(clickLon, clickLat)
+}
+
+/** 计算多边形中心点 */
+function getPolygonCenter(coordinates) {
+  if (!coordinates || coordinates.length === 0) return null
+
+  let sumLon = 0
+  let sumLat = 0
+  let count = 0
+
+  for (const coord of coordinates) {
+    if (Array.isArray(coord) && coord.length >= 2) {
+      sumLon += parseFloat(coord[0])
+      sumLat += parseFloat(coord[1])
+      count++
+    }
+  }
+
+  if (count === 0) return null
+
+  return {
+    lon: sumLon / count,
+    lat: sumLat / count
+  }
+}
+
+/** 查找最近医院 */
+async function findNearestHospital(incident) {
+  // 确保建筑数据已加载
+  if (!buildingsLoaded || buildingModels.length === 0) {
+    console.log('[ScenarioDemo] 加载建筑数据...')
+    await loadBuildingModels()
+  }
+
+  // 筛选医院 (type === 1)
+  const hospitals = buildingModels.filter(b => {
+    const type = b.properties?.type || b.type
+    return type === 1
+  })
+
+  console.log('[ScenarioDemo] 找到医院数量:', hospitals.length)
+
+  if (hospitals.length === 0) {
+    // 如果没有找到医院，返回一个默认位置
+    console.warn('[ScenarioDemo] 未找到医院，使用默认位置')
+    return {
+      lon: 119.9850,
+      lat: 30.5350,
+      name: '最近医院（默认）'
+    }
+  }
+
+  let nearest = null
+  let minDist = Infinity
+
+  for (const h of hospitals) {
+    const center = getPolygonCenter(h.coordinates)
+    if (!center) continue
+
+    // 使用Haversine计算距离
+    const dist = calculateDistance(incident.lat, incident.lon, center.lat, center.lon)
+
+    if (dist < minDist) {
+      minDist = dist
+      nearest = {
+        lon: center.lon,
+        lat: center.lat,
+        name: h.properties?.name || '医院',
+        building: h
+      }
+    }
+  }
+
+  console.log('[ScenarioDemo] 最近医院:', nearest, '距离:', minDist.toFixed(2), 'km')
+  return nearest
+}
+
+/** 使用Haversine公式计算两点间距离(km) */
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLon = (lon2 - lon1) * Math.PI / 180
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return R * c
+}
+
+/** 执行航线规划 */
+async function executeRoutePlanning() {
+  const incident = scenarioState.incidentLocation
+  const runToken = ++currentPlanningToken
+  const runStartToken = currentStartToken
+
+  try {
+    // 1. 查找最近医院
+    const hospital = await findNearestHospital(incident)
+    if (runToken !== currentPlanningToken) return
+    scenarioState.nearestHospital = hospital
+
+    // 2. 准备直线航线点（高度10m，层级14）
+    const linePoints = [
+      [hospital.lon, hospital.lat, 10],
+      [incident.lon, incident.lat, 10]
+    ]
+    scenarioState.lineRoute = linePoints
+
+    // 3. 调用三维线网格化API获取路径格网
+    const gridData = await getGridByLine(linePoints)
+    if (runToken !== currentPlanningToken) return
+
+    if (!gridData.success || gridData.count === 0) {
+      drawSimpleLineRoute(hospital, incident)
+    } else {
+      scenarioState.gridCells = gridData.cells
+    }
+
+    // 4. 调用冲突检测API
+    const conflictResult = await checkRouteConflict(linePoints)
+    if (runToken !== currentPlanningToken) return
+    scenarioState.conflictResult = conflictResult
+
+    // 最终门卫：只有当前运行的场景演示轮次与本轮次一致才更新状态
+    if (runStartToken !== currentStartToken) return
+
+    if (conflictResult.hasConflict) {
+      if (gridData.cells && gridData.cells.length > 0) drawGridRoute(gridData, scenarioEntityIds)
+      if (conflictResult.conflictCell) drawConflictCell(conflictResult.conflictCell, scenarioEntityIds)
+      scenarioState.dialogType = 'conflict'
+    } else {
+      if (gridData.cells && gridData.cells.length > 0) drawGridRoute(gridData, scenarioEntityIds)
+      scenarioState.dialogType = 'result'
+    }
+  } catch (error) {
+    console.error('[ScenarioDemo] 航线规划失败:', error)
+    if (runToken !== currentPlanningToken) return
+    if (runStartToken !== currentStartToken) return
+    alert('航线规划失败：' + error.message)
+    scenarioState.dialogType = 'intro'
+  } finally {
+    if (runToken === currentPlanningToken) {
+      scenarioState.planningLoading = false
+    }
+  }
+}
+
+/** 调用冲突检测API */
+async function checkRouteConflict(points) {
+  const payload = {
+    startTime: Math.floor(Date.now() / 1000),
+    points: points,
+    level: 14,
+    planeRadius: 0.75,
+    speed: 15.0,
+    workHeight: 100,
+    condition: {
+      gd_14: "",
+      dz_14: ""
+    }
+  }
+
+  try {
+    console.log('[ScenarioDemo] 调用冲突检测API:', payload)
+
+    const resp = await fetch('/api/airRoute/lineConflict/checkFirst', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+
+    const data = await resp.json()
+    console.log('[ScenarioDemo] 冲突检测结果:', data)
+
+    // 检查是否有冲突
+    const hasConflict = resp.status === 400 || data.status === 'conflict'
+
+    // 提取冲突格网信息
+    let conflictCell = null
+    if (hasConflict) {
+      conflictCell = data.grid || data.conflictCell || data.cell || null
+    }
+
+    return {
+      hasConflict,
+      reason: data.reason || data.message || (hasConflict ? '检测到航线冲突' : ''),
+      grid: data.grid,
+      conflictCell
+    }
+  } catch (err) {
+    console.error('[ScenarioDemo] 冲突检测失败:', err)
+    return { hasConflict: false, reason: '', grid: null, conflictCell: null }
+  }
+}
+
+/** 调用三维线网格化API */
+async function getGridByLine(points) {
+  const payload = {
+    line: points,
+    level: 14
+  }
+
+  try {
+    console.log('[ScenarioDemo] 调用三维线网格化API:', payload)
+
+    const resp = await fetch('/api/multiSource/geometricGrid/getGridByLine', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+
+    const data = await resp.json()
+    console.log('[ScenarioDemo] 网格化结果:', data)
+
+    if (data.status === 'success' && data.data) {
+      return {
+        success: true,
+        cells: data.data.cells || [],
+        count: data.data.count || 0
+      }
+    }
+    return { success: false, cells: [], count: 0 }
+  } catch (err) {
+    console.error('[ScenarioDemo] 网格化失败:', err)
+    return { success: false, cells: [], count: 0 }
+  }
+}
+
+/** 绘制格网路径（蓝色） */
+function drawGridRoute(gridData, entityIds, color = '#3b82f6') {
+  if (!gridData.cells || gridData.cells.length === 0) return
+
+  // 为每个格网添加半透明体可视化
+  for (let i = 0; i < gridData.cells.length; i++) {
+    const cell = gridData.cells[i]
+    if (!cell.center || cell.center.length < 3) continue
+
+    const cellId = `scenario-grid-cell-${i}`
+    entityIds.push(cellId)
+
+    const minLon = cell.minlon
+    const maxLon = cell.maxlon
+    const minLat = cell.minlat
+    const maxLat = cell.maxlat
+    const bottom = cell.bottom || 0
+    const top = cell.top || 10
+
+    viewer.entities.add({
+      id: cellId,
+      rectangle: {
+        coordinates: Cesium.Rectangle.fromDegrees(minLon, minLat, maxLon, maxLat),
+        height: bottom,
+        extrudedHeight: top,
+        material: Cesium.Color.fromCssColorString(color).withAlpha(0.15),
+        outline: true,
+        outlineColor: Cesium.Color.fromCssColorString(color).withAlpha(0.5),
+        outlineWidth: 1,
+      }
+    })
+  }
+}
+
+/** 绘制冲突格网（红色） */
+function drawConflictCell(conflictCell, entityIds) {
+  if (!conflictCell) return
+
+  const cellId = 'scenario-conflict-cell'
+  entityIds.push(cellId)
+
+  const minLon = conflictCell.minlon
+  const maxLon = conflictCell.maxlon
+  const minLat = conflictCell.minlat
+  const maxLat = conflictCell.maxlat
+  const bottom = conflictCell.bottom || 0
+  const top = conflictCell.top || 10
+
+  // 添加冲突格网实体
+  viewer.entities.add({
+    id: cellId,
+    rectangle: {
+      coordinates: Cesium.Rectangle.fromDegrees(minLon, minLat, maxLon, maxLat),
+      height: bottom,
+      extrudedHeight: top,
+      material: Cesium.Color.fromCssColorString('#f97316').withAlpha(0.3),
+      outline: true,
+      outlineColor: Cesium.Color.fromCssColorString('#f97316'),
+      outlineWidth: 2,
+    }
+  })
+
+  // 添加冲突点标记
+  if (conflictCell.center && conflictCell.center.length >= 3) {
+    const markerId = 'scenario-conflict-marker'
+    entityIds.push(markerId)
+    viewer.entities.add({
+      id: markerId,
+      position: Cesium.Cartesian3.fromDegrees(
+        conflictCell.center[0],
+        conflictCell.center[1],
+        conflictCell.center[2] + 20
+      ),
+      billboard: {
+        image: createConflictMarkerImage(),
+        scale: 1.2,
+      },
+      label: {
+        text: '冲突点',
+        font: '12px sans-serif',
+        fillColor: Cesium.Color.fromCssColorString('#ef4444'),
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(0, -30),
+      }
+    })
+  }
+}
+
+/** 创建医院标记图标 */
+function createHospitalMarkerImage() {
+  const canvas = document.createElement('canvas')
+  canvas.width = 64
+  canvas.height = 64
+  const ctx = canvas.getContext('2d')
+
+  // 绘制圆形背景
+  ctx.fillStyle = '#10b981'
+  ctx.beginPath()
+  ctx.arc(32, 32, 28, 0, Math.PI * 2)
+  ctx.fill()
+
+  // 绘制十字
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(28, 14, 8, 36)
+  ctx.fillRect(14, 28, 36, 8)
+
+  return canvas
+}
+
+/** 创建冲突标记图标 */
+function createConflictMarkerImage() {
+  const canvas = document.createElement('canvas')
+  canvas.width = 64
+  canvas.height = 64
+  const ctx = canvas.getContext('2d')
+
+  // 绘制三角形警告标志
+  ctx.fillStyle = '#ef4444'
+  ctx.beginPath()
+  ctx.moveTo(32, 8)
+  ctx.lineTo(56, 52)
+  ctx.lineTo(8, 52)
+  ctx.closePath()
+  ctx.fill()
+
+  // 绘制感叹号
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(29, 18, 6, 18)
+  ctx.beginPath()
+  ctx.arc(32, 44, 4, 0, Math.PI * 2)
+  ctx.fill()
+
+  return canvas
+}
+
+/** 清除场景演示相关实体 */
+function clearScenarioEntities() {
+  if (!viewer) return
+
+  // 清除所有场景实体
+  for (const id of scenarioEntityIds) {
+    viewer.entities.removeById(id)
+  }
+  scenarioEntityIds = []
+
+  // 清除圆形区域
+  if (scenarioCircleEntity) {
+    viewer.entities.remove(scenarioCircleEntity)
+    scenarioCircleEntity = null
+  }
+
+  // 清除事故标记
+  viewer.entities.removeById('incident-marker')
+}
+
+/** 绘制直线航线 */
+function drawLineRoute(hospital, incident) {
+  drawSimpleLineRoute(hospital, incident)
+}
+
+/** 绘制简单直线航线（无格网） */
+function drawSimpleLineRoute(hospital, incident) {
+  // 清除旧的航线相关实体
+  viewer.entities.removeById('scenario-line-route')
+  viewer.entities.removeById('scenario-hospital-marker')
+  viewer.entities.removeById('scenario-incident-marker')
+
+  // 绘制医院标记
+  const hospitalMarkerId = 'scenario-hospital-marker'
+  scenarioEntityIds.push(hospitalMarkerId)
+  viewer.entities.add({
+    id: hospitalMarkerId,
+    position: Cesium.Cartesian3.fromDegrees(hospital.lon, hospital.lat, 150),
+    billboard: {
+      image: createHospitalMarkerImage(),
+      scale: 1,
+    },
+    label: {
+      text: hospital.name || '医院',
+      font: '14px sans-serif',
+      fillColor: Cesium.Color.fromCssColorString('#10b981'),
+      outlineColor: Cesium.Color.WHITE,
+      outlineWidth: 2,
+      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+      pixelOffset: new Cesium.Cartesian2(0, -25),
+    }
+  })
+
+  // 绘制直线航线（绿色）
+  const lineRouteId = 'scenario-line-route'
+  scenarioEntityIds.push(lineRouteId)
+  viewer.entities.add({
+    id: lineRouteId,
+    polyline: {
+      positions: Cesium.Cartesian3.fromDegreesArrayHeights([
+        hospital.lon, hospital.lat, 1,
+        incident.lon, incident.lat, 1
+      ]),
+      width: 4,
+      material: Cesium.Color.fromCssColorString('#10b981'),
+      clampToGround: false,
+    }
+  })
+
+  // 绘制事故点标记
+  const incidentMarkerId = 'scenario-incident-marker'
+  scenarioEntityIds.push(incidentMarkerId)
+  viewer.entities.add({
+    id: incidentMarkerId,
+    position: Cesium.Cartesian3.fromDegrees(incident.lon, incident.lat, 20),
+    billboard: {
+      image: createIncidentMarkerImage(),
+      scale: 1,
+    },
+    label: {
+      text: '事故地点',
+      font: '14px sans-serif',
+      fillColor: Cesium.Color.fromCssColorString('#ef4444'),
+      outlineColor: Cesium.Color.WHITE,
+      outlineWidth: 2,
+      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+      pixelOffset: new Cesium.Cartesian2(0, -25),
+    }
+  })
+}
+
+/** 创建事故地点标记图标 */
+function createIncidentMarkerImage() {
+  const canvas = document.createElement('canvas')
+  canvas.width = 64
+  canvas.height = 64
+  const ctx = canvas.getContext('2d')
+
+  // 绘制红色圆形背景
+  ctx.fillStyle = '#ef4444'
+  ctx.beginPath()
+  ctx.arc(32, 32, 28, 0, Math.PI * 2)
+  ctx.fill()
+
+  // 绘制白色边框
+  ctx.strokeStyle = '#ffffff'
+  ctx.lineWidth = 3
+  ctx.stroke()
+
+  // 绘制X标记
+  ctx.strokeStyle = '#ffffff'
+  ctx.lineWidth = 6
+  ctx.lineCap = 'round'
+  ctx.beginPath()
+  ctx.moveTo(20, 20)
+  ctx.lineTo(44, 44)
+  ctx.moveTo(44, 20)
+  ctx.lineTo(20, 44)
+  ctx.stroke()
+
+  return canvas.toDataURL()
+}
+
+/** 启动A*航路规划 */
+async function startAstarPlanning() {
+  const incident = scenarioState.incidentLocation
+  const hospital = scenarioState.nearestHospital
+  const runToken = ++currentPlanningToken
+  const runStartToken = currentStartToken
+
+  scenarioState.planningLoading = true
+
+  // 起点：鼠标点击位置上方10m
+  const startHeight = (incident.height || 0) + 10
+  // 终点：医院模型顶部上方1m（最小10m保底，防止高度为0落在地面）
+  // OSGB网格可能仍标记该格子为障碍，需叠加一个安全余量
+  const endHeight = Math.max(10, (hospital.building?.height || 30) + 1) + 30
+
+  const payload = {
+    startTime: Math.floor(Date.now() / 1000),
+    points: [
+      [incident.lon, incident.lat, startHeight],
+      [hospital.lon, hospital.lat, endHeight]
+    ],
+    level: 14,
+    planeRadius: 0.75,
+    speed: 15.0,
+    workHeight: 100,
+    condition: {
+      gd_14: "",
+      dz_14: ""
+    }
+  }
+
+  try {
+    const resp = await fetch('/api/airRoute/Astar/AstarPathPlane', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+
+    const data = await resp.json()
+
+    // 门卫：旧请求直接丢弃
+    if (runToken !== currentPlanningToken) return
+    if (runStartToken !== currentStartToken) return
+
+    if (data.results?.success) {
+      scenarioState.astarRoute = data.results.path
+
+      // 清除旧直线航线、蓝色格网和冲突格网（含 cell 实体）
+      viewer.entities.removeById('scenario-line-route')
+      viewer.entities.removeById('scenario-grid-route')
+      viewer.entities.removeById('scenario-conflict-cell')
+      for (let i = 0; i < scenarioEntityIds.length; i++) {
+        const id = scenarioEntityIds[i]
+        if (id.startsWith('scenario-grid-cell-') || id === 'scenario-conflict-cell') {
+          viewer.entities.removeById(id)
+        }
+      }
+      scenarioEntityIds.splice(0)
+
+      // 用 A* 返回的 path 绘制绿色格网路径
+      drawGridRoute({ cells: data.results.path }, scenarioEntityIds, '#22c55e')
+      scenarioState.dialogType = 'result'
+    } else {
+      if (runToken !== currentPlanningToken || runStartToken !== currentStartToken) return
+      alert('A*规划失败: ' + (data.results?.reason || '未知错误'))
+    }
+  } catch (err) {
+    if (runToken !== currentPlanningToken || runStartToken !== currentStartToken) return
+    alert('A*规划请求失败')
+  } finally {
+    if (runToken === currentPlanningToken) {
+      scenarioState.planningLoading = false
+    }
+  }
+}
+
+/** 绘制A*航线 */
+function drawAstarRoute(pathData) {
+  if (!pathData || pathData.length === 0) return
+
+  const positions = []
+  for (const cell of pathData) {
+    if (cell.center && Array.isArray(cell.center) && cell.center.length >= 3) {
+      positions.push(cell.center[0], cell.center[1], cell.center[2])
+    }
+  }
+
+  if (positions.length === 0) return
+
+  const astarRouteId = 'scenario-astar-route'
+  scenarioEntityIds.push(astarRouteId)
+
+  viewer.entities.add({
+    id: astarRouteId,
+    polyline: {
+      positions: Cesium.Cartesian3.fromDegreesArrayHeights(positions),
+      width: 4,
+      material: Cesium.Color.fromCssColorString('#3b82f6'),
+      clampToGround: false,
+    }
   })
 }
 
@@ -2487,6 +3523,21 @@ function getUavCurrentPosition(routeId) {
   ]
 }
 
+function getScenarioFlightPosition() {
+  if (!currentFlightAnim || !currentFlightAnim.pos || !viewer) return null
+  try {
+    const cartographic = Cesium.Cartographic.fromCartesian(currentFlightAnim.pos)
+    if (!cartographic) return null
+    return {
+      lon: Number(Cesium.Math.toDegrees(cartographic.longitude).toFixed(6)),
+      lat: Number(Cesium.Math.toDegrees(cartographic.latitude).toFixed(6)),
+      height: Number(cartographic.height.toFixed(1)),
+    }
+  } catch (e) {
+    return null
+  }
+}
+
 defineExpose({
   flyToPoint,
   clearCenterPoint,
@@ -2524,6 +3575,7 @@ defineExpose({
   stopUavAnimation,
   stopUavAnimationByRouteId,
   getUavCurrentPosition,
+  getScenarioFlightPosition,
   // 建筑白膜模型
   loadBuildingModels,
   toggleBuildingsOnMap,
@@ -2592,6 +3644,12 @@ onMounted(async () => {
   // 处理鼠标点击
   function handleMouseClick(movement) {
     if (!viewer) return
+
+    // 如果处于场景演示模式且正在选择地点，交给场景演示处理
+    if (scenarioState.active && scenarioState.dialogType === 'location') {
+      handleScenarioMapClick(movement)
+      return
+    }
 
     // 获取点击位置的 cartesian 坐标
     const cartesian = viewer.scene.pickPosition(movement.position)
@@ -2705,6 +3763,21 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
+      <!-- 一键场景演示按钮（飞行中显示取消按钮） -->
+      <div v-if="!scenarioState.flightActive" class="single-toggle-card scenario-demo-btn" @click="openScenarioDemo">
+        <span class="layer-label">一键场景演示</span>
+        <svg class="scenario-demo-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 12h4l3-9 4 18 3-9h4" />
+        </svg>
+      </div>
+      <div v-else class="single-toggle-card scenario-demo-btn flight-cancel-btn" @click="cancelFlight">
+        <span class="layer-label">取消飞行</span>
+        <svg class="scenario-demo-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18" />
+          <line x1="6" y1="6" x2="18" y2="18" />
+        </svg>
+      </div>
+
       <!-- 3D底图单行开关 -->
       <div v-if="props.show3DToggle" class="single-toggle-card" @click="toggle3DTiles">
         <span class="layer-label">3D底图</span>
@@ -2714,6 +3787,183 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </section>
+
+  <!-- 一键场景演示弹窗区域 -->
+  <div v-if="scenarioState.showDialog">
+    <!-- 步骤1: 场景介绍（右上角浮动卡片） -->
+    <div v-if="scenarioState.dialogType === 'intro'" class="scenario-result-card intro">
+      <div class="location-card-header">
+        <div class="location-card-icon">&#x1F3E5;</div>
+        <div class="location-card-title">医疗急救场景演示</div>
+        <button class="location-card-close" @click="closeScenarioDemo">&#x2715;</button>
+      </div>
+      <div class="location-card-body">
+        <div class="scenario-narrative">
+          <div class="narrative-icon">&#x26A0;</div>
+          <p class="narrative-text">
+            紧急情况：某人在此处突发心脏骤停，需要紧急配送AED（自动体外除颤器）和急救药物！
+          </p>
+        </div>
+        <div class="scenario-steps">
+          <div class="step-item">
+            <div class="step-number">1</div>
+            <div class="step-content">从最近的医院/卫生室取回AED和药物</div>
+          </div>
+          <div class="step-item">
+            <div class="step-number">2</div>
+            <div class="step-content">以最高效的航线飞抵事发地点</div>
+          </div>
+          <div class="step-item">
+            <div class="step-number">3</div>
+            <div class="step-content">为伤者提供及时的急救支持</div>
+          </div>
+        </div>
+        <div class="scenario-urgency">
+          <div class="urgency-bar"></div>
+          <span>这是一场与时间赛跑的生命救援</span>
+          <div class="urgency-bar"></div>
+        </div>
+      </div>
+      <div class="location-card-footer">
+        <button class="scenario-btn cancel small" @click="closeScenarioDemo">取消</button>
+        <button class="scenario-btn primary small" @click="nextScenarioStep">
+          <span class="btn-icon">&#x25B6;</span>
+          开始演示
+        </button>
+      </div>
+    </div>
+
+    <!-- 步骤3: 航线规划中（右上角浮动卡片） -->
+    <div v-if="scenarioState.dialogType === 'planning'" class="scenario-result-card planning">
+      <div class="location-card-header">
+        <div class="location-card-icon">&#x2699;</div>
+        <div class="location-card-title">航线规划中</div>
+        <button class="location-card-close" @click="closeScenarioDemo">&#x2715;</button>
+      </div>
+      <div class="location-card-body">
+        <div class="planning-status">
+          <div class="planning-spinner"></div>
+          <p>正在执行航线规划...</p>
+          <div class="planning-steps">
+            <div class="planning-step active">
+              <span class="step-check">&#x2714;</span>
+              <span>查找最近医院</span>
+            </div>
+            <div class="planning-step active">
+              <span class="step-spin"></span>
+              <span>规划航线</span>
+            </div>
+            <div class="planning-step">
+              <span class="step-pending">&#x25CB;</span>
+              <span>检测冲突</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 步骤4: 结果展示（右上角浮动卡片） -->
+    <div v-if="scenarioState.dialogType === 'result'" class="scenario-result-card">
+      <div class="location-card-header success">
+        <div class="location-card-icon">&#x2705;</div>
+        <div class="location-card-title">航线规划成功</div>
+        <button class="location-card-close" @click="resetScenarioDemo">&#x2715;</button>
+      </div>
+      <div class="location-card-body">
+        <div class="result-summary">
+          <p>已找到最近医院并成功规划航线：</p>
+          <div class="result-info">
+            <div class="info-row">
+              <span class="info-label">医院位置</span>
+              <span class="info-value">
+                {{ scenarioState.nearestHospital?.lon.toFixed(6) }}, {{ scenarioState.nearestHospital?.lat.toFixed(6) }}
+              </span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">事故位置</span>
+              <span class="info-value">
+                {{ scenarioState.incidentLocation?.lon.toFixed(6) }}, {{ scenarioState.incidentLocation?.lat.toFixed(6) }}
+              </span>
+            </div>
+          </div>
+          <div class="result-success-badge">
+            <span>&#x2714;</span> 航线已生成，允许放飞无人机
+          </div>
+        </div>
+      </div>
+      <div class="location-card-footer">
+        <button class="scenario-btn primary small" @click="releaseDrone">
+          <span class="btn-icon">&#x2708;</span>
+          放飞无人机
+        </button>
+      </div>
+    </div>
+
+    <!-- 步骤5: 冲突提示（右上角浮动卡片） -->
+    <div v-if="scenarioState.dialogType === 'conflict'" class="scenario-result-card conflict">
+      <div class="location-card-header warning">
+        <div class="location-card-icon">&#x26A0;</div>
+        <div class="location-card-title">航线冲突警告</div>
+        <button class="location-card-close" @click="resetScenarioDemo">&#x2715;</button>
+      </div>
+      <div class="location-card-body">
+        <div class="conflict-info">
+          <p>检测到直线航线存在冲突：</p>
+          <div class="conflict-reason">
+            {{ scenarioState.conflictResult?.reason || '检测到障碍物' }}
+          </div>
+          <p class="conflict-question">是否启用 A* 智能航路规划绕开障碍物？</p>
+        </div>
+      </div>
+      <div class="location-card-footer">
+        <button class="scenario-btn cancel small" @click="resetScenarioDemo">取消</button>
+        <button class="scenario-btn primary warning small" @click="startAstarPlanning">
+          <span class="btn-icon">&#x2699;</span>
+          开启A*规划
+        </button>
+      </div>
+    </div>
+
+    <!-- 步骤2: 选择出事地点（右上角浮动卡片） -->
+    <div v-if="scenarioState.dialogType === 'location'" class="scenario-location-card">
+      <div class="location-card-header">
+        <div class="location-card-icon">&#x1F4CD;</div>
+        <div class="location-card-title">选择事发地点</div>
+        <button class="location-card-close" @click="closeScenarioDemo">&#x2715;</button>
+      </div>
+      <div class="location-card-body">
+        <p class="location-card-hint">
+          请在地图<strong>红圈范围内</strong>点击选择事故地点
+        </p>
+        <div class="location-card-coords">
+          <div class="coords-center">
+            中心: <strong>({{ SCENARIO_CENTER.lon }}, {{ SCENARIO_CENTER.lat }})</strong>
+          </div>
+          <div class="coords-radius">
+            范围: <strong>{{ SCENARIO_RADIUS_KM }} 公里</strong>
+          </div>
+        </div>
+        <div v-if="scenarioState.incidentLocation" class="location-card-selected">
+          <div class="selected-check">&#x2705;</div>
+          <div class="selected-info">
+            <span class="selected-label">已选择</span>
+            <span class="selected-lon">经度: {{ scenarioState.incidentLocation.lon.toFixed(6) }}</span>
+            <span class="selected-lat">纬度: {{ scenarioState.incidentLocation.lat.toFixed(6) }}</span>
+          </div>
+        </div>
+        <div v-else class="location-card-waiting">
+          <div class="mini-pulse"></div>
+          <span>点击地图选择位置</span>
+        </div>
+      </div>
+      <div class="location-card-footer">
+        <button class="scenario-btn cancel small" @click="prevScenarioStep">返回</button>
+        <button class="scenario-btn primary small" :disabled="!scenarioState.incidentLocation" @click="nextScenarioStep">
+          下一步 &#x25B6;
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -2736,7 +3986,6 @@ onBeforeUnmount(() => {
   gap: 16px;
   padding: 10px 16px;
   background: rgba(15, 23, 42, 0.85);
-  backdrop-filter: blur(10px);
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
@@ -2757,7 +4006,6 @@ onBeforeUnmount(() => {
   gap: 10px;
   padding: 10px 14px;
   background: rgba(15, 23, 42, 0.85);
-  backdrop-filter: blur(10px);
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   cursor: pointer;
@@ -2822,5 +4070,757 @@ onBeforeUnmount(() => {
 
 .toggle-switch.active .toggle-slider {
   transform: translateX(16px);
+}
+
+/* ==================== 一键场景演示样式 ==================== */
+
+/* 场景演示按钮样式 */
+.scenario-demo-btn {
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%) !important;
+  border-color: #f87171 !important;
+}
+
+.scenario-demo-btn:hover {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
+  border-color: #fca5a5 !important;
+  transform: scale(1.02);
+}
+
+.flight-cancel-btn {
+  background: linear-gradient(135deg, #d97706 0%, #b45309 100%) !important;
+  border-color: #fbbf24 !important;
+  cursor: pointer;
+}
+
+.flight-cancel-btn:hover {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%) !important;
+  border-color: #fcd34d !important;
+}
+
+.scenario-demo-icon {
+  color: #ffffff;
+  font-size: 14px;
+}
+
+/* 弹窗遮罩层（透明，不影响地图操作） */
+.scenario-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: transparent;
+  pointer-events: none;
+  z-index: 9998;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 地点选择时的透明覆盖层（不阻挡地图但确保卡片在最上层） */
+.scenario-location-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  pointer-events: none;
+}
+
+/* 弹窗主体 */
+.scenario-dialog {
+  width: min(520px, 92vw);
+  background: linear-gradient(145deg, #1e293b 0%, #0f172a 100%);
+  border-radius: 16px;
+  border: 2px solid #3b82f6;
+  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.6), 0 0 40px rgba(59, 130, 246, 0.15);
+  overflow: hidden;
+  animation: slideUp 0.4s ease;
+}
+
+.scenario-dialog.success {
+  border-color: #10b981;
+  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.6), 0 0 40px rgba(16, 185, 129, 0.15);
+}
+
+.scenario-dialog.warning {
+  border-color: #f59e0b;
+  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.6), 0 0 40px rgba(245, 158, 11, 0.15);
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* 弹窗头部 */
+.scenario-dialog-header {
+  padding: 24px;
+  background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.scenario-dialog-header.success {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+}
+
+.scenario-dialog-header.warning {
+  background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+}
+
+.scenario-header-icon {
+  font-size: 28px;
+}
+
+.scenario-header-title {
+  font-size: 20px;
+  font-weight: bold;
+  color: white;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* 弹窗内容 */
+.scenario-dialog-body {
+  padding: 24px;
+  color: #e2e8f0;
+  line-height: 1.8;
+}
+
+/* 叙述文本 */
+.scenario-narrative {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.narrative-icon {
+  font-size: 24px;
+  margin-bottom: 8px;
+}
+
+.narrative-text {
+  font-size: 15px;
+  color: #fca5a5;
+  margin: 0;
+}
+
+/* 步骤列表 */
+.scenario-steps {
+  margin: 20px 0;
+}
+
+.step-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.step-number {
+  width: 32px;
+  height: 32px;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 14px;
+  color: white;
+  flex-shrink: 0;
+}
+
+.step-content {
+  font-size: 14px;
+  color: #cbd5e1;
+}
+
+/* 紧急提示条 */
+.scenario-urgency {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: linear-gradient(90deg, rgba(239, 68, 68, 0.2), rgba(239, 68, 68, 0.3), rgba(239, 68, 68, 0.2));
+  border-radius: 8px;
+  margin-top: 20px;
+}
+
+.urgency-bar {
+  flex: 1;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #ef4444, transparent);
+}
+
+.scenario-urgency span {
+  font-size: 13px;
+  color: #fca5a5;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* 位置选择说明 */
+.location-instruction {
+  font-size: 16px;
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+.location-hint {
+  margin: 16px 0;
+}
+
+.hint-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 12px;
+}
+
+.hint-icon {
+  font-size: 24px;
+}
+
+.hint-text {
+  font-size: 14px;
+  color: #93c5fd;
+}
+
+/* 已选位置显示 */
+.location-selected {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 12px;
+  padding: 16px;
+  margin-top: 16px;
+}
+
+.selected-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.selected-icon {
+  font-size: 18px;
+}
+
+.selected-badge span {
+  font-weight: bold;
+  color: #6ee7b7;
+}
+
+.selected-coords {
+  display: flex;
+  gap: 24px;
+}
+
+.coord-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.coord-label {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.coord-value {
+  font-family: 'SF Mono', 'Monaco', monospace;
+  font-size: 14px;
+  color: #10b981;
+  font-weight: bold;
+}
+
+/* 等待动画 */
+.location-waiting {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 24px;
+  color: #64748b;
+}
+
+.waiting-animation {
+  position: relative;
+  width: 60px;
+  height: 60px;
+}
+
+.pulse-ring {
+  position: absolute;
+  inset: 0;
+  border: 3px solid rgba(59, 130, 246, 0.3);
+  border-radius: 50%;
+  animation: pulse 1.5s ease-out infinite;
+}
+
+.pulse-dot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  background: #3b82f6;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(0.5);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+/* 规划中状态 */
+.planning-status {
+  text-align: center;
+}
+
+.planning-spinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid rgba(59, 130, 246, 0.2);
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 0 auto 16px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.planning-steps {
+  margin-top: 24px;
+  text-align: left;
+}
+
+.planning-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  color: #64748b;
+}
+
+.planning-step.active {
+  color: #3b82f6;
+}
+
+.step-check {
+  color: #10b981;
+}
+
+.step-spin {
+  animation: spin 1s linear infinite;
+}
+
+.step-pending {
+  color: #475569;
+}
+
+/* 结果展示 */
+.result-summary p {
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+.result-info {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.info-row:last-child {
+  border-bottom: none;
+}
+
+.info-label {
+  color: #64748b;
+  font-size: 14px;
+}
+
+.info-value {
+  font-family: 'SF Mono', 'Monaco', monospace;
+  font-size: 13px;
+  color: #6ee7b7;
+}
+
+.result-success-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 12px;
+  background: rgba(16, 185, 129, 0.2);
+  border-radius: 8px;
+  color: #6ee7b7;
+  font-weight: bold;
+}
+
+/* 冲突提示 */
+.conflict-info {
+  text-align: center;
+}
+
+.conflict-reason {
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 16px 0;
+  color: #fbbf24;
+  font-family: monospace;
+}
+
+.conflict-question {
+  margin-top: 16px;
+  color: #fcd34d;
+}
+
+/* 弹窗底部按钮 */
+.scenario-dialog-footer {
+  padding: 16px 24px;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.scenario-btn {
+  padding: 12px 28px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scenario-btn .btn-icon {
+  font-size: 12px;
+}
+
+.scenario-btn.cancel {
+  background: rgba(100, 116, 139, 0.2);
+  color: #94a3b8;
+  border: 1px solid rgba(100, 116, 139, 0.4);
+}
+
+.scenario-btn.cancel:hover {
+  background: rgba(100, 116, 139, 0.4);
+  color: #cbd5e1;
+}
+
+.scenario-btn.primary {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+}
+
+.scenario-btn.primary:hover {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+}
+
+.scenario-btn.primary.warning {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  box-shadow: 0 4px 15px rgba(245, 158, 11, 0.3);
+}
+
+.scenario-btn.primary.warning:hover {
+  background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+  box-shadow: 0 6px 20px rgba(245, 158, 11, 0.4);
+}
+
+.scenario-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* ==================== 角落浮动选择卡片 ==================== */
+
+.scenario-location-card {
+  position: fixed;
+  top: 80px;
+  right: 20px;
+  width: 280px;
+  background: linear-gradient(145deg, #1e293b 0%, #0f172a 100%);
+  border-radius: 12px;
+  border: 2px solid #3b82f6;
+  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(59, 130, 246, 0.15);
+  overflow: hidden;
+  z-index: 9999;
+  animation: slideInRight 0.3s ease;
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.location-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%);
+}
+
+.location-card-icon {
+  font-size: 18px;
+}
+
+.location-card-title {
+  flex: 1;
+  font-size: 14px;
+  font-weight: bold;
+  color: white;
+}
+
+.location-card-close {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px;
+  line-height: 1;
+}
+
+.location-card-close:hover {
+  color: white;
+}
+
+/* ==================== 结果展示卡片 ==================== */
+.scenario-result-card {
+  position: fixed;
+  top: 80px;
+  right: 20px;
+  width: 300px;
+  background: linear-gradient(145deg, #1e293b 0%, #0f172a 100%);
+  border-radius: 12px;
+  border: 2px solid #10b981;
+  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(16, 185, 129, 0.15);
+  overflow: hidden;
+  z-index: 9999;
+  animation: slideInRight 0.3s ease;
+}
+
+.scenario-result-card.conflict {
+  border-color: #f59e0b;
+  box-shadow: 0 15px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(245, 158, 11, 0.15);
+}
+
+.scenario-result-card .location-card-header.success {
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.3), transparent);
+  border-bottom: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.scenario-result-card .location-card-header.warning {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.3), transparent);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.scenario-result-card .location-card-body {
+  padding: 14px;
+}
+
+.scenario-result-card .result-summary p {
+  font-size: 13px;
+  color: #e2e8f0;
+  margin: 0 0 10px 0;
+}
+
+.scenario-result-card .result-success-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: #10b981;
+}
+
+.scenario-result-card .conflict-info p {
+  font-size: 13px;
+  color: #e2e8f0;
+  margin: 0 0 8px 0;
+}
+
+.scenario-result-card .conflict-reason {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #fca5a5;
+  margin-bottom: 10px;
+}
+
+.scenario-result-card .conflict-question {
+  font-size: 12px;
+  color: #fbbf24;
+  font-weight: 500;
+}
+
+.location-card-body {
+  padding: 14px;
+}
+
+.location-card-hint {
+  font-size: 13px;
+  color: #e2e8f0;
+  margin: 0 0 12px 0;
+  text-align: center;
+}
+
+.location-card-hint strong {
+  color: #ff6b6b;
+}
+
+.location-card-coords {
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: #93c5fd;
+}
+
+.coords-center, .coords-radius {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+}
+
+.coords-center strong, .coords-radius strong {
+  color: #3b82f6;
+}
+
+.location-card-selected {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 8px;
+  padding: 10px;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.selected-check {
+  font-size: 24px;
+}
+
+.selected-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.selected-label {
+  font-size: 12px;
+  color: #10b981;
+  font-weight: bold;
+}
+
+.selected-lon, .selected-lat {
+  font-family: 'SF Mono', 'Monaco', monospace;
+  font-size: 11px;
+  color: #6ee7b7;
+}
+
+.location-card-waiting {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.mini-pulse {
+  width: 16px;
+  height: 16px;
+  background: #3b82f6;
+  border-radius: 50%;
+  animation: miniPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes miniPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.3);
+    opacity: 0.6;
+  }
+}
+
+.location-card-footer {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.scenario-btn.small {
+  padding: 8px 16px;
+  font-size: 13px;
+  flex: 1;
+  justify-content: center;
 }
 </style>

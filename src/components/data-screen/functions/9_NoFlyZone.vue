@@ -17,7 +17,7 @@ const emit = defineEmits(['close', 'showPoint', 'showGrid', 'show-polygon', 'get
 
 const noFlyZoneForm = reactive({
   name: '',
-  typeCode: 'electronic_fence',
+  typeCode: 'unit_organization',
   level: 14,
   bottom: 0,
   top: 120,
@@ -31,8 +31,12 @@ const result = ref(null)
 const hasVisualization = ref(false)
 
 const typeCodeOptions = [
-  { value: 'electronic_fence', label: '电子围栏' },
-  { value: 'risk_area', label: '风险区域' },
+  { value: 'unit_organization', label: '单位机构' },
+  { value: 'airport_airspace', label: '机场空域' },
+  { value: 'transportation_hub', label: '交通枢纽' },
+  { value: 'hazardous_materials', label: '危险品' },
+  { value: 'major_event', label: '重要活动' },
+  { value: 'other_no_fly_zone', label: '其他禁飞区' },
 ]
 
 const levelOptions = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
@@ -87,7 +91,7 @@ function resetForm() {
   result.value = null
   hasVisualization.value = false
   noFlyZoneForm.name = ''
-  noFlyZoneForm.typeCode = 'electronic_fence'
+  noFlyZoneForm.typeCode = 'unit_organization'
   noFlyZoneForm.level = 14
   noFlyZoneForm.bottom = 0
   noFlyZoneForm.top = 120

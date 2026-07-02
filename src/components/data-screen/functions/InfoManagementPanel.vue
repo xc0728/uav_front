@@ -1,6 +1,28 @@
 ﻿<script setup>
-import { ref, onMounted, watch } from 'vue'
-import { ChevronLeft, Plane, AlertTriangle, FileCheck, Route, RefreshCw, Loader2, Shield, X, Trash2, Database } from 'lucide-vue-next'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ChevronLeft, Plane, AlertTriangle, FileCheck, Route, RefreshCw, Loader2, Shield, X, Trash2, Map } from 'lucide-vue-next'
+const DEBUG_ENDPOINT = 'http://127.0.0.1:7312/ingest/5e57985b-bd02-4287-9790-3766cef1de87'
+const SESSION_ID = '7ed241'
+function debugLog(location, message, data = {}) {
+  // #region agent log
+  fetch(DEBUG_ENDPOINT, {method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':SESSION_ID},body:JSON.stringify({sessionId:SESSION_ID,location,message,data,timestamp:Date.now()})}).catch(()=>{})
+  // #endregion
+}
+
+const FETCH_TIMEOUT_MS = 1000 * 20
+
+async function withTimeout(fetchFn, signal) {
+  const timer = setTimeout(() => {
+    if (signal && typeof signal.abort === 'function') {
+      signal.abort()
+    }
+  }, FETCH_TIMEOUT_MS)
+  try {
+    return await fetchFn()
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 const emit = defineEmits(['switch-view', 'route-monitor-start', 'route-monitor-stop', 'visualize-event', 'show-no-fly-zone', 'hide-no-fly-zone'])
 
@@ -15,6 +37,8 @@ const props = defineProps({
 const currentView = ref('list') // 'list' | 'detail'
 const activeModuleId = ref('')
 const isLoading = ref(false)
+const isRoutesLoading = ref(false)
+const isFencesLoading = ref(false)
 
 // 信息管理系统功能模块
 const infoModules = [
@@ -94,7 +118,16 @@ const aircraftPaginatedList = ref([])
 // 电子围栏数据
 const fenceList = ref([])
 const fenceError = ref('')
-const fenceTypeCode = ref('electronic_fence')
+const fenceTypeCode = ref('')
+const typeCodeNameMap = {
+  '': '所有类型',
+  unit_organization: '单位机构',
+  airport_airspace: '机场空域',
+  transportation_hub: '交通枢纽',
+  hazardous_materials: '危险品',
+  major_event: '重要活动',
+  other_no_fly_zone: '其他禁飞区',
+}
 const noFlyZoneVisibleMap = ref({})
 const selectedFenceIds = ref(new Set())
 const isSyncing = ref(false)
@@ -666,6 +699,7 @@ function selectModule(module) {
   } else if (module.id === 'fence-info') {
     currentView.value = 'list'
     fetchFences()
+    syncNoFlyZoneToRedis()
   } else if (module.id === 'event-management') {
     currentView.value = 'event-dashboard'
   }
@@ -804,8 +838,10 @@ function handleVisualizeEvent() {
 
 // 获取航线列表
 async function fetchRoutes() {
-  isLoading.value = true
+  debugLog('InfoManagementPanel.vue:fetchRoutes', 'fetchRoutes start', {})
+  isRoutesLoading.value = true
   routeError.value = ''
+  const routeStart = Date.now()
 
   try {
     const resp = await fetch('/api/airRoute/routeManagement/listStoredRoutes', {
@@ -819,7 +855,7 @@ async function fetchRoutes() {
     }
 
     const data = await resp.json()
-    console.log('[航线列表] 返回数据:', data)
+    debugLog('InfoManagementPanel.vue:fetchRoutes', 'fetchRoutes response', {status:data?.status,hasData:!!data?.data,count:data?.data?.length,latency:Date.now()-routeStart})
 
     if (data?.status === 'success' && Array.isArray(data?.data)) {
       routeList.value = data.data
@@ -832,9 +868,12 @@ async function fetchRoutes() {
     }
   } catch (err) {
     console.error('[航线列表] 请求错误:', err)
+    debugLog('InfoManagementPanel.vue:fetchRoutes', 'fetchRoutes error', {message:err?.message,latency:Date.now()-routeStart})
     routeError.value = err?.message || '获取航线列表失败'
   } finally {
-    isLoading.value = false
+    debugLog('InfoManagementPanel.vue:fetchRoutes', 'fetchRoutes finally', {isLoadingBefore:isRoutesLoading.value,latency:Date.now()-routeStart})
+    isRoutesLoading.value = false
+    debugLog('InfoManagementPanel.vue:fetchRoutes', 'fetchRoutes finally after', {isLoadingAfter:isRoutesLoading.value,latency:Date.now()-routeStart})
   }
 }
 
@@ -845,45 +884,110 @@ function viewDetail(route) {
 }
 
 // 获取禁飞区列表
+const ALL_FENCE_TYPES = [
+  'unit_organization',
+  'airport_airspace',
+  'transportation_hub',
+  'hazardous_materials',
+  'major_event',
+  'other_no_fly_zone',
+]
+
+let currentFetchId = 0
+let inFlightFetches = 0
+
 async function fetchFences() {
+  debugLog('InfoManagementPanel.vue:fetchFences', 'fetchFences start', {fenceTypeCode:fenceTypeCode.value,page:fenceCurrentPage.value,pageSize:fencePageSize.value,inFlight:inFlightFetches})
   isLoading.value = true
+  isFencesLoading.value = true
   fenceError.value = ''
+  const fetchId = ++currentFetchId
+  inFlightFetches++
+  const fenceStart = Date.now()
 
   try {
-    const resp = await fetch('/api/multiSource/airSpace/noFlyZone/list', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        typeCode: fenceTypeCode.value,
-        page: fenceCurrentPage.value,
-        pageSize: fencePageSize.value,
-      }),
-    })
+    const page = fenceCurrentPage.value
+    const pageSize = fencePageSize.value
 
-    if (!resp.ok) {
-      const errText = await resp.text()
-      throw new Error(`请求失败: ${resp.status}`)
-    }
+    let data
 
-    const data = await resp.json()
-    console.log('[禁飞区列表] 返回数据:', data)
+    if (fenceTypeCode.value) {
+      // 单类型：直接请求后端分页
+      const ctrl = new AbortController()
+      const resp = await withTimeout(() => fetch('/api/multiSource/airSpace/noFlyZone/list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          typeCode: fenceTypeCode.value,
+          page,
+          pageSize,
+        }),
+        signal: ctrl.signal,
+      }), ctrl.signal)
 
-    if (data?.status === 'success' && data?.data) {
-      fenceList.value = data.data.items || []
-      fenceTotalCount.value = data.data.count || 0
-      fenceTotalPages.value = Math.max(1, Math.ceil(fenceTotalCount.value / fencePageSize.value))
-      paginatedFences.value = fenceList.value
+      if (!resp.ok) throw new Error(`请求失败: ${resp.status}`)
+      data = await resp.json()
+      debugLog('InfoManagementPanel.vue:fetchFences', 'fetchFences single response', {status:data?.status,hasData:!!data?.data,latency:Date.now()-fenceStart})
+      if (fetchId !== currentFetchId) {
+        debugLog('InfoManagementPanel.vue:fetchFences', 'fetchFences single stale', {fetchId,currentFetchId})
+        return
+      }
+
+      if (data?.status === 'success' && data?.data) {
+        fenceList.value = data.data.items || []
+        fenceTotalCount.value = data.data.count || 0
+        fenceTotalPages.value = Math.max(1, Math.ceil(fenceTotalCount.value / pageSize))
+        paginatedFences.value = fenceList.value
+      } else {
+        fenceList.value = []
+        fenceTotalCount.value = 0
+        fenceTotalPages.value = 1
+        paginatedFences.value = []
+      }
     } else {
-      fenceList.value = []
-      fenceTotalCount.value = 0
-      fenceTotalPages.value = 1
-      paginatedFences.value = []
+      // 所有类型：直接调用后端的 'all' 类型
+      debugLog('InfoManagementPanel.vue:fetchFences', 'fetchFences all types start', {type:'all'})
+      const ctrl = new AbortController()
+      const resp = await withTimeout(() => fetch('/api/multiSource/airSpace/noFlyZone/list', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ typeCode: 'all', page, pageSize }),
+      }), ctrl.signal)
+
+      if (!resp.ok) throw new Error(`请求失败: ${resp.status}`)
+      data = await resp.json()
+      debugLog('InfoManagementPanel.vue:fetchFences', 'fetchFences all types response', {status:data?.status,hasData:!!data?.data,latency:Date.now()-fenceStart})
+      if (fetchId !== currentFetchId) {
+        debugLog('InfoManagementPanel.vue:fetchFences', 'fetchFences all types stale', {fetchId,currentFetchId})
+        return
+      }
+
+      if (data?.status === 'success' && data?.data) {
+        fenceList.value = data.data.items || []
+        fenceTotalCount.value = data.data.count || 0
+        fenceTotalPages.value = Math.max(1, Math.ceil(fenceTotalCount.value / pageSize))
+        paginatedFences.value = fenceList.value
+      } else {
+        fenceList.value = []
+        fenceTotalCount.value = 0
+        fenceTotalPages.value = 1
+        paginatedFences.value = []
+      }
     }
   } catch (err) {
     console.error('[禁飞区列表] 请求错误:', err)
-    fenceError.value = err?.message || '获取禁飞区列表失败'
+    debugLog('InfoManagementPanel.vue:fetchFences', 'fetchFences error', {message:err?.message,latency:Date.now()-fenceStart})
+    if (fetchId === currentFetchId) {
+      fenceError.value = err?.message || '获取禁飞区列表失败'
+    }
   } finally {
-    isLoading.value = false
+    debugLog('InfoManagementPanel.vue:fetchFences', 'fetchFences finally', {fetchId,currentFetchId,isLoadingBefore:isFencesLoading.value,inFlight:inFlightFetches,latency:Date.now()-fenceStart})
+    inFlightFetches = Math.max(0, inFlightFetches - 1)
+    if (inFlightFetches === 0) {
+      isFencesLoading.value = false
+      isLoading.value = false
+    }
+    debugLog('InfoManagementPanel.vue:fetchFences', 'fetchFences finally after', {fetchId,currentFetchId,isLoadingAfter:isFencesLoading.value,inFlight:inFlightFetches,latency:Date.now()-fenceStart})
   }
 }
 
@@ -901,7 +1005,7 @@ async function toggleNoFlyZoneVisibility(zone) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          typeCode: zone.type_code || 'electronic_fence',
+          typeCode: zone.type_code || 'unit_organization',
           zoneId: zoneId,
         }),
       })
@@ -917,6 +1021,48 @@ async function toggleNoFlyZoneVisibility(zone) {
       noFlyZoneVisibleMap.value[zoneId] = false
       console.error('[禁飞区详情] 请求错误:', err)
     }
+  }
+}
+
+async function showAllNoFlyZones() {
+  if (!fenceList.value.length) return
+  isLoading.value = true
+  const zones = fenceList.value
+  const total = zones.length
+  let successCount = 0
+  let failCount = 0
+
+  for (const zone of zones) {
+    const zoneId = zone.zone_id
+    if (!zoneId) continue
+
+    try {
+      const resp = await fetch('/api/multiSource/airSpace/noFlyZone/detail', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          typeCode: zone.type_code || 'unit_organization',
+          zoneId: zoneId,
+        }),
+      })
+      const data = await resp.json()
+      if (data?.status === 'success' && data?.data?.zone) {
+        noFlyZoneVisibleMap.value[zoneId] = true
+        emit('show-no-fly-zone', data.data.zone)
+        successCount++
+      } else {
+        failCount++
+      }
+    } catch (err) {
+      failCount++
+    }
+  }
+
+  isLoading.value = false
+  if (successCount > 0) {
+    alert(`一键显示完成：成功 ${successCount} 个${failCount > 0 ? `，失败 ${failCount} 个` : ''}`)
+  } else {
+    alert('一键显示失败，请稍后重试')
   }
 }
 
@@ -959,7 +1105,7 @@ async function deleteSelectedFences() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          typeCode: zone.type_code || 'electronic_fence',
+          typeCode: zone.type_code || 'unit_organization',
           zoneId: zoneId,
           cleanupRedis: true,
         }),
@@ -1407,8 +1553,8 @@ defineExpose({
         <div v-if="currentView === 'list'" class="route-list-view">
           <div class="view-header">
             <h3>航线列表</h3>
-            <button class="btn-refresh" @click="fetchRoutes" :disabled="isLoading">
-              <Loader2 v-if="isLoading" :size="14" class="spin" />
+            <button class="btn-refresh" @click="fetchRoutes" :disabled="isRoutesLoading">
+              <Loader2 v-if="isRoutesLoading" :size="14" class="spin" />
               <RefreshCw v-else :size="14" />
               刷新
             </button>
@@ -1537,18 +1683,22 @@ defineExpose({
               <h3>禁飞区列表</h3>
               <div class="view-header-actions">
                 <select v-model="fenceTypeCode" class="type-select" @change="fenceCurrentPage = 1; fetchFences()">
-                  <option value="electronic_fence">电子围栏</option>
-                  <option value="risk_area">风险区域</option>
+                  <option value="">所有类型</option>
+                  <option value="unit_organization">单位机构</option>
+                  <option value="airport_airspace">机场空域</option>
+                  <option value="transportation_hub">交通枢纽</option>
+                  <option value="hazardous_materials">危险品</option>
+                  <option value="major_event">重要活动</option>
+                  <option value="other_no_fly_zone">其他禁飞区</option>
                 </select>
-                <button class="btn-refresh" @click="fetchFences" :disabled="isLoading">
-                  <Loader2 v-if="isLoading" :size="14" class="spin" />
+                <button class="btn-show-all" @click="showAllNoFlyZones" :disabled="isFencesLoading || fenceList.length === 0">
+                  <Map :size="14" />
+                  一键显示
+                </button>
+                <button class="btn-refresh" @click="fetchFences" :disabled="isFencesLoading">
+                  <Loader2 v-if="isFencesLoading" :size="14" class="spin" />
                   <RefreshCw v-else :size="14" />
                   刷新
-                </button>
-                <button class="btn-sync" @click="syncNoFlyZoneToRedis" :disabled="isSyncing">
-                  <Loader2 v-if="isSyncing" :size="14" class="spin" />
-                  <Database v-else :size="14" />
-                  同步
                 </button>
                 <button class="btn-delete" @click="deleteSelectedFences" :disabled="selectedFenceIds.size === 0">
                   <Trash2 :size="14" />
@@ -1609,8 +1759,8 @@ defineExpose({
                     <td class="col-id">{{ zone.zone_id }}</td>
                     <td class="col-name">{{ zone.name || '-' }}</td>
                     <td class="col-type">
-                      <span class="type-badge" :class="zone.type_code === 'electronic_fence' ? 'type-circle' : 'type-polygon'">
-                        {{ zone.type_name || (zone.type_code === 'electronic_fence' ? '电子围栏' : '风险区域') }}
+                      <span class="type-badge type-polygon">
+                        {{ zone.type_name || (typeCodeNameMap[zone.type_code] || '其他禁飞区') }}
                       </span>
                     </td>
                     <td class="col-coord">{{ zone.bottom ?? '-' }}</td>
@@ -2074,6 +2224,30 @@ defineExpose({
   transition: all 0.15s ease;
 }
 
+.btn-show-all {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid #d1fae5;
+  border-radius: 6px;
+  background: #f0fdf4;
+  color: #16a34a;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-show-all:hover:not(:disabled) {
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.btn-show-all:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .btn-refresh:hover:not(:disabled) {
   background: #f8fafc;
   border-color: #cbd5e1;
@@ -2104,30 +2278,6 @@ defineExpose({
 }
 
 .btn-delete:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.btn-sync {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  border: 1px solid #bfdbfe;
-  border-radius: 6px;
-  background: #ffffff;
-  color: #2563eb;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.btn-sync:hover:not(:disabled) {
-  background: #eff6ff;
-  border-color: #93c5fd;
-}
-
-.btn-sync:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }

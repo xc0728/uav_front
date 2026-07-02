@@ -10,6 +10,9 @@ const isOnline = ref(navigator.onLine)
 const cesiumMapRef = ref(null)
 const fencePanelRef = ref(null)
 
+// 场景演示飞行模拟定时器
+let flightSimulationTimer = null
+
 // 模拟无人机状态数据
 const uavStatus = ref({
   online: false,
@@ -289,6 +292,7 @@ onBeforeUnmount(() => {
     window.clearInterval(clockTimer)
     clockTimer = null
   }
+  stopFlightSimulation()
   simulationTimers.value.forEach(t => window.clearTimeout(t))
   simulationTimers.value = []
   window.removeEventListener('online', handleOnline)
@@ -300,6 +304,13 @@ watch(() => cesiumMapRef.value?.isMapReady, (ready) => {
     console.log('[MonitoringScreen] CesiumMap 就绪')
     drawAllRoutes()
   }
+})
+
+// 监听 CesiumMap 的飞行事件
+watch(cesiumMapRef, (ref) => {
+  if (!ref) return
+  ref.$on('flight-start', startFlightSimulation)
+  ref.$on('flight-end', stopFlightSimulation)
 })
 
 watch(() => props.routeData, () => {
@@ -439,6 +450,72 @@ function handleDeleteFence(id) {
   if (cesiumMapRef.value && typeof cesiumMapRef.value.removeFenceFromMap === 'function') {
     cesiumMapRef.value.removeFenceFromMap(id)
   }
+}
+
+/** 场景演示飞行模拟：读取 Cesium 真实无人机位置更新 uavStatus */
+function startFlightSimulation() {
+  stopFlightSimulation()
+  uavStatus.value.online = true
+  uavStatus.value.battery = 100
+  uavStatus.value.signal = 85
+  uavStatus.value.heading = 0
+  let lastPosition = null
+  let lastTimestamp = null
+
+  flightSimulationTimer = window.setInterval(() => {
+    const pos = typeof cesiumMapRef.value?.getScenarioFlightPosition === 'function'
+      ? cesiumMapRef.value.getScenarioFlightPosition()
+      : null
+
+    if (!pos) {
+      uavStatus.value.speed = 0
+      uavStatus.value.altitude = 0
+      return
+    }
+
+    uavStatus.value.position = [pos.lon, pos.lat]
+    uavStatus.value.altitude = pos.height
+
+    const now = performance.now()
+    if (lastPosition && lastTimestamp) {
+      const dt = (now - lastTimestamp) / 1000
+      if (dt > 0.01) {
+        const dist = haversineDistanceMeters(lastPosition, [pos.lon, pos.lat])
+        const speed = dt > 0 ? dist / dt : 0
+        uavStatus.value.speed = Math.max(0, Math.min(30, speed))
+
+        const dLonRad = (pos.lon - lastPosition[0]) * Math.PI / 180
+        const fromLatRad = lastPosition[1] * Math.PI / 180
+        const toLatRad = pos.lat * Math.PI / 180
+        const headingRad = Math.atan2(
+          Math.sin(dLonRad) * Math.cos(toLatRad),
+          Math.cos(fromLatRad) * Math.sin(toLatRad) - Math.sin(fromLatRad) * Math.cos(toLatRad) * Math.cos(dLonRad)
+        )
+        uavStatus.value.heading = ((headingRad * 180) / Math.PI % 360 + 360) % 360
+
+        const batteryDrop = (dist / 1000) * 0.8
+        uavStatus.value.battery = Math.max(0, uavStatus.value.battery - batteryDrop)
+      }
+    }
+
+    lastPosition = [pos.lon, pos.lat]
+    lastTimestamp = now
+  }, 500)
+}
+
+/** 停止场景演示飞行模拟 */
+function stopFlightSimulation() {
+  if (flightSimulationTimer) {
+    window.clearInterval(flightSimulationTimer)
+    flightSimulationTimer = null
+  }
+  uavStatus.value.online = false
+  uavStatus.value.speed = 0
+  uavStatus.value.battery = 100
+  uavStatus.value.altitude = 0
+  uavStatus.value.position = [0, 0]
+  uavStatus.value.signal = 0
+  uavStatus.value.heading = 0
 }
 
 function handleStartEventSimulation() {
@@ -877,28 +954,36 @@ function formatEventTypeLabel(type) {
 }
 
 const TYPE_COLORS = {
-  electronic_fence: '#5b9fd4',
-  risk_zone: '#a855f7',
-  custom: '#f59e0b',
+  unit_organization: '#5b9fd4',
+  airport_airspace: '#ef4444',
+  transportation_hub: '#f97316',
+  hazardous_materials: '#a855f7',
+  major_event: '#eab308',
+  other_no_fly_zone: '#64748b',
+  unknown: '#64748b',
 }
 
 const TYPE_NAMES = {
-  electronic_fence: '电子围栏',
-  risk_zone: '风险区域',
-  custom: '自定义区域',
+  unit_organization: '单位机构',
+  airport_airspace: '机场空域',
+  transportation_hub: '交通枢纽',
+  hazardous_materials: '危险品',
+  major_event: '重要活动',
+  other_no_fly_zone: '其他禁飞区',
+  unknown: '未知类型',
 }
 
 const fenceTypeStats = computed(() => {
   const zones = Object.values(props.visibleNoFlyZones)
   const counts = {}
   zones.forEach(z => {
-    const code = z.type_code || 'custom'
+    const code = z.type_code || 'unknown'
     counts[code] = (counts[code] || 0) + 1
   })
   const legend = Object.entries(counts).map(([type, count]) => ({
     type,
-    name: TYPE_NAMES[type] || TYPE_NAMES.custom,
-    color: TYPE_COLORS[type] || TYPE_COLORS.custom,
+    name: TYPE_NAMES[type] || TYPE_NAMES.unknown,
+    color: TYPE_COLORS[type] || TYPE_COLORS.unknown,
     count,
   }))
 
@@ -923,12 +1008,12 @@ const fenceTypeStats = computed(() => {
 
 const fenceZoneStats = computed(() => {
   const zones = Object.values(props.visibleNoFlyZones).map(z => {
-    const code = z.type_code || 'custom'
+    const code = z.type_code || 'unknown'
     return {
       id: z.zone_id,
       name: z.name || '未命名禁飞区',
-      tagName: TYPE_NAMES[code] || TYPE_NAMES.custom,
-      tagColor: TYPE_COLORS[code] || TYPE_COLORS.custom,
+      tagName: TYPE_NAMES[code] || TYPE_NAMES.unknown,
+      tagColor: TYPE_COLORS[code] || TYPE_COLORS.unknown,
     }
   })
   return { total: zones.length, list: zones }
