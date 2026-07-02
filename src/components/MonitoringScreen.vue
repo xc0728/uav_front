@@ -56,6 +56,14 @@ async function fetchAircraftList() {
 }
 
 const props = defineProps({
+  embedded: {
+    type: Boolean,
+    default: false,
+  },
+  externalCesiumMap: {
+    type: Object,
+    default: null,
+  },
   routeData: {
     type: Array,
     default: () => []
@@ -75,6 +83,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['switch_page', 'visualize-event', 'start-event-simulation', 'stop-event-simulation', 'anomaly-triggered'])
+const activeCesiumMap = computed(() => props.externalCesiumMap || cesiumMapRef.value)
 
 // ========== 浙江省天气配置 ==========
 // 浙江省11个地级市经纬度
@@ -295,7 +304,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('offline', handleOffline)
 })
 
-watch(() => cesiumMapRef.value?.isMapReady, (ready) => {
+watch(() => activeCesiumMap.value?.isMapReady, (ready) => {
   if (ready) {
     console.log('[MonitoringScreen] CesiumMap 就绪')
     drawAllRoutes()
@@ -320,22 +329,22 @@ function drawAllRoutes() {
 
   routes.forEach(route => {
     if (route && route.id && route.path) {
-      if (cesiumMapRef.value && typeof cesiumMapRef.value.drawRouteGrid === 'function') {
-        cesiumMapRef.value.drawRouteGrid(route.id, route.path)
+      if (activeCesiumMap.value && typeof activeCesiumMap.value.drawRouteGrid === 'function') {
+        activeCesiumMap.value.drawRouteGrid(route.id, route.path)
       }
     }
   })
 }
 
 function clearRouteGrid(routeId) {
-  if (cesiumMapRef.value && typeof cesiumMapRef.value.clearRouteGrid === 'function') {
-    cesiumMapRef.value.clearRouteGrid(routeId)
+  if (activeCesiumMap.value && typeof activeCesiumMap.value.clearRouteGrid === 'function') {
+    activeCesiumMap.value.clearRouteGrid(routeId)
   }
 }
 
 function clearEventVisualization() {
-  if (cesiumMapRef.value && typeof cesiumMapRef.value.clearEventVisualization === 'function') {
-    cesiumMapRef.value.clearEventVisualization()
+  if (activeCesiumMap.value && typeof activeCesiumMap.value.clearEventVisualization === 'function') {
+    activeCesiumMap.value.clearEventVisualization()
   }
 }
 
@@ -354,16 +363,16 @@ function drawWarningSampleGrids(warningArea) {
     color: '#f59e0b',
     level: warningArea?.gridLevel,
   }))
-  if (cesiumMapRef.value && typeof cesiumMapRef.value.drawGridBoundary === 'function') {
-    cesiumMapRef.value.drawGridBoundary({ cells })
+  if (activeCesiumMap.value && typeof activeCesiumMap.value.drawGridBoundary === 'function') {
+    activeCesiumMap.value.drawGridBoundary({ cells })
   }
 }
 
 async function drawEventVisualization(payload) {
-  if (!cesiumMapRef.value) return
+  if (!activeCesiumMap.value) return
 
-  if (payload?.eventGrid && typeof cesiumMapRef.value.drawGridBoundary === 'function') {
-    cesiumMapRef.value.drawGridBoundary({
+  if (payload?.eventGrid && typeof activeCesiumMap.value.drawGridBoundary === 'function') {
+    activeCesiumMap.value.drawGridBoundary({
       code: payload.eventGrid.code,
       center: payload.eventGrid.center,
       bounds: {
@@ -379,8 +388,8 @@ async function drawEventVisualization(payload) {
 
   await drawWarningSampleGrids(payload?.warningArea)
 
-  if (typeof cesiumMapRef.value.drawEventVisualization === 'function') {
-    cesiumMapRef.value.drawEventVisualization({
+  if (typeof activeCesiumMap.value.drawEventVisualization === 'function') {
+    activeCesiumMap.value.drawEventVisualization({
       eventPoint: payload?.eventPoint,
       warningArea: payload?.warningArea,
     })
@@ -396,48 +405,48 @@ const routeStats = computed(() => {
 })
 
 function handleDrawSphereFence(params) {
-  if (cesiumMapRef.value && typeof cesiumMapRef.value.startDrawSphereFence === 'function') {
-    cesiumMapRef.value.startDrawSphereFence(params, () => {})
+  if (activeCesiumMap.value && typeof activeCesiumMap.value.startDrawSphereFence === 'function') {
+    activeCesiumMap.value.startDrawSphereFence(params, () => {})
   }
 }
 
 function handleDrawLineFence(params) {
-  if (cesiumMapRef.value && typeof cesiumMapRef.value.startDrawLineFence === 'function') {
-    cesiumMapRef.value.startDrawLineFence(params, () => {})
+  if (activeCesiumMap.value && typeof activeCesiumMap.value.startDrawLineFence === 'function') {
+    activeCesiumMap.value.startDrawLineFence(params, () => {})
   }
 }
 
 function handleCompleteSphereFence(fenceData) {
-  if (cesiumMapRef.value && typeof cesiumMapRef.value.completeSphereFence === 'function') {
-    cesiumMapRef.value.completeSphereFence(fenceData, (data) => {
+  if (activeCesiumMap.value && typeof activeCesiumMap.value.completeSphereFence === 'function') {
+    activeCesiumMap.value.completeSphereFence(fenceData, (data) => {
       fencePanelRef.value?.confirmFenceDraw(data)
     })
   }
 }
 
 function handleCompleteLineFence(fenceData) {
-  if (cesiumMapRef.value && typeof cesiumMapRef.value.completeLineFence === 'function') {
-    cesiumMapRef.value.completeLineFence(fenceData, (data) => {
+  if (activeCesiumMap.value && typeof activeCesiumMap.value.completeLineFence === 'function') {
+    activeCesiumMap.value.completeLineFence(fenceData, (data) => {
       fencePanelRef.value?.confirmFenceDraw(data)
     })
   }
 }
 
 function handleClearFence() {
-  if (cesiumMapRef.value && typeof cesiumMapRef.value.clearFenceDrawing === 'function') {
-    cesiumMapRef.value.clearFenceDrawing()
+  if (activeCesiumMap.value && typeof activeCesiumMap.value.clearFenceDrawing === 'function') {
+    activeCesiumMap.value.clearFenceDrawing()
   }
 }
 
 function handleToggleFence(fence) {
-  if (cesiumMapRef.value && typeof cesiumMapRef.value.toggleFenceVisibility === 'function') {
-    cesiumMapRef.value.toggleFenceVisibility(fence)
+  if (activeCesiumMap.value && typeof activeCesiumMap.value.toggleFenceVisibility === 'function') {
+    activeCesiumMap.value.toggleFenceVisibility(fence)
   }
 }
 
 function handleDeleteFence(id) {
-  if (cesiumMapRef.value && typeof cesiumMapRef.value.removeFenceFromMap === 'function') {
-    cesiumMapRef.value.removeFenceFromMap(id)
+  if (activeCesiumMap.value && typeof activeCesiumMap.value.removeFenceFromMap === 'function') {
+    activeCesiumMap.value.removeFenceFromMap(id)
   }
 }
 
@@ -453,18 +462,18 @@ function handleStopEventSimulation() {
   simulationTimers.value = []
   simulationParamsMap.value = {}
 
-  if (cesiumMapRef.value) {
-    if (typeof cesiumMapRef.value.stopUavAnimation === 'function') {
-      cesiumMapRef.value.stopUavAnimation()
+  if (activeCesiumMap.value) {
+    if (typeof activeCesiumMap.value.stopUavAnimation === 'function') {
+      activeCesiumMap.value.stopUavAnimation()
     }
-    if (typeof cesiumMapRef.value.clearEventVisualization === 'function') {
-      cesiumMapRef.value.clearEventVisualization()
+    if (typeof activeCesiumMap.value.clearEventVisualization === 'function') {
+      activeCesiumMap.value.clearEventVisualization()
     }
-    if (typeof cesiumMapRef.value.clearGridVisual === 'function') {
-      cesiumMapRef.value.clearGridVisual()
+    if (typeof activeCesiumMap.value.clearGridVisual === 'function') {
+      activeCesiumMap.value.clearGridVisual()
     }
-    if (typeof cesiumMapRef.value.clearWarningGridPoints === 'function') {
-      cesiumMapRef.value.clearWarningGridPoints()
+    if (typeof activeCesiumMap.value.clearWarningGridPoints === 'function') {
+      activeCesiumMap.value.clearWarningGridPoints()
     }
   }
 
@@ -598,18 +607,18 @@ async function handleConfirmSimulation() {
   simulationTimers.value = []
   simulationParamsMap.value = {}
 
-  if (cesiumMapRef.value) {
-    if (typeof cesiumMapRef.value.stopUavAnimation === 'function') {
-      cesiumMapRef.value.stopUavAnimation()
+  if (activeCesiumMap.value) {
+    if (typeof activeCesiumMap.value.stopUavAnimation === 'function') {
+      activeCesiumMap.value.stopUavAnimation()
     }
-    if (typeof cesiumMapRef.value.clearEventVisualization === 'function') {
-      cesiumMapRef.value.clearEventVisualization()
+    if (typeof activeCesiumMap.value.clearEventVisualization === 'function') {
+      activeCesiumMap.value.clearEventVisualization()
     }
-    if (typeof cesiumMapRef.value.clearGridVisual === 'function') {
-      cesiumMapRef.value.clearGridVisual()
+    if (typeof activeCesiumMap.value.clearGridVisual === 'function') {
+      activeCesiumMap.value.clearGridVisual()
     }
-    if (typeof cesiumMapRef.value.clearWarningGridPoints === 'function') {
-      cesiumMapRef.value.clearWarningGridPoints()
+    if (typeof activeCesiumMap.value.clearWarningGridPoints === 'function') {
+      activeCesiumMap.value.clearWarningGridPoints()
     }
   }
 
@@ -636,8 +645,8 @@ async function handleConfirmSimulation() {
   })
 
   routes.forEach((route, index) => {
-    if (cesiumMapRef.value && typeof cesiumMapRef.value.startUavAnimation === 'function') {
-      cesiumMapRef.value.startUavAnimation(route.path, route.id, index === 0)
+    if (activeCesiumMap.value && typeof activeCesiumMap.value.startUavAnimation === 'function') {
+      activeCesiumMap.value.startUavAnimation(route.path, route.id, index === 0)
     }
 
     const delay = 3000 + Math.random() * 5000
@@ -654,14 +663,14 @@ async function handleConfirmSimulation() {
 }
 
 async function triggerAnomaly(routeId) {
-  if (!cesiumMapRef.value) return
+  if (!activeCesiumMap.value) return
 
-  const currentPosition = typeof cesiumMapRef.value.getUavCurrentPosition === 'function'
-    ? cesiumMapRef.value.getUavCurrentPosition(routeId)
+  const currentPosition = typeof activeCesiumMap.value.getUavCurrentPosition === 'function'
+    ? activeCesiumMap.value.getUavCurrentPosition(routeId)
     : null
 
-  if (typeof cesiumMapRef.value.stopUavAnimationByRouteId === 'function') {
-    cesiumMapRef.value.stopUavAnimationByRouteId(routeId)
+  if (typeof activeCesiumMap.value.stopUavAnimationByRouteId === 'function') {
+    activeCesiumMap.value.stopUavAnimationByRouteId(routeId)
   }
 
   const params = simulationParamsMap.value[routeId]
@@ -721,7 +730,7 @@ async function triggerAnomaly(routeId) {
 }
 
 async function visualizeEmergencyResponse(responseData) {
-  if (!cesiumMapRef.value) return
+  if (!activeCesiumMap.value) return
 
   const allCells = []
 
@@ -764,15 +773,15 @@ async function visualizeEmergencyResponse(responseData) {
   console.log('[MonitoringScreen] 可视化网格总数:', allCells.length, '事件网格:', responseData.eventGrid ? 1 : 0, '警戒区网格:', Array.isArray(gridCells) ? gridCells.length : 0)
 
   // 统一使用 drawGridBoundary 绘制所有网格
-  if (allCells.length > 0 && typeof cesiumMapRef.value.drawGridBoundary === 'function') {
-    cesiumMapRef.value.drawGridBoundary({ cells: allCells })
+  if (allCells.length > 0 && typeof activeCesiumMap.value.drawGridBoundary === 'function') {
+    activeCesiumMap.value.drawGridBoundary({ cells: allCells })
   }
 
   // 绘制事件位置点和警戒区范围
-  if (typeof cesiumMapRef.value.drawEventVisualization === 'function') {
+  if (typeof activeCesiumMap.value.drawEventVisualization === 'function') {
     const eg = responseData.eventGrid
     const waCenter = warningArea?.center
-    cesiumMapRef.value.drawEventVisualization({
+    activeCesiumMap.value.drawEventVisualization({
       eventPoint: eg?.center ? {
         lon: eg.center[0],
         lat: eg.center[1],
@@ -793,8 +802,8 @@ function handleSaveFence(fences) {
 }
 
 function handleDrawFence(fence) {
-  if (cesiumMapRef.value && typeof cesiumMapRef.value.drawFenceOnMap === 'function') {
-    cesiumMapRef.value.drawFenceOnMap(fence)
+  if (activeCesiumMap.value && typeof activeCesiumMap.value.drawFenceOnMap === 'function') {
+    activeCesiumMap.value.drawFenceOnMap(fence)
   }
 }
 
@@ -935,11 +944,11 @@ const fenceZoneStats = computed(() => {
 })
 
 function addNoFlyZoneVisualization(zone) {
-  if (!cesiumMapRef.value) return
+  if (!activeCesiumMap.value) return
   const boundary = zone.boundary
   if (!boundary || boundary.length < 3) return
 
-  cesiumMapRef.value.drawPolygon({
+  activeCesiumMap.value.drawPolygon({
     type: 'noFlyZone',
     zoneId: zone.zone_id,
     points: boundary.map(coord => ({
@@ -953,18 +962,18 @@ function addNoFlyZoneVisualization(zone) {
 }
 
 function removeNoFlyZoneVisualization(zoneId) {
-  if (!cesiumMapRef.value) return
-  if (typeof cesiumMapRef.value.removeNoFlyZonePrism === 'function') {
-    cesiumMapRef.value.removeNoFlyZonePrism(zoneId)
+  if (!activeCesiumMap.value) return
+  if (typeof activeCesiumMap.value.removeNoFlyZonePrism === 'function') {
+    activeCesiumMap.value.removeNoFlyZonePrism(zoneId)
   }
 }
 
 watch(
   () => props.visibleNoFlyZones,
   (newVal) => {
-    if (!cesiumMapRef.value) return
-    if (typeof cesiumMapRef.value.removeNoFlyZonePrism !== 'function') return
-    const entityIds = cesiumMapRef.value.viewer?.entities?.values?.map(e => e.id) || []
+    if (!activeCesiumMap.value) return
+    if (typeof activeCesiumMap.value.removeNoFlyZonePrism !== 'function') return
+    const entityIds = activeCesiumMap.value.viewer?.entities?.values?.map(e => e.id) || []
     const activeZoneIds = new Set(Object.keys(newVal))
     const renderedZoneIds = new Set()
     entityIds.forEach(id => {
@@ -974,7 +983,7 @@ watch(
     })
     renderedZoneIds.forEach(zoneId => {
       if (!activeZoneIds.has(zoneId)) {
-        cesiumMapRef.value.removeNoFlyZonePrism(zoneId)
+        activeCesiumMap.value.removeNoFlyZonePrism(zoneId)
       }
     })
     Object.values(newVal).forEach(zone => {
@@ -994,11 +1003,11 @@ defineExpose({
 </script>
 
 <template>
-  <div class="app-root" :class="`theme-${props.theme}`">
-    <CesiumMap ref="cesiumMapRef" :show3-d-toggle="false" />
+  <div class="app-root" :class="[`theme-${props.theme}`, { embedded: props.embedded }]">
+    <CesiumMap v-if="!props.embedded" ref="cesiumMapRef" :show3-d-toggle="false" />
 
     <!-- 顶部导航 -->
-    <header class="topbar">
+    <header v-if="!props.embedded" class="topbar">
       <!-- 左侧导航按钮 -->
       <div class="left-nav-buttons">
         <div class="nav-btn" @click="$emit('switch_page', 'grid')">网格化算子</div>
@@ -1027,6 +1036,7 @@ defineExpose({
     <main class="monitoring-content">
       <!-- 左侧面板：天气 + 禁飞区饼图 + 禁飞区列表 + 异常事件 -->
       <div class="control-panel-fence">
+        <div class="monitor-rail-title">实时监控</div>
         <!-- 上1/4：实时天气 -->
         <div class="weather-section">
           <div class="section-title">实时天气</div>
@@ -1132,6 +1142,7 @@ defineExpose({
 
       <!-- 右侧监控航线面板 -->
       <div class="control-panel-route">
+        <div class="monitor-rail-title">航线监控</div>
         <!-- 航线列表区域 上1/4 -->
         <div class="route-list-section">
           <div class="panel-header">
@@ -2799,5 +2810,474 @@ defineExpose({
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+.app-root.embedded {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+
+.app-root.embedded .monitoring-content {
+  position: relative;
+  top: auto;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  pointer-events: none;
+}
+
+.app-root.embedded .control-panel-fence,
+.app-root.embedded .control-panel-route {
+  width: 320px;
+  pointer-events: auto;
+}
+
+.app-root.embedded .control-panel-route {
+  right: 0;
+}
+
+.app-root.embedded .simulation-modal-mask {
+  position: absolute;
+}
+
+/* 数字监理风格侧栏主框体 */
+.app-root.embedded .control-panel-fence,
+.app-root.embedded .control-panel-route {
+  width: 320px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(0, 4, 12, 0.75);
+  border: 1px solid rgba(14, 156, 255, 0.6);
+  border-radius: 2px;
+  box-shadow: inset 0 0 15px rgba(14, 156, 255, 0.35);
+  color: #fff;
+}
+
+.app-root.embedded .control-panel-fence {
+  padding-left: 14px;
+  padding-right: 14px;
+}
+
+.app-root.embedded .control-panel-fence {
+  margin-left: 0;
+}
+
+.app-root.embedded .control-panel-route {
+  right: 0;
+}
+
+.monitor-rail-title {
+  position: relative;
+  flex: 0 0 auto;
+  margin-bottom: 0;
+  padding-bottom: 7px;
+  border-bottom: 1px solid rgba(14, 156, 255, 0.25);
+  font-family: YouSheBiaoTiHei, "Microsoft YaHei", sans-serif;
+  font-size: 23px;
+  font-weight: normal;
+  letter-spacing: 1px;
+  line-height: 1.2;
+  background: linear-gradient(104deg, #c6e4fb 3%, #ffffff 20%, #c6e4fb 38%, #ffffff 56%, #c6e4fb 74%, #ffffff 92%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 8px rgba(14, 156, 255, 0.5));
+}
+
+.monitor-rail-title::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 120px;
+  height: 2px;
+  background: linear-gradient(90deg, #00f6ff 0%, rgba(14, 156, 255, 0.8) 60%, transparent 100%);
+  box-shadow: 0 0 10px rgba(0, 246, 255, 0.85), 0 0 20px rgba(0, 246, 255, 0.4);
+}
+
+.app-root.embedded .weather-section,
+.app-root.embedded .fence-pie-section,
+.app-root.embedded .fence-list-section,
+.app-root.embedded .event-list-section,
+.app-root.embedded .route-list-section,
+.app-root.embedded .route-stats-section,
+.app-root.embedded .uav-status-section,
+.app-root.embedded .aircraft-list-section {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.app-root.embedded .weather-section::before,
+.app-root.embedded .fence-pie-section::before,
+.app-root.embedded .fence-list-section::before,
+.app-root.embedded .event-list-section::before,
+.app-root.embedded .route-list-section::before,
+.app-root.embedded .route-stats-section::before,
+.app-root.embedded .uav-status-section::before,
+.app-root.embedded .aircraft-list-section::before {
+  display: none;
+}
+
+.app-root.embedded .weather-section,
+.app-root.embedded .fence-pie-section,
+.app-root.embedded .fence-list-section,
+.app-root.embedded .event-list-section {
+  flex: 1 1 0;
+  min-height: 96px;
+}
+
+.app-root.embedded .route-list-section {
+  flex: 1.15 1 0;
+  min-height: 104px;
+}
+
+.app-root.embedded .route-stats-section {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.app-root.embedded .uav-status-section {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+.app-root.embedded .aircraft-list-section {
+  flex: 1 1 0;
+  min-height: 104px;
+}
+
+.app-root.embedded .section-title,
+.app-root.embedded .stats-title,
+.app-root.embedded .panel-title,
+.app-root.embedded .uav-card-title {
+  margin: 0 0 6px;
+  padding: 0 0 6px;
+  border-bottom: 1px solid rgba(14, 156, 255, 0.2);
+  color: #8ab4f8;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: none;
+  text-shadow: none;
+}
+
+.app-root.embedded .panel-header,
+.app-root.embedded .uav-card-header {
+  min-height: 0;
+  padding: 0 0 6px;
+  border-bottom: 1px solid rgba(14, 156, 255, 0.2);
+  background: transparent;
+}
+
+.app-root.embedded .panel-header .panel-title,
+.app-root.embedded .uav-card-header .uav-card-title {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.app-root.embedded .weather-content,
+.app-root.embedded .fence-pie-wrapper,
+.app-root.embedded .fence-list,
+.app-root.embedded .event-list,
+.app-root.embedded .route-list,
+.app-root.embedded .aircraft-list {
+  min-height: 0;
+}
+
+.app-root.embedded .weather-content,
+.app-root.embedded .fence-pie-wrapper,
+.app-root.embedded .fence-list,
+.app-root.embedded .event-list {
+  height: calc(100% - 28px);
+}
+
+.app-root.embedded .weather-section,
+.app-root.embedded .weather-content,
+.app-root.embedded .weather-main,
+.app-root.embedded .weather-temp,
+.app-root.embedded .wp-value,
+.app-root.embedded .pie-total,
+.app-root.embedded .legend-count,
+.app-root.embedded .fence-zone-name,
+.app-root.embedded .event-name,
+.app-root.embedded .route-name,
+.app-root.embedded .sn-value {
+  color: #fff;
+}
+
+.app-root.embedded .weather-city,
+.app-root.embedded .weather-desc,
+.app-root.embedded .wp-label,
+.app-root.embedded .pie-total-label,
+.app-root.embedded .legend-name,
+.app-root.embedded .event-time,
+.app-root.embedded .route-id,
+.app-root.embedded .grid-label,
+.app-root.embedded .uav-metric-label,
+.app-root.embedded .uav-position-label,
+.app-root.embedded .aircraft-model,
+.app-root.embedded .sn-label {
+  color: rgba(224, 239, 245, 0.48);
+}
+
+.app-root.embedded .weather-warning {
+  margin-top: 6px;
+  border-radius: 2px;
+  background: rgba(230, 162, 60, 0.14);
+  color: #e6a23c;
+}
+
+.app-root.embedded .weather-main {
+  gap: 8px;
+  min-width: 0;
+}
+
+.app-root.embedded .weather-icon {
+  flex: 0 0 auto;
+  font-size: 32px;
+}
+
+.app-root.embedded .weather-temp {
+  flex: 0 0 auto;
+  font-size: 26px;
+  letter-spacing: 0;
+}
+
+.app-root.embedded .weather-city {
+  flex: 0 1 auto;
+  max-width: 54px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-root.embedded .weather-params {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 10px;
+}
+
+.app-root.embedded .weather-param {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px;
+  min-width: 0;
+  font-size: 10px;
+}
+
+.app-root.embedded .wp-label {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.app-root.embedded .wp-value {
+  min-width: 0;
+  text-align: right;
+  white-space: nowrap;
+  overflow: visible;
+  font-size: 10px;
+}
+
+.app-root.embedded .fence-pie-wrapper {
+  gap: 8px;
+}
+
+.app-root.embedded .pie-chart {
+  width: 82px;
+  height: 82px;
+}
+
+.app-root.embedded .pie-total {
+  font-size: 18px;
+}
+
+.app-root.embedded .pie-legend {
+  gap: 5px;
+}
+
+.app-root.embedded .fence-list,
+.app-root.embedded .event-list,
+.app-root.embedded .route-list,
+.app-root.embedded .aircraft-list {
+  padding: 0;
+  overflow-y: auto;
+}
+
+.app-root.embedded .route-stats-section .stats-title {
+  margin-bottom: 6px;
+}
+
+.app-root.embedded .route-stats-section .stats-grid {
+  min-height: 40px;
+  gap: 8px;
+}
+
+.app-root.embedded .route-stats-section .stat-item {
+  min-height: 40px;
+  padding: 5px 4px;
+}
+
+.app-root.embedded .route-stats-section .stat-value {
+  font-size: 17px;
+  line-height: 1;
+}
+
+.app-root.embedded .route-stats-section .stat-label {
+  margin-top: 2px;
+  font-size: 10px;
+}
+
+.app-root.embedded .fence-list::-webkit-scrollbar,
+.app-root.embedded .event-list::-webkit-scrollbar,
+.app-root.embedded .route-list::-webkit-scrollbar,
+.app-root.embedded .aircraft-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.app-root.embedded .fence-list::-webkit-scrollbar-thumb,
+.app-root.embedded .event-list::-webkit-scrollbar-thumb,
+.app-root.embedded .route-list::-webkit-scrollbar-thumb,
+.app-root.embedded .aircraft-list::-webkit-scrollbar-thumb {
+  border-radius: 2px;
+  background: rgba(14, 156, 255, 0.28);
+}
+
+.app-root.embedded .fence-list,
+.app-root.embedded .event-list,
+.app-root.embedded .route-list,
+.app-root.embedded .aircraft-list {
+  border: 1px solid rgba(14, 156, 255, 0.18);
+  border-radius: 4px;
+  background: rgba(4, 16, 28, 0.16);
+}
+
+.app-root.embedded .fence-zone-item,
+.app-root.embedded .event-item,
+.app-root.embedded .route-item,
+.app-root.embedded .aircraft-item {
+  position: relative;
+  margin: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  transition: all 0.22s ease;
+}
+
+.app-root.embedded .fence-zone-item::after,
+.app-root.embedded .event-item::after,
+.app-root.embedded .route-item::after,
+.app-root.embedded .aircraft-item::after {
+  content: '';
+  position: absolute;
+  left: 4%;
+  right: 4%;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(0, 246, 255, 0) 0%, rgba(0, 246, 255, 0.35) 20%, rgba(0, 246, 255, 0.35) 80%, rgba(0, 246, 255, 0) 100%);
+  box-shadow: 0 0 6px rgba(0, 246, 255, 0.24);
+}
+
+.app-root.embedded .fence-zone-item:hover,
+.app-root.embedded .event-item:hover,
+.app-root.embedded .route-item:hover,
+.app-root.embedded .aircraft-item:hover {
+  background:
+    radial-gradient(circle at 10% 50%, rgba(0, 246, 255, 0.08) 0%, rgba(0, 246, 255, 0) 80%),
+    rgba(14, 156, 255, 0.04);
+}
+
+.app-root.embedded .stat-item,
+.app-root.embedded .uav-metric-item,
+.app-root.embedded .uav-position-row {
+  border: 1px solid rgba(14, 156, 255, 0.22);
+  border-radius: 4px;
+  background: rgba(4, 16, 28, 0.22);
+}
+
+.app-root.embedded .uav-status-card {
+  padding: 0;
+  gap: 6px;
+}
+
+.app-root.embedded .uav-metrics-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.app-root.embedded .uav-metric-item {
+  padding: 6px 6px;
+  min-width: 0;
+}
+
+.app-root.embedded .uav-position-row {
+  padding: 6px 8px;
+}
+
+.app-root.embedded .uav-metric-label,
+.app-root.embedded .uav-position-label {
+  margin-bottom: 2px;
+  font-size: 10px;
+}
+
+.app-root.embedded .uav-metric-value {
+  font-size: 14px;
+  line-height: 1.1;
+}
+
+.app-root.embedded .uav-metric-unit {
+  font-size: 9px;
+}
+
+.app-root.embedded .stat-value,
+.app-root.embedded .grid-count,
+.app-root.embedded .uav-metric-value,
+.app-root.embedded .uav-position-value,
+.app-root.embedded .aircraft-name {
+  color: #00f6ff;
+  text-shadow: 0 0 6px rgba(0, 246, 255, 0.35);
+}
+
+.app-root.embedded .action-btn {
+  min-width: 54px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 3px;
+  border-color: rgba(14, 156, 255, 0.4);
+  background: rgba(14, 156, 255, 0.08);
+  color: #8ab4f8;
+  font-size: 12px;
+}
+
+.app-root.embedded .action-btn:hover {
+  border-color: #00f6ff;
+  background: rgba(0, 246, 255, 0.16);
+  color: #fff;
+  box-shadow: 0 0 8px rgba(0, 246, 255, 0.35);
+}
+
+.app-root.embedded .simulate-btn {
+  color: #e6a23c;
+}
+
+.app-root.embedded .exit-btn,
+.app-root.embedded .empty-list.error {
+  color: #ff4757;
+}
+
+.app-root.embedded .empty-list {
+  color: rgba(224, 239, 245, 0.45);
 }
 </style>

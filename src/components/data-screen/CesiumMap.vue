@@ -22,6 +22,9 @@ let tileset = null
 const lon = ref(null)
 const lat = ref(null)
 const height = ref(null)
+const cameraLon = ref(null)
+const cameraLat = ref(null)
+const cameraHeight = ref(null)
 const show3DTiles = ref(true)
 const showBuildings = ref(false) // 建筑白膜开关
 const isMapReady = ref(false) // 地图是否准备就绪
@@ -43,6 +46,10 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
+  showHudStatus: {
+    type: Boolean,
+    default: true,
+  },
 })
 
 // 框选相关变量
@@ -53,8 +60,35 @@ let boxSelectEntity = null
 
 function formatNum(v, digits) {
   if (v === null || v === undefined) return '--'
-  if (Number.isNaN(v)) return '--'
-  return Number(v).toFixed(digits)
+  const num = Number(v)
+  if (!Number.isFinite(num)) return '--'
+  const factor = 10 ** digits
+  return (Math.trunc(num * factor) / factor).toFixed(digits)
+}
+
+function formatHudNum(v) {
+  if (v === null || v === undefined) return '------'
+  const num = Number(v)
+  if (!Number.isFinite(num)) return '------'
+  const factor = 100
+  return (Math.trunc(num * factor) / factor).toFixed(2).padStart(6, ' ')
+}
+
+function formatHudHeight(v) {
+  if (v === null || v === undefined) return '----'
+  const num = Number(v)
+  if (!Number.isFinite(num)) return '----'
+  const factor = 100
+  return (Math.trunc(num * factor) / factor).toFixed(2).padStart(6, ' ')
+}
+
+function updateCameraPosition() {
+  if (!viewer) return
+  const cartographic = viewer.camera.positionCartographic
+  if (!cartographic) return
+  cameraLon.value = Cesium.Math.toDegrees(cartographic.longitude)
+  cameraLat.value = Cesium.Math.toDegrees(cartographic.latitude)
+  cameraHeight.value = cartographic.height
 }
 
 function flyToPoint(lon, lat, height = 0) {
@@ -858,9 +892,12 @@ function clearCenterPoint() {
 }
 
 function toggle3DTiles() {
-  if (!tileset) return
-  show3DTiles.value = !show3DTiles.value
-  tileset.show = show3DTiles.value
+  const nextVisible = !show3DTiles.value
+  show3DTiles.value = nextVisible
+  if (tileset) {
+    tileset.show = nextVisible
+    viewer?.scene.requestRender()
+  }
 }
 
 function toggleBuildingsOnMap() {
@@ -876,6 +913,7 @@ function toggleBuildingsOnMap() {
     const entity = viewer.entities.getById(id)
     if (entity) entity.show = showBuildings.value
   })
+  viewer?.scene.requestRender()
 }
 
 // ==================== 电子围栏绘制功能 ====================
@@ -2527,6 +2565,8 @@ defineExpose({
   // 建筑白膜模型
   loadBuildingModels,
   toggleBuildingsOnMap,
+  show3DTiles,
+  showBuildings,
 })
 
 onMounted(async () => {
@@ -2565,9 +2605,17 @@ onMounted(async () => {
 
     viewer.scene.globe.depthTestAgainstTerrain = false
 
-    tileset = await Cesium.Cesium3DTileset.fromUrl('/dq3dtiles/tileset.json')
-    viewer.scene.primitives.add(tileset)
-    await viewer.zoomTo(tileset)
+    try {
+      tileset = await Cesium.Cesium3DTileset.fromUrl('/dq3dtiles/tileset.json')
+      tileset.show = true
+      viewer.scene.primitives.add(tileset)
+      show3DTiles.value = true
+      await viewer.zoomTo(tileset)
+    } catch (tilesetError) {
+      tileset = null
+      show3DTiles.value = false
+      console.warn('[CesiumMap] 3D底图资源未加载，已关闭3D底图开关:', tilesetError)
+    }
   } catch (error) {
     console.error('[CesiumMap] 初始化错误:', error)
   }
@@ -2642,6 +2690,9 @@ onMounted(async () => {
     handleMouseClick(movement)
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
 
+  updateCameraPosition()
+  viewer.camera.moveEnd.addEventListener(updateCameraPosition)
+
   // 地图初始化完成
   isMapReady.value = true
   console.log('[CesiumMap] 地图初始化完成')
@@ -2654,6 +2705,7 @@ onBeforeUnmount(() => {
     handler = null
   }
   if (viewer) {
+    viewer.camera?.moveEnd?.removeEventListener(updateCameraPosition)
     viewer.destroy()
     viewer = null
   }
@@ -2664,52 +2716,46 @@ onBeforeUnmount(() => {
   <section class="cesium-map-container">
     <div ref="cesiumEl" class="cesium-viewer" />
 
-    <!-- 鼠标位置信息 -->
-    <div class="mouse-info">
-      <div class="mouse-info-item">
-        <span class="label">经度</span>
-        <span class="value">{{ formatNum(lon, 6) }}</span>
-      </div>
-      <div class="mouse-info-item">
-        <span class="label">纬度</span>
-        <span class="value">{{ formatNum(lat, 6) }}</span>
-      </div>
-      <div class="mouse-info-item">
-        <span class="label">高程</span>
-        <span class="value">{{ formatNum(height, 2) }} m</span>
-      </div>
-    </div>
-
-    <!-- 底图开关卡片（位于鼠标信息条右侧） -->
-    <div class="bottom-bar">
-      <div class="mouse-info">
-        <div class="mouse-info-item">
-          <span class="label">经度</span>
-          <span class="value">{{ formatNum(lon, 6) }}</span>
+    <div v-if="props.showHudStatus" class="hud-status-bar">
+      <div class="hud-container hud-left">
+        <div class="panel panel-left">
+          <div class="panel-title">CURSOR</div>
+          <div class="panel-row">
+            <span class="axis-label">E</span>
+            <span class="axis-value">{{ formatHudNum(lon) }}</span>
+          </div>
+          <div class="panel-row">
+            <span class="axis-label">N</span>
+            <span class="axis-value">{{ formatHudNum(lat) }}</span>
+          </div>
+          <div class="panel-row">
+            <span class="axis-label">H</span>
+            <span class="axis-value">{{ formatHudHeight(height) }} m</span>
+          </div>
         </div>
-        <div class="mouse-info-item">
-          <span class="label">纬度</span>
-          <span class="value">{{ formatNum(lat, 6) }}</span>
-        </div>
-        <div class="mouse-info-item">
-          <span class="label">高程</span>
-          <span class="value">{{ formatNum(height, 2) }} m</span>
-        </div>
+        <svg class="arc-line" viewBox="0 0 24 240">
+          <path d="M 22 10 Q -20 120 22 230" />
+        </svg>
       </div>
 
-      <!-- 建筑白膜单行开关 -->
-      <div class="single-toggle-card" @click="toggleBuildingsOnMap">
-        <span class="layer-label">建筑白膜</span>
-        <div class="toggle-switch" :class="{ active: showBuildings }">
-          <div class="toggle-slider" />
-        </div>
-      </div>
-
-      <!-- 3D底图单行开关 -->
-      <div v-if="props.show3DToggle" class="single-toggle-card" @click="toggle3DTiles">
-        <span class="layer-label">3D底图</span>
-        <div class="toggle-switch" :class="{ active: show3DTiles }">
-          <div class="toggle-slider" />
+      <div class="hud-container hud-right">
+        <svg class="arc-line" viewBox="0 0 24 240">
+          <path d="M 2 10 Q 44 120 2 230" />
+        </svg>
+        <div class="panel panel-right">
+          <div class="panel-title">CAMERA</div>
+          <div class="panel-row">
+            <span class="axis-label">E</span>
+            <span class="axis-value">{{ formatHudNum(cameraLon) }}</span>
+          </div>
+          <div class="panel-row">
+            <span class="axis-label">N</span>
+            <span class="axis-value">{{ formatHudNum(cameraLat) }}</span>
+          </div>
+          <div class="panel-row">
+            <span class="axis-label">H</span>
+            <span class="axis-value">{{ formatHudHeight(cameraHeight) }} m</span>
+          </div>
         </div>
       </div>
     </div>
@@ -2731,96 +2777,129 @@ onBeforeUnmount(() => {
   height: 100%;
 }
 
-.mouse-info {
-  display: flex;
-  gap: 16px;
-  padding: 10px 16px;
-  background: rgba(15, 23, 42, 0.85);
-  backdrop-filter: blur(10px);
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.bottom-bar {
+.hud-status-bar {
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: 20px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
 }
 
-.single-toggle-card {
+.hud-container {
+  position: absolute;
+  top: 50%;
   display: flex;
   align-items: center;
+  gap: 20px;
+  transform: translateY(-50%);
+}
+
+.hud-left {
+  left: 360px;
+}
+
+.hud-right {
+  right: 360px;
+}
+
+.arc-line {
+  width: 24px;
+  height: 240px;
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+.arc-line path {
+  fill: none;
+  stroke: rgba(0, 246, 255, 0.85);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 4px rgba(0, 246, 255, 0.9)) drop-shadow(0 0 10px rgba(0, 246, 255, 0.6));
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
   gap: 10px;
-  padding: 10px 14px;
-  background: rgba(15, 23, 42, 0.85);
-  backdrop-filter: blur(10px);
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  cursor: pointer;
-  transition: all 0.2s ease;
 }
 
-.single-toggle-card:hover {
-  background: rgba(15, 23, 42, 0.95);
-  border-color: rgba(59, 130, 246, 0.4);
+.panel-left {
+  align-items: flex-end;
+  text-align: right;
 }
 
-.mouse-info-item {
+.panel-right {
+  align-items: flex-start;
+  text-align: left;
+}
+
+.panel-title {
+  font-family: 'Consolas', 'Menlo', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(0, 246, 255, 0.8);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  text-shadow: 0 0 6px rgba(0, 246, 255, 0.9), 0 0 12px rgba(0, 246, 255, 0.5);
+}
+
+.panel-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.mouse-info-item .label {
+  align-items: baseline;
+  gap: 10px;
+  color: rgba(220, 245, 255, 0.95);
+  font-family: 'Consolas', 'Menlo', monospace;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
+  font-weight: 500;
+  text-shadow: 0 0 6px rgba(0, 246, 255, 0.7), 0 0 12px rgba(0, 246, 255, 0.3);
 }
 
-.mouse-info-item .value {
-  font-size: 13px;
-  font-family: 'SF Mono', 'Monaco', monospace;
+.axis-label {
+  color: rgba(0, 246, 255, 0.7);
+  font-size: 10px;
+  font-weight: 700;
+  text-shadow: 0 0 6px rgba(0, 246, 255, 0.9), 0 0 12px rgba(0, 246, 255, 0.5);
+}
+
+.axis-value {
+  min-width: 70px;
   font-variant-numeric: tabular-nums;
-  color: #fff;
+  white-space: nowrap;
 }
 
-/* 底图开关卡片 */
-/* 已废弃，保持兼容 */
+@media (max-width: 1420px) {
+  .hud-left {
+    left: 330px;
+  }
 
-.layer-label {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.8);
+  .hud-right {
+    right: 330px;
+  }
 }
 
-.toggle-switch {
-  position: relative;
-  width: 36px;
-  height: 20px;
-  background: rgba(100, 116, 139, 0.5);
-  border-radius: 10px;
-  transition: background 0.3s ease;
-}
+@media (max-width: 900px) {
+  .arc-line {
+    width: 18px;
+    height: 180px;
+  }
 
-.toggle-switch.active {
-  background: rgba(59, 130, 246, 0.7);
-}
+  .panel {
+    gap: 8px;
+  }
 
-.toggle-slider {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 16px;
-  height: 16px;
-  background: #fff;
-  border-radius: 50%;
-  transition: transform 0.3s ease;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-}
+  .panel-row {
+    font-size: 11px;
+  }
 
-.toggle-switch.active .toggle-slider {
-  transform: translateX(16px);
+  .panel-row:last-child {
+    display: none;
+  }
+
+  .hud-left {
+    left: 12px;
+  }
+
+  .hud-right {
+    right: 12px;
+  }
 }
 </style>

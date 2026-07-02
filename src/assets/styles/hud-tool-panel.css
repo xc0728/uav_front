@@ -1,0 +1,786 @@
+/* =====================================================
+   共享分析工具面板样式 — hud-tool-panel.css
+   所有浮动分析工具面板复用此文件，不在组件内重复定义
+   ===================================================== */
+
+/* ==== 面板容器 ==== */
+.display-layout .hud-tool-panel{
+  position: absolute;
+  left: 170px;
+  top: 134px;
+  width: 320px;
+  display: flex;
+  flex-direction: column;
+  background: rgba(0, 4, 12, 0.96);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(14, 156, 255, 0.65);
+  box-shadow:
+    0 10px 40px rgba(0, 0, 0, 0.85),
+    0 0 30px rgba(14, 156, 255, 0.25),
+    inset 0 0 20px rgba(14, 156, 255, 0.15);
+  border-radius: 2px;
+  color: #ffffff;
+  box-sizing: border-box;
+  overflow: hidden;
+  font-family: "MiSansCustom", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  max-height: calc(100vh - 200px);
+}
+
+/* ==== 标题栏（蓝底白字，参考底栏二级菜单） ==== */
+.display-layout .hud-tool-header{
+  height: 44px;
+  background: linear-gradient(180deg, rgba(0, 246, 255, 0.25) 0%, rgba(0, 180, 255, 0.55) 100%);
+  border-bottom: 1px solid #00f6ff;
+  box-shadow: 0 0 12px rgba(0, 246, 255, 0.35), inset 0 0 10px rgba(0, 246, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  flex-shrink: 0;
+}
+
+.display-layout .hud-tool-title{
+  font-family: YouSheBiaoTiHei, "Microsoft YaHei", sans-serif;
+  font-size: 17px;
+  color: #ffffff;
+  letter-spacing: 1px;
+  text-shadow: 0 0 10px rgba(0, 246, 255, 0.8), 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.display-layout .hud-tool-close{
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+.display-layout .hud-tool-close:hover{
+  color: #ffffff;
+  transform: rotate(90deg);
+  filter: drop-shadow(0 0 4px rgba(0, 246, 255, 0.8));
+}
+
+/* ==== 内容区 ==== */
+.display-layout .hud-tool-body{
+  flex: 1;
+  padding: 14px 14px 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+.display-layout .hud-tool-body::-webkit-scrollbar{ width: 4px; }
+.display-layout .hud-tool-body::-webkit-scrollbar-thumb{ background: rgba(14, 156, 255, 0.3); border-radius: 2px; }
+
+/* ==== 分组标题 ==== */
+.display-layout .hud-tool-section{
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.display-layout .hud-tool-section-title{
+  font-size: 12px;
+  color: #00f6ff;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  text-shadow: 0 0 6px rgba(0, 246, 255, 0.5);
+  padding-bottom: 5px;
+  border-bottom: 1px solid rgba(14, 156, 255, 0.25);
+}
+
+/* ==== 表单行 ==== */
+.display-layout .hud-tool-row{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.display-layout .hud-tool-label{
+  font-size: 12px;
+  color: rgba(224, 239, 245, 0.75);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.display-layout .hud-tool-label-wide{
+  min-width: 80px;
+}
+
+/* ==== 输入框 ==== */
+.display-layout .hud-tool-input{
+  flex: 1;
+  background: rgba(2, 7, 18, 0.85);
+  border: 1px solid rgba(14, 156, 255, 0.35);
+  color: #ffffff;
+  padding: 5px 10px;
+  font-size: 12px;
+  outline: none;
+  transition: all 0.3s;
+  border-radius: 2px;
+  font-family: inherit;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+.display-layout .hud-tool-input::placeholder{ color: #5a7b9e; }
+.display-layout .hud-tool-input:focus{
+  border-color: #00f6ff;
+  box-shadow: 0 0 6px rgba(0, 246, 255, 0.4);
+  background: rgba(2, 7, 18, 0.95);
+}
+
+/* ==== Select ==== */
+.display-layout .hud-tool-select-wrap{
+  flex: 1;
+  position: relative;
+  min-width: 0;
+}
+.display-layout .hud-tool-select{
+  width: 100%;
+  background: linear-gradient(180deg, rgba(2, 10, 24, 0.92) 0%, rgba(4, 18, 38, 0.88) 100%);
+  border: 1px solid rgba(14, 156, 255, 0.45);
+  color: rgba(224, 239, 245, 0.92);
+  padding: 5px 28px 5px 10px;
+  font-size: 12px;
+  outline: none;
+  appearance: none;
+  cursor: pointer;
+  transition: border-color 0.25s, box-shadow 0.25s, background 0.25s;
+  border-radius: 2px;
+  font-family: inherit;
+  height: 28px;
+  line-height: 18px;
+  letter-spacing: 0.3px;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+.display-layout .hud-tool-select option{
+  background: #040f22;
+  color: rgba(224, 239, 245, 0.92);
+  padding: 4px 10px;
+}
+.display-layout .hud-tool-select optgroup{
+  background: #020b1a;
+  color: rgba(0, 246, 255, 0.7);
+  font-style: normal;
+  font-size: 11px;
+}
+.display-layout .hud-tool-select:hover{
+  border-color: rgba(14, 156, 255, 0.7);
+  background: linear-gradient(180deg, rgba(4, 14, 32, 0.95) 0%, rgba(6, 22, 46, 0.92) 100%);
+}
+.display-layout .hud-tool-select:focus{
+  border-color: #00f6ff;
+  box-shadow: 0 0 0 1px rgba(0, 246, 255, 0.2), inset 0 1px 3px rgba(0, 0, 0, 0.4);
+  background: linear-gradient(180deg, rgba(4, 14, 32, 0.98) 0%, rgba(6, 22, 46, 0.95) 100%);
+}
+/* 自定义箭头：SVG 三角 */
+.display-layout .hud-tool-select-wrap::after{
+  content: '';
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid #0e9cff;
+  pointer-events: none;
+  filter: drop-shadow(0 0 3px rgba(14, 156, 255, 0.6));
+}
+
+/* ==== 主要操作按钮 ==== */
+.display-layout .hud-tool-btn{
+  height: 30px;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s;
+  border-radius: 2px;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.display-layout .hud-tool-btn:disabled{ opacity: 0.4; cursor: not-allowed; }
+.display-layout .hud-tool-btn:focus{ outline: none; }
+
+.display-layout .hud-tool-btn-primary{
+  background: linear-gradient(180deg, rgba(0, 246, 255, 0.25), rgba(0, 180, 255, 0.5));
+  border: 1px solid #00f6ff;
+  color: #ffffff;
+  text-shadow: 0 0 5px rgba(0, 246, 255, 0.6);
+  box-shadow: 0 0 8px rgba(0, 246, 255, 0.2);
+}
+.display-layout .hud-tool-btn-primary:not(:disabled):hover{
+  background: linear-gradient(180deg, rgba(0, 246, 255, 0.4), rgba(0, 180, 255, 0.7));
+  box-shadow: 0 0 14px rgba(0, 246, 255, 0.55);
+}
+
+.display-layout .hud-tool-btn-ghost{
+  background: rgba(14, 156, 255, 0.08);
+  border: 1px solid rgba(14, 156, 255, 0.35);
+  color: #0e9cff;
+}
+.display-layout .hud-tool-btn-ghost:not(:disabled):hover{
+  background: rgba(14, 156, 255, 0.2);
+  border-color: #0e9cff;
+  color: #fff;
+  box-shadow: 0 0 8px rgba(14, 156, 255, 0.4);
+}
+
+.display-layout .hud-tool-btn-danger{
+  background: rgba(255, 71, 87, 0.08);
+  border: 1px solid rgba(255, 71, 87, 0.4);
+  color: rgba(255, 71, 87, 0.85);
+}
+.display-layout .hud-tool-btn-danger:not(:disabled):hover{
+  background: rgba(255, 71, 87, 0.2);
+  border-color: #ff4757;
+  color: #ff4757;
+  box-shadow: 0 0 8px rgba(255, 71, 87, 0.35);
+}
+
+/* 全宽按钮 */
+.display-layout .hud-tool-btn-full{
+  width: 100%;
+}
+
+/* 套用模板按钮 — 行内紧凑，带青色描边强调 */
+.display-layout .hud-tool-btn-apply{
+  background: rgba(0, 246, 255, 0.08);
+  border: 1px solid rgba(0, 246, 255, 0.5);
+  color: #00f6ff;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
+.display-layout .hud-tool-btn-apply:not(:disabled):hover{
+  background: rgba(0, 246, 255, 0.18);
+  border-color: #00f6ff;
+  box-shadow: 0 0 8px rgba(0, 246, 255, 0.35);
+  color: #ffffff;
+}
+.display-layout .hud-tool-btn-apply:disabled{ opacity: 0.35; }
+
+/* 添加因子 / 添加行 — 虚线风格，全宽 */
+.display-layout .hud-tool-btn-add{
+  width: 100%;
+  height: 28px;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 400;
+  cursor: pointer;
+  border: 1px dashed rgba(14, 156, 255, 0.5);
+  background: rgba(14, 156, 255, 0.05);
+  color: rgba(138, 180, 248, 0.85);
+  border-radius: 2px;
+  font-family: inherit;
+  letter-spacing: 0.5px;
+  transition: all 0.2s;
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  display: block;
+}
+.display-layout .hud-tool-btn-add:hover{
+  border-color: rgba(0, 246, 255, 0.8);
+  color: #00f6ff;
+  background: rgba(0, 246, 255, 0.08);
+  box-shadow: 0 0 6px rgba(0, 246, 255, 0.2);
+}
+.display-layout .hud-tool-btn-add:focus{ outline: none; }
+
+/* 拾取/点选 toggle 按钮（非激活态） */
+.display-layout .hud-tool-btn-pick{
+  background: rgba(14, 156, 255, 0.08);
+  border: 1px solid rgba(14, 156, 255, 0.35);
+  color: #8ab4f8;
+}
+.display-layout .hud-tool-btn-pick:not(:disabled):hover{
+  background: rgba(14, 156, 255, 0.2);
+  border-color: #0e9cff;
+  color: #fff;
+}
+/* 激活态 — 与 primary 一致但加闪烁感 */
+.display-layout .hud-tool-btn-pick.is-active{
+  background: linear-gradient(180deg, rgba(0, 246, 255, 0.25), rgba(0, 180, 255, 0.5));
+  border: 1px solid #00f6ff;
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(0, 246, 255, 0.4);
+  animation: pick-pulse 1.5s ease-in-out infinite;
+}
+@keyframes pick-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(0, 246, 255, 0.4); }
+  50%       { box-shadow: 0 0 16px rgba(0, 246, 255, 0.7); }
+}
+
+/* 按钮行 */
+.display-layout .hud-tool-btn-row{
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+.display-layout .hud-tool-btn-row .hud-tool-btn{ flex: 1; }
+
+/* ==== 拾取按钮（带坐标显示） ==== */
+.display-layout .hud-tool-pick-row{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.display-layout .hud-tool-pick-coords{
+  flex: 1;
+  font-size: 11px;
+  color: rgba(138, 180, 248, 0.7);
+  background: rgba(4, 16, 28, 0.5);
+  border: 1px solid rgba(14, 156, 255, 0.2);
+  padding: 5px 8px;
+  border-radius: 2px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.display-layout .hud-tool-pick-coords.has-value{ color: #00f6ff; border-color: rgba(14, 156, 255, 0.4); }
+
+/* ==== 结果 KV 表格 ==== */
+.display-layout .hud-tool-kv{
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  border: 1px solid rgba(14, 156, 255, 0.25);
+  border-radius: 2px;
+  overflow: hidden;
+  background: rgba(14, 156, 255, 0.08);
+}
+.display-layout .hud-tool-kv-3{ grid-template-columns: repeat(3, 1fr); }
+.display-layout .hud-tool-kv-full{ grid-template-columns: 1fr; }
+
+.display-layout .hud-tool-kv-item{
+  background: rgba(4, 16, 28, 0.6);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.display-layout .hud-tool-kv-label{
+  font-size: 11px;
+  color: rgba(138, 180, 248, 0.65);
+}
+.display-layout .hud-tool-kv-value{
+  font-size: 14px;
+  font-weight: bold;
+  color: #00f6ff;
+  text-shadow: 0 0 6px rgba(0, 246, 255, 0.4);
+  font-family: 'MiSansCustom', sans-serif;
+}
+.display-layout .hud-tool-kv-value.amber{
+  color: #ffaa00;
+  text-shadow: 0 0 6px rgba(255, 170, 0, 0.4);
+}
+.display-layout .hud-tool-kv-value.success{
+  color: #2ed573;
+  text-shadow: 0 0 6px rgba(46, 213, 115, 0.4);
+}
+.display-layout .hud-tool-kv-value.danger{
+  color: #ff4757;
+  text-shadow: 0 0 6px rgba(255, 71, 87, 0.4);
+}
+.display-layout .hud-tool-kv-value.white{
+  color: rgba(224, 239, 245, 0.9);
+  text-shadow: none;
+  font-size: 12px;
+  font-weight: normal;
+}
+
+/* ==== 图例色块行 ==== */
+.display-layout .hud-tool-legend-row{
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: rgba(224, 239, 245, 0.8);
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(14, 156, 255, 0.1);
+}
+.display-layout .hud-tool-legend-row:last-child{ border-bottom: none; }
+
+.display-layout .hud-tool-legend-dot{
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.display-layout .hud-tool-legend-label{ flex: 1; }
+.display-layout .hud-tool-legend-value{
+  font-size: 11px;
+  color: rgba(138, 180, 248, 0.65);
+  flex-shrink: 0;
+}
+
+/* ==== 通知/提示条 ==== */
+.display-layout .hud-tool-tip{
+  font-size: 11px;
+  color: rgba(138, 180, 248, 0.55);
+  padding: 4px 0;
+  line-height: 1.5;
+}
+
+.display-layout .hud-tool-verdict{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 2px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.display-layout .hud-tool-verdict.success{
+  background: rgba(46, 213, 115, 0.1);
+  border: 1px solid rgba(46, 213, 115, 0.4);
+  color: #2ed573;
+}
+.display-layout .hud-tool-verdict.danger{
+  background: rgba(255, 71, 87, 0.1);
+  border: 1px solid rgba(255, 71, 87, 0.4);
+  color: #ff4757;
+}
+.display-layout .hud-tool-verdict.info{
+  background: rgba(14, 156, 255, 0.08);
+  border: 1px solid rgba(14, 156, 255, 0.3);
+  color: #8ab4f8;
+}
+
+/* ==== 滑块行 ==== */
+.display-layout .hud-tool-slider-row{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+.display-layout .hud-tool-slider-val{
+  font-size: 12px;
+  color: #00f6ff;
+  min-width: 34px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* ==== Element Plus 深层覆盖（在使用 el-* 时生效）==== */
+.display-layout .hud-tool-body .el-input-number{
+  flex: 1;
+  min-width: 0;
+  --el-input-bg-color: rgba(2, 7, 18, 0.85);
+  --el-input-border-color: rgba(14, 156, 255, 0.35);
+  --el-input-text-color: #ffffff;
+  --el-input-focus-border-color: #00f6ff;
+  --el-fill-color-blank: rgba(2, 7, 18, 0.85);
+  --el-text-color-regular: #ffffff;
+}
+.display-layout .hud-tool-body .el-input-number .el-input__wrapper{
+  background: rgba(2, 7, 18, 0.85) !important;
+  box-shadow: 0 0 0 1px rgba(14, 156, 255, 0.35) !important;
+  border-radius: 2px;
+}
+.display-layout .hud-tool-body .el-input-number .el-input__wrapper:hover,
+.display-layout .hud-tool-body .el-input-number .el-input__wrapper.is-focus{
+  box-shadow: 0 0 0 1px #00f6ff !important;
+}
+.display-layout .hud-tool-body .el-input-number .el-input__inner{ color: #ffffff; font-size: 12px; }
+.display-layout .hud-tool-body .el-input-number .el-input-number__decrease,
+.display-layout .hud-tool-body .el-input-number .el-input-number__increase{
+  background: rgba(14, 156, 255, 0.1);
+  border-color: rgba(14, 156, 255, 0.35);
+  color: #8ab4f8;
+}
+.display-layout .hud-tool-body .el-input-number .el-input-number__decrease:hover,
+.display-layout .hud-tool-body .el-input-number .el-input-number__increase:hover{
+  color: #00f6ff;
+  background: rgba(14, 156, 255, 0.2);
+}
+
+.display-layout .hud-tool-body .el-slider{
+  flex: 1;
+  min-width: 0;
+}
+.display-layout .hud-tool-body .el-slider__runway{
+  background: rgba(14, 156, 255, 0.2);
+  height: 3px;
+}
+.display-layout .hud-tool-body .el-slider__bar{ background: #00f6ff; }
+.display-layout .hud-tool-body .el-slider__button{
+  border-color: #00f6ff;
+  background: #001a2e;
+  width: 12px;
+  height: 12px;
+}
+
+.display-layout .hud-tool-body .el-switch{
+  --el-switch-on-color: #00b4ff;
+  --el-switch-off-color: rgba(14, 156, 255, 0.2);
+}
+
+.display-layout .hud-tool-body .el-checkbox{
+  --el-checkbox-checked-bg-color: #00b4ff;
+  --el-checkbox-checked-border-color: #00f6ff;
+  --el-checkbox-input-border-color: rgba(14, 156, 255, 0.5);
+  --el-checkbox-text-color: rgba(224, 239, 245, 0.85);
+  --el-checkbox-font-size: 12px;
+}
+.display-layout .hud-tool-body .el-checkbox__inner{ border-radius: 1px; }
+
+.display-layout .hud-tool-body .el-radio-button__inner{
+  background: rgba(2, 7, 18, 0.85);
+  border-color: rgba(14, 156, 255, 0.35);
+  color: #8ab4f8;
+  font-size: 12px;
+  padding: 5px 10px;
+}
+.display-layout .hud-tool-body .el-radio-button.is-active .el-radio-button__inner{
+  background: rgba(0, 180, 255, 0.3);
+  border-color: #00f6ff;
+  color: #ffffff;
+  box-shadow: 0 0 8px rgba(0, 246, 255, 0.3);
+}
+
+/* date-picker input */
+.display-layout .hud-tool-body .el-date-editor .el-input__wrapper{
+  background: rgba(2, 7, 18, 0.85) !important;
+  box-shadow: 0 0 0 1px rgba(14, 156, 255, 0.35) !important;
+  border-radius: 2px;
+}
+.display-layout .hud-tool-body .el-date-editor .el-input__inner{ color: #ffffff; font-size: 12px; }
+
+/* =====================================================
+   共享 cp-* / eval-* 工具类（合规审查、综合评分、地块比选等复用）
+   ===================================================== */
+
+/* 分组标题支持右侧按钮/徽标（flex 布局） */
+.display-layout .hud-tool-section-title{
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* ==== 空态提示 ==== */
+.display-layout .cp-layer-empty{
+  padding: 10px 14px;
+  text-align: center;
+  font-size: 12px;
+  color: rgba(138, 180, 248, 0.45);
+  line-height: 1.5;
+}
+
+/* ==== 图层行 ==== */
+.display-layout .cp-layer-list{
+  border: 1px solid rgba(14, 156, 255, 0.2);
+  border-radius: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+  background: rgba(4, 16, 28, 0.4);
+}
+.display-layout .cp-layer-row{
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(14, 156, 255, 0.1);
+  font-size: 12px;
+}
+.display-layout .cp-layer-row:last-child{ border-bottom: none; }
+.display-layout .cp-geom-tag{
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  background: rgba(14, 156, 255, 0.15);
+  border: 1px solid rgba(14, 156, 255, 0.3);
+  color: #8ab4f8;
+}
+.display-layout .cp-layer-name{
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(224, 239, 245, 0.85);
+}
+
+/* ==== 模式切换按钮组（排除/包含） ==== */
+.display-layout .cp-mode-btns{
+  display: flex;
+  flex-shrink: 0;
+}
+.display-layout .cp-mode-btn{
+  font-size: 11px;
+  padding: 2px 7px;
+  background: transparent;
+  border: 1px solid rgba(14, 156, 255, 0.3);
+  color: rgba(138, 180, 248, 0.6);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.display-layout .cp-mode-btn:first-child{ border-radius: 2px 0 0 2px; }
+.display-layout .cp-mode-btn:last-child{ border-radius: 0 2px 2px 0; border-left: none; }
+.display-layout .cp-mode-btn.active,
+.display-layout .cp-mode-btn.is-active{
+  background: rgba(0, 246, 255, 0.15);
+  border-color: #00f6ff;
+  color: #00f6ff;
+}
+
+/* ==== 筛选按钮（漏斗图标） ==== */
+.display-layout .cp-filter-btn{
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: rgba(138, 180, 248, 0.4);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 3px;
+  transition: color 0.15s;
+}
+.display-layout .cp-filter-btn.has-filter{ color: #ffaa00; }
+
+/* ==== 删除按钮（×） ==== */
+.display-layout .cp-remove-btn{
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: rgba(255, 71, 87, 0.5);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 3px;
+  transition: color 0.15s;
+  line-height: 1;
+}
+.display-layout .cp-remove-btn:hover{ color: #ff4757; }
+
+/* ==== 评分因子行 ==== */
+.display-layout .eval-factor-list{
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.display-layout .eval-factor-row{
+  border: 1px solid rgba(14, 156, 255, 0.2);
+  border-radius: 2px;
+  padding: 6px;
+  margin-bottom: 6px;
+  background: rgba(4, 16, 28, 0.5);
+}
+.display-layout .eval-factor-top{
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.display-layout .eval-factor-mid,
+.display-layout .eval-factor-bot{
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+/* 权重输入框（固定宽） */
+.display-layout .eval-weight-input{
+  width: 54px !important;
+  flex: none !important;
+  text-align: center;
+  padding: 5px 4px !important;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.display-layout .eval-weight-input::-webkit-outer-spin-button,
+.display-layout .eval-weight-input::-webkit-inner-spin-button{
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* 方向切换按钮（↑/↓） */
+.display-layout .eval-dir-btn{
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid rgba(255, 170, 0, 0.35);
+  color: #ffaa00;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 2px;
+  padding: 0;
+  transition: all 0.15s;
+}
+.display-layout .eval-dir-btn:hover{
+  background: rgba(255, 170, 0, 0.15);
+  border-color: #ffaa00;
+}
+
+/* 内联文字按钮（平均、AI检查） */
+.display-layout .eval-link-btn{
+  background: transparent;
+  border: none;
+  color: #0e9cff;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 4px;
+  text-decoration: underline;
+  font-family: inherit;
+  transition: color 0.15s;
+  flex-shrink: 0;
+}
+.display-layout .eval-link-btn:hover{ color: #00f6ff; }
+.display-layout .eval-link-btn:disabled{ color: rgba(14, 156, 255, 0.35); cursor: not-allowed; text-decoration: none; }
+
+/* 权重总和标签（右侧小字） */
+.display-layout .eval-weight-sum{
+  font-size: 11px;
+  color: rgba(138, 180, 248, 0.55);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.display-layout .eval-weight-sum.is-good{ color: #2ed573; }
+
+/* 因子 AI 检查结果 */
+.display-layout .eval-check-result{
+  font-size: 11px;
+  margin-top: 4px;
+  padding: 2px 6px;
+  border-radius: 2px;
+  line-height: 1.4;
+  color: rgba(138, 180, 248, 0.65);
+}
+.display-layout .eval-check-result.is-ok{ color: #95de64; background: rgba(82, 196, 26, 0.15); }
+.display-layout .eval-check-result.is-warning{ color: #ffd666; background: rgba(250, 173, 20, 0.15); }
+.display-layout .eval-check-result.is-error{ color: #ff7875; background: rgba(245, 34, 45, 0.15); }
+
+/* ==== AI 推荐消息气泡 ==== */
+.display-layout .eval-ai-msgs{
+  max-height: 80px;
+  overflow-y: auto;
+  margin-bottom: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.display-layout .eval-ai-user{ color: #6fb8ff; }
+.display-layout .eval-ai-ai{ color: rgba(224, 239, 245, 0.75); }

@@ -18,6 +18,10 @@ const props = defineProps({
     type: String,
     default: 'both'
   },
+  displayMode: {
+    type: String,
+    default: 'panel'
+  },
   theme: {
     type: String,
     default: 'white'
@@ -157,6 +161,7 @@ function openCalcPanel(service, funcName) {
   activeServiceIcon.value = service.icon
   activeFunctionName.value = funcName
   activeServiceId.value = service.id
+  isControlPanelCollapsed.value = false
   panelMode.value = 'calc'
 }
 
@@ -344,7 +349,114 @@ defineExpose({
 </script>
 
 <template>
-  <div class="service-panel-container" :class="`theme-${props.theme}`">
+  <div class="service-panel-container display-layout" :class="[`theme-${props.theme}`, { 'toolbar-mode': props.displayMode === 'toolbar' }]">
+    <template v-if="props.displayMode === 'toolbar'">
+      <div
+        v-if="panelMode === 'calc'"
+        class="tool-modal-overlay"
+        @click.self="closeCalcPanel"
+      >
+        <section class="hud-tool-panel toolbar-calc-panel" role="dialog" aria-modal="true" :aria-label="activeFunctionName">
+          <div class="hud-tool-header">
+            <span class="hud-tool-title">{{ activeFunctionName }}</span>
+            <button
+              type="button"
+              class="hud-tool-close"
+              @click="closeCalcPanel"
+              title="关闭"
+              aria-label="关闭"
+            >
+              <X :size="18" />
+            </button>
+          </div>
+
+          <div class="hud-tool-body toolbar-calc-body">
+            <div class="calc-view">
+            <component
+              :is="activeComponent"
+              ref="activeComponentRef"
+              :service-name="activeServiceName"
+              :function-name="activeFunctionName"
+              :theme="props.theme"
+              @close="closeCalcPanel"
+              @show-point="handleShowPoint"
+              @show-grid="handleShowGrid"
+              @show-line="handleShowLine"
+              @show-polygon="handleShowPolygon"
+              @get-view-bounds="handleGetViewBounds"
+            />
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <nav class="grid-tool-dock" aria-label="网格化管理工具栏">
+        <svg class="grid-tool-dock-svg" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 1100 86" preserveAspectRatio="none">
+          <defs>
+            <filter id="gridToolDockGlow" x="-10%" y="-30%" width="120%" height="160%">
+              <feGaussianBlur stdDeviation="4" result="blur" />
+              <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+            </filter>
+            <linearGradient id="gridToolLineGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="rgba(14,156,255,0.05)" />
+              <stop offset="20%" stop-color="#0E9CFF" />
+              <stop offset="50%" stop-color="#00f6ff" />
+              <stop offset="80%" stop-color="#0E9CFF" />
+              <stop offset="100%" stop-color="rgba(14,156,255,0.05)" />
+            </linearGradient>
+            <linearGradient id="gridToolBgGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stop-color="rgba(4,16,32,0.58)" />
+              <stop offset="100%" stop-color="rgba(1,5,12,0.74)" />
+            </linearGradient>
+          </defs>
+          <path d="M 35,86 L 130,18 L 970,18 L 1065,86 Z" fill="url(#gridToolBgGradient)" />
+          <path d="M 35,86 L 130,18 L 970,18 L 1065,86" stroke="url(#gridToolLineGradient)" stroke-width="1.8" filter="url(#gridToolDockGlow)" />
+          <path d="M 48,83 L 134,23 L 966,23 L 1052,83" stroke="rgba(0,246,255,0.3)" stroke-width="1" />
+        </svg>
+
+        <div class="grid-tool-links">
+          <template
+            v-for="(s, index) in services"
+            :key="s.id"
+          >
+          <div class="grid-tool-wrap">
+            <div
+              v-show="openServiceId === s.id"
+              class="grid-tool-menu"
+            >
+              <div class="grid-tool-menu-header">{{ s.shortName }}</div>
+              <button
+                v-for="fn in s.functions"
+                :key="fn"
+                type="button"
+                class="grid-tool-menu-item"
+                :class="{ 'is-active': activeServiceId === s.id && activeFunctionName === fn }"
+                @click="openCalcPanel(s, fn); openServiceId = null"
+              >
+                {{ fn }}
+              </button>
+            </div>
+
+            <button
+              type="button"
+              class="grid-tool-button"
+              :class="{ 'is-active': openServiceId === s.id || activeServiceId === s.id }"
+              @click="toggleServiceDropdown(s.id)"
+            >
+              <span>{{ s.shortName }}</span>
+            </button>
+          </div>
+          <span v-if="index < services.length - 1" class="grid-tool-sep">
+            <svg viewBox="0 0 142 141">
+              <path d="M72,62C72,62,80,62,80,62C80,62,70,79,70,79C70,79,62,79,62,79C62,79,72,62,72,62Z" />
+            </svg>
+          </span>
+          </template>
+        </div>
+      </nav>
+    </template>
+
+    <template v-else>
     <!-- 左侧控制面板 -->
     <div class="control-panel" :class="{ collapsed: isControlPanelCollapsed }">
         <!-- 面板头部 -->
@@ -501,6 +613,7 @@ defineExpose({
           </template>
         </div>
       </div>
+    </template>
   </div>
 </template>
 
@@ -729,6 +842,309 @@ defineExpose({
 /* 所有子元素启用 pointer-events */
 .service-panel-container > * {
   pointer-events: auto;
+}
+
+.service-panel-container.toolbar-mode {
+  position: fixed;
+  inset: 0;
+  z-index: 82;
+  pointer-events: none;
+}
+
+.toolbar-mode .tool-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 92;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 96px 24px 112px;
+  background: rgba(0, 4, 12, 0.18);
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+
+.toolbar-mode .toolbar-calc-panel {
+  position: relative !important;
+  left: auto !important;
+  top: auto !important;
+  bottom: auto !important;
+  width: min(640px, calc(100vw - 48px)) !important;
+  max-height: min(720px, calc(100vh - 208px)) !important;
+  z-index: 93;
+  animation: toolbar-calc-pop 0.18s ease-out;
+}
+
+@keyframes toolbar-calc-pop {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.grid-tool-dock {
+  position: fixed;
+  left: 50%;
+  bottom: 0;
+  width: min(1280px, calc(100vw - 24px));
+  height: 86px;
+  z-index: 85;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 13px;
+  pointer-events: auto;
+  transform: translateX(-50%);
+  user-select: none;
+}
+
+.grid-tool-dock-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  filter: drop-shadow(0 -2px 10px rgba(14, 156, 255, 0.42));
+  pointer-events: none;
+}
+
+.grid-tool-links {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: bold;
+}
+
+.grid-tool-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.grid-tool-button {
+  position: relative;
+  min-width: auto;
+  height: auto;
+  padding: 0 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  outline: none;
+  background: linear-gradient(104deg, #c6e4fb 3%, #ffffff 20%, #c6e4fb 38%, #ffffff 56%, #c6e4fb 74%, #ffffff 92%), #ffffff;
+  background-clip: text;
+  color: transparent;
+  cursor: pointer;
+  font-family: 'YouSheBiaoTiHei', 'Microsoft YaHei', sans-serif;
+  font-size: 19px;
+  font-weight: normal;
+  line-height: normal;
+  letter-spacing: 0;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  transition: 0.3s;
+  white-space: nowrap;
+}
+
+.grid-tool-button::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 150px;
+  height: 64px;
+  z-index: -1;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(0.7);
+  background:
+    linear-gradient(90deg, rgba(217, 217, 217, 0) -3%, rgba(217, 217, 217, 0.35) 49%, rgba(217, 217, 217, 0) 100%) no-repeat 40px 11px / 83px 1px,
+    linear-gradient(90deg, rgba(217, 217, 217, 0) -3%, rgba(217, 217, 217, 0.43) 30%, rgba(217, 217, 217, 0.8) 49%, rgba(217, 217, 217, 0.45) 72%, rgba(217, 217, 217, 0) 100%) no-repeat 40px 54px / 70px 1px,
+    radial-gradient(27% 68% at 42% 90%, rgba(58, 130, 205, 0.05) 0%, rgba(58, 130, 205, 0) 100%) no-repeat 20px 0 / 124px 64px,
+    linear-gradient(270deg, rgba(36, 86, 142, 0) 0%, rgba(36, 86, 142, 0.15) 55%, rgba(36, 86, 142, 0) 99%) no-repeat 20px 0 / 124px 64px,
+    radial-gradient(23% 88% at 46% 100%, rgba(36, 87, 141, 0.25) 0%, rgba(36, 87, 141, 0) 100%) no-repeat 0 10px / 150px 45px,
+    linear-gradient(90deg, rgba(39, 85, 143, 0) 7%, rgba(39, 85, 143, 0.08) 16%, rgba(37, 86, 141, 0.15) 45%, rgba(34, 86, 144, 0.08) 75%, rgba(34, 86, 144, 0) 100%) no-repeat 0 10px / 150px 45px;
+  opacity: 1;
+}
+
+.grid-tool-button:hover,
+.grid-tool-button.is-active {
+  text-shadow: 0 0 8px rgba(0, 246, 255, 0.5);
+  -webkit-text-fill-color: #00f6ff;
+}
+
+.grid-tool-button.is-active {
+  background: linear-gradient(180deg, #ffffff 8%, #fdcd6e 21%, #e89002 73%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 8px rgba(232, 144, 2, 0.35);
+}
+
+.grid-tool-button.is-active:hover {
+  background: linear-gradient(180deg, #ffffff 8%, #fdcd6e 21%, #e89002 73%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 8px rgba(232, 144, 2, 0.35);
+}
+
+.grid-tool-sep {
+  position: relative;
+  width: 12px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.grid-tool-sep svg {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 118px;
+  height: 118px;
+  transform: translate(-50%, -50%) scale(0.58);
+}
+
+.grid-tool-sep path {
+  fill: #e8f6ff;
+  filter: drop-shadow(0 0 8px rgba(129, 189, 255, 0.85));
+}
+
+.grid-tool-menu {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 18px);
+  width: 218px;
+  display: flex;
+  flex-direction: column;
+  padding: 0 0 4px;
+  background: rgba(0, 4, 12, 0.95);
+  border: 1px solid rgba(14, 156, 255, 0.6);
+  border-radius: 3px;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.85),
+    0 0 15px rgba(14, 156, 255, 0.25),
+    inset 0 0 12px rgba(14, 156, 255, 0.15);
+  backdrop-filter: blur(10px);
+  transform: translateX(-50%);
+  animation: grid-tool-slide-up 0.22s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+@keyframes grid-tool-slide-up {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+.grid-tool-menu::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  width: 10px;
+  height: 6px;
+  background: rgba(14, 156, 255, 0.6);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  transform: translateX(-50%);
+}
+
+.grid-tool-menu-header {
+  height: 34px;
+  margin-bottom: 4px;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  background: linear-gradient(90deg, #051833 0%, #0b376c 65%, #094791 100%);
+  border-bottom: 1.5px solid rgba(0, 246, 255, 0.35);
+  border-radius: 2px 2px 0 0;
+  color: #ffffff;
+  font-family: 'YouSheBiaoTiHei', 'Microsoft YaHei', sans-serif;
+  font-size: 14px;
+  letter-spacing: 0.5px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 5px rgba(0, 246, 255, 0.6);
+  white-space: nowrap;
+}
+
+.grid-tool-menu-item {
+  position: relative;
+  min-height: 36px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  border: none;
+  border-bottom: 1px solid rgba(14, 156, 255, 0.12);
+  background: transparent;
+  color: rgba(224, 239, 245, 0.85);
+  cursor: pointer;
+  font-family: 'MiSans', 'Microsoft YaHei', sans-serif;
+  font-size: 13px;
+  text-align: left;
+  transition: all 0.15s;
+}
+
+.grid-tool-menu-item:last-child {
+  border-bottom: none;
+}
+
+.grid-tool-menu-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 2px;
+  height: 0;
+  background: #00f6ff;
+  transition: height 0.15s;
+  transform: translateY(-50%);
+}
+
+.grid-tool-menu-item:hover {
+  padding-left: 18px;
+  background: rgba(14, 156, 255, 0.12);
+  color: #ffffff;
+}
+
+.grid-tool-menu-item:hover::before {
+  height: 60%;
+}
+
+.grid-tool-menu-item.is-active {
+  background: rgba(0, 246, 255, 0.08);
+  color: #00f6ff;
+}
+
+@media (max-width: 1420px) {
+  .grid-tool-dock {
+    width: min(1160px, calc(100vw - 24px));
+  }
+
+  .grid-tool-links {
+    gap: 9px;
+  }
+
+  .grid-tool-button {
+    font-size: 17px;
+  }
+
+  .grid-tool-sep {
+    width: 9px;
+  }
 }
 
 /* ==================== 左侧控制面板 - 奶白清新 ==================== */
@@ -1557,6 +1973,183 @@ defineExpose({
 
 .calc-content :deep(.form-actions .btn) {
   flex: 1;
+}
+
+.toolbar-mode .toolbar-calc-body {
+  padding: 14px 14px 16px;
+}
+
+.toolbar-mode .toolbar-calc-body .calc-view {
+  width: 100%;
+  max-height: calc(min(720px, calc(100vh - 208px)) - 74px);
+  padding: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.toolbar-mode .toolbar-calc-body .calc-view::-webkit-scrollbar {
+  width: 4px;
+}
+
+.toolbar-mode .toolbar-calc-body .calc-view::-webkit-scrollbar-thumb {
+  background: rgba(14, 156, 255, 0.3);
+  border-radius: 2px;
+}
+
+.toolbar-mode .toolbar-calc-body :deep(.form-section),
+.toolbar-mode .toolbar-calc-body :deep(.form-group),
+.toolbar-mode .toolbar-calc-body :deep(.point-input-section),
+.toolbar-mode .toolbar-calc-body :deep(.coord-input-group),
+.toolbar-mode .toolbar-calc-body :deep(.rule-card),
+.toolbar-mode .toolbar-calc-body :deep(.store-section),
+.toolbar-mode .toolbar-calc-body :deep(.result-box),
+.toolbar-mode .toolbar-calc-body :deep(.result-section),
+.toolbar-mode .toolbar-calc-body :deep(.detail-card),
+.toolbar-mode .toolbar-calc-body :deep(.info-card),
+.toolbar-mode .toolbar-calc-body :deep(.point-item),
+.toolbar-mode .toolbar-calc-body :deep(.empty-state),
+.toolbar-mode .toolbar-calc-body :deep(.hint-box),
+.toolbar-mode .toolbar-calc-body :deep(.tip-box) {
+  background: rgba(4, 16, 28, 0.58) !important;
+  border: 1px solid rgba(14, 156, 255, 0.24) !important;
+  border-radius: 2px !important;
+  box-shadow: inset 0 0 12px rgba(14, 156, 255, 0.08) !important;
+}
+
+.toolbar-mode .toolbar-calc-body :deep(.form-section),
+.toolbar-mode .toolbar-calc-body :deep(.form-group),
+.toolbar-mode .toolbar-calc-body :deep(.rule-card),
+.toolbar-mode .toolbar-calc-body :deep(.store-section),
+.toolbar-mode .toolbar-calc-body :deep(.result-section) {
+  padding: 12px !important;
+}
+
+.toolbar-mode .toolbar-calc-body :deep(.group-title),
+.toolbar-mode .toolbar-calc-body :deep(.group-title-row .group-title),
+.toolbar-mode .toolbar-calc-body :deep(.form-section-title),
+.toolbar-mode .toolbar-calc-body :deep(.form-title),
+.toolbar-mode .toolbar-calc-body :deep(.result-section-title),
+.toolbar-mode .toolbar-calc-body :deep(.panel-title),
+.toolbar-mode .toolbar-calc-body :deep(.rule-label) {
+  color: #00f6ff !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.5px !important;
+  text-shadow: 0 0 6px rgba(0, 246, 255, 0.45) !important;
+  border-bottom-color: rgba(14, 156, 255, 0.25) !important;
+}
+
+.toolbar-mode .toolbar-calc-body :deep(label),
+.toolbar-mode .toolbar-calc-body :deep(.form-label),
+.toolbar-mode .toolbar-calc-body :deep(.param-label),
+.toolbar-mode .toolbar-calc-body :deep(.coord-label),
+.toolbar-mode .toolbar-calc-body :deep(.height-label),
+.toolbar-mode .toolbar-calc-body :deep(.rule-param-label),
+.toolbar-mode .toolbar-calc-body :deep(.rule-param-sm-label),
+.toolbar-mode .toolbar-calc-body :deep(.checkbox-text),
+.toolbar-mode .toolbar-calc-body :deep(.result-label),
+.toolbar-mode .toolbar-calc-body :deep(.detail-label),
+.toolbar-mode .toolbar-calc-body :deep(.store-info-label),
+.toolbar-mode .toolbar-calc-body :deep(.tip-text),
+.toolbar-mode .toolbar-calc-body :deep(.help-text),
+.toolbar-mode .toolbar-calc-body :deep(.field-tip),
+.toolbar-mode .toolbar-calc-body :deep(.empty-tip) {
+  color: rgba(224, 239, 245, 0.75) !important;
+  font-size: 12px !important;
+}
+
+.toolbar-mode .toolbar-calc-body :deep(input:not([type="checkbox"]):not([type="radio"])),
+.toolbar-mode .toolbar-calc-body :deep(select),
+.toolbar-mode .toolbar-calc-body :deep(textarea),
+.toolbar-mode .toolbar-calc-body :deep(.form-input),
+.toolbar-mode .toolbar-calc-body :deep(.form-select),
+.toolbar-mode .toolbar-calc-body :deep(.param-input),
+.toolbar-mode .toolbar-calc-body :deep(.param-select),
+.toolbar-mode .toolbar-calc-body :deep(.param-select-sm),
+.toolbar-mode .toolbar-calc-body :deep(.field-input),
+.toolbar-mode .toolbar-calc-body :deep(.field-select) {
+  background: rgba(2, 7, 18, 0.85) !important;
+  border: 1px solid rgba(14, 156, 255, 0.35) !important;
+  border-radius: 2px !important;
+  color: #ffffff !important;
+  box-shadow: none !important;
+  font-family: 'MiSans', 'MiSansCustom', 'Microsoft YaHei', sans-serif !important;
+}
+
+.toolbar-mode .toolbar-calc-body :deep(input:not([type="checkbox"]):not([type="radio"]):focus),
+.toolbar-mode .toolbar-calc-body :deep(select:focus),
+.toolbar-mode .toolbar-calc-body :deep(textarea:focus) {
+  border-color: #00f6ff !important;
+  box-shadow: 0 0 6px rgba(0, 246, 255, 0.4) !important;
+  outline: none !important;
+}
+
+.toolbar-mode .toolbar-calc-body :deep(button:not(.hud-tool-close):not(.modal-close):not(.dialog-close)) {
+  border-radius: 2px !important;
+  font-family: 'MiSans', 'MiSansCustom', 'Microsoft YaHei', sans-serif !important;
+  transition: all 0.2s ease !important;
+}
+
+.toolbar-mode .toolbar-calc-body :deep(.btn-query),
+.toolbar-mode .toolbar-calc-body :deep(.btn-primary),
+.toolbar-mode .toolbar-calc-body :deep(.btn-submit),
+.toolbar-mode .toolbar-calc-body :deep(.btn-dialog.primary),
+.toolbar-mode .toolbar-calc-body :deep(.modal-btn.primary) {
+  background: linear-gradient(180deg, rgba(0, 246, 255, 0.25), rgba(0, 180, 255, 0.5)) !important;
+  border: 1px solid #00f6ff !important;
+  color: #ffffff !important;
+  text-shadow: 0 0 5px rgba(0, 246, 255, 0.6) !important;
+  box-shadow: 0 0 8px rgba(0, 246, 255, 0.2) !important;
+}
+
+.toolbar-mode .toolbar-calc-body :deep(.btn-query:hover:not(:disabled)),
+.toolbar-mode .toolbar-calc-body :deep(.btn-primary:hover:not(:disabled)),
+.toolbar-mode .toolbar-calc-body :deep(.btn-submit:hover:not(:disabled)),
+.toolbar-mode .toolbar-calc-body :deep(.btn-dialog.primary:hover:not(:disabled)),
+.toolbar-mode .toolbar-calc-body :deep(.modal-btn.primary:hover:not(:disabled)) {
+  background: linear-gradient(180deg, rgba(0, 246, 255, 0.4), rgba(0, 180, 255, 0.7)) !important;
+  box-shadow: 0 0 14px rgba(0, 246, 255, 0.55) !important;
+}
+
+.toolbar-mode .toolbar-calc-body :deep(.btn-clear),
+.toolbar-mode .toolbar-calc-body :deep(.btn-secondary),
+.toolbar-mode .toolbar-calc-body :deep(.btn-link-clear),
+.toolbar-mode .toolbar-calc-body :deep(.btn-dialog.cancel),
+.toolbar-mode .toolbar-calc-body :deep(.modal-btn.secondary) {
+  background: rgba(14, 156, 255, 0.08) !important;
+  border: 1px solid rgba(14, 156, 255, 0.35) !important;
+  color: #8ab4f8 !important;
+  box-shadow: none !important;
+}
+
+.toolbar-mode .toolbar-calc-body :deep(.btn-clear:hover:not(:disabled)),
+.toolbar-mode .toolbar-calc-body :deep(.btn-secondary:hover:not(:disabled)),
+.toolbar-mode .toolbar-calc-body :deep(.btn-link-clear:hover:not(:disabled)),
+.toolbar-mode .toolbar-calc-body :deep(.btn-dialog.cancel:hover:not(:disabled)),
+.toolbar-mode .toolbar-calc-body :deep(.modal-btn.secondary:hover:not(:disabled)) {
+  background: rgba(14, 156, 255, 0.2) !important;
+  border-color: #0e9cff !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 8px rgba(14, 156, 255, 0.4) !important;
+}
+
+.toolbar-mode .toolbar-calc-body :deep(.btn-point-delete),
+.toolbar-mode .toolbar-calc-body :deep(.btn-delete),
+.toolbar-mode .toolbar-calc-body :deep(.point-delete) {
+  background: rgba(255, 71, 87, 0.08) !important;
+  border: 1px solid rgba(255, 71, 87, 0.4) !important;
+  color: rgba(255, 71, 87, 0.85) !important;
+}
+
+.toolbar-mode .toolbar-calc-body :deep(.result-num),
+.toolbar-mode .toolbar-calc-body :deep(.result-v),
+.toolbar-mode .toolbar-calc-body :deep(.detail-value),
+.toolbar-mode .toolbar-calc-body :deep(.coord-value),
+.toolbar-mode .toolbar-calc-body :deep(.height-value),
+.toolbar-mode .toolbar-calc-body :deep(.store-info-value),
+.toolbar-mode .toolbar-calc-body :deep(.result-status.success) {
+  color: #00f6ff !important;
+  text-shadow: 0 0 6px rgba(0, 246, 255, 0.4) !important;
 }
 
 /* ==================== 过渡动画 ==================== */

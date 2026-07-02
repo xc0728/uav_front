@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { MapPin } from 'lucide-vue-next'
+import { Settings, UserRound, X } from 'lucide-vue-next'
 import ServicePanel from './data-screen/ServicePanel.vue'
 import InfoManagementPanel from './data-screen/functions/InfoManagementPanel.vue'
 import CesiumMap from './data-screen/CesiumMap.vue'
@@ -32,9 +32,10 @@ const pendingEventVisualization = ref(null)
 const pendingAnomalyEvents = ref([])
 const visibleNoFlyZones = ref({})
 
-const currentPage = ref('main') // 'main' | 'monitoring' | 'info'
+const currentPage = ref('main') // 'main' | 'info'
 const currentTheme = ref('white')
-const isThemeMenuOpen = ref(false)
+const isThemeDrawerOpen = ref(false)
+const showHudStatus = ref(true)
 
 const themeOptions = [
   { value: 'white', label: '天空白' },
@@ -43,6 +44,16 @@ const themeOptions = [
 ]
 
 const activeTheme = computed(() => THEME_CONFIG[currentTheme.value] || THEME_CONFIG.white)
+function exposedValue(value) {
+  if (value && typeof value === 'object' && 'value' in value) return value.value
+  return value
+}
+
+const layerSwitchState = computed(() => ({
+  hud: showHudStatus.value,
+  buildings: Boolean(exposedValue(cesiumMapRef.value?.showBuildings)),
+  tiles3d: Boolean(exposedValue(cesiumMapRef.value?.show3DTiles)),
+}))
 
 // 存储所有已开启监控的航线数据
 const monitoredRoutes = ref({})
@@ -53,21 +64,11 @@ const monitoredRouteIds = computed(() => Object.keys(monitoredRoutes.value))
 // 监控航线数据
 const monitoredRoutesData = computed(() => Object.values(monitoredRoutes.value))
 
-const isOnline = ref(navigator.onLine)
-let onlineTimer = null
-
-const networkStatus = computed(() => {
-  return isOnline.value ? '运行中' : '网络未连接'
-})
-
-const networkStatusClass = computed(() => {
-  return isOnline.value ? 'online' : 'offline'
-})
-
 const timeText = computed(() => {
   const d = now.value
   const pad = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  const weekday = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+  return `${weekday[d.getDay()]} ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())} : ${pad(d.getMinutes())} : ${pad(d.getSeconds())}`
 })
 
 function handleMapPointSelected(payload) {
@@ -133,10 +134,6 @@ onMounted(() => {
   clockTimer = window.setInterval(() => {
     now.value = new Date()
   }, 1000)
-
-  isOnline.value = navigator.onLine
-  window.addEventListener('online', handleOnline)
-  window.addEventListener('offline', handleOffline)
 })
 
 onBeforeUnmount(() => {
@@ -144,44 +141,57 @@ onBeforeUnmount(() => {
     window.clearInterval(clockTimer)
     clockTimer = null
   }
-  window.removeEventListener('online', handleOnline)
-  window.removeEventListener('offline', handleOffline)
 })
-
-function handleOnline() {
-  isOnline.value = true
-}
-
-function handleOffline() {
-  isOnline.value = false
-}
 
 function goToGridOperator() {
   currentPage.value = 'main'
 }
 
 function goToMonitoring() {
-  currentPage.value = 'monitoring'
+  currentPage.value = 'main'
 }
 
 function goToInfoSystem() {
   currentPage.value = 'info'
 }
 
-function toggleThemeMenu() {
-  isThemeMenuOpen.value = !isThemeMenuOpen.value
+function toggleBackendPage() {
+  currentPage.value = currentPage.value === 'info' ? 'main' : 'info'
+}
+
+function toggleThemeDrawer() {
+  isThemeDrawerOpen.value = !isThemeDrawerOpen.value
+}
+
+function closeThemeDrawer() {
+  isThemeDrawerOpen.value = false
 }
 
 function selectTheme(themeValue) {
   currentTheme.value = themeValue
-  isThemeMenuOpen.value = false
+}
+
+function toggleBuildingLayer() {
+  if (cesiumMapRef.value && typeof cesiumMapRef.value.toggleBuildingsOnMap === 'function') {
+    cesiumMapRef.value.toggleBuildingsOnMap()
+  }
+}
+
+function toggle3DTileLayer() {
+  if (cesiumMapRef.value && typeof cesiumMapRef.value.toggle3DTiles === 'function') {
+    cesiumMapRef.value.toggle3DTiles()
+  }
+}
+
+function toggleHudStatus() {
+  showHudStatus.value = !showHudStatus.value
 }
 
 function handleSwitchPage(page) {
   if (page === 'grid') {
-    currentPage.value = 'main'
+    goToGridOperator()
   } else if (page === 'monitoring') {
-    currentPage.value = 'monitoring'
+    goToMonitoring()
   } else if (page === 'info') {
     currentPage.value = 'info'
   }
@@ -208,6 +218,7 @@ async function handleRouteMonitorStart(payload) {
     if (data?.status === 'success' && data?.results?.path) {
       // 存储到已监控列表
       monitoredRoutes.value[id] = { id, name, path: data.results.path }
+      goToMonitoring()
     } else {
       console.warn('[DataScreen] 航线数据格式不正确')
     }
@@ -224,6 +235,8 @@ function handleRouteMonitorStop(payload) {
   // 先清除地图上的航线
   if (monitoringScreenRef.value && typeof monitoringScreenRef.value.clearRouteGrid === 'function') {
     monitoringScreenRef.value.clearRouteGrid(id)
+  } else if (cesiumMapRef.value && typeof cesiumMapRef.value.clearRouteGrid === 'function') {
+    cesiumMapRef.value.clearRouteGrid(id)
   }
 
   // 从已监控列表移除
@@ -252,7 +265,7 @@ function handleVisualizeEvent(payload) {
   console.log('[DataScreen] 收到异常事件可视化请求:', payload)
   pendingEventVisualization.value = payload || null
   if (payload) {
-    currentPage.value = 'monitoring'
+    goToMonitoring()
   }
 }
 
@@ -269,6 +282,18 @@ function handleShowNoFlyZone(zone) {
   visibleNoFlyZones.value = { ...visibleNoFlyZones.value, [zone.zone_id]: zone }
   if (monitoringScreenRef.value && typeof monitoringScreenRef.value.addNoFlyZoneVisualization === 'function') {
     monitoringScreenRef.value.addNoFlyZoneVisualization(zone)
+  } else if (cesiumMapRef.value && typeof cesiumMapRef.value.drawPolygon === 'function' && Array.isArray(zone.boundary)) {
+    cesiumMapRef.value.drawPolygon({
+      type: 'noFlyZone',
+      zoneId: zone.zone_id,
+      points: zone.boundary.map(coord => ({
+        lon: Number(coord[0]),
+        lat: Number(coord[1]),
+      })),
+      bottom: Number(zone.bottom ?? 0),
+      top: Number(zone.top ?? 120),
+      color: '#ef4444',
+    })
   }
 }
 
@@ -279,6 +304,8 @@ function handleHideNoFlyZone({ zoneId }) {
   visibleNoFlyZones.value = newMap
   if (monitoringScreenRef.value && typeof monitoringScreenRef.value.removeNoFlyZoneVisualization === 'function') {
     monitoringScreenRef.value.removeNoFlyZoneVisualization(zoneId)
+  } else if (cesiumMapRef.value && typeof cesiumMapRef.value.removeNoFlyZonePrism === 'function') {
+    cesiumMapRef.value.removeNoFlyZonePrism(zoneId)
   }
 }
 
@@ -326,130 +353,128 @@ function handleGetViewBounds() {
 </script>
 
 <template>
-  <div class="app-root" :class="activeTheme.appClass">
+  <div class="app-root" :class="[activeTheme.appClass, { 'info-mode': currentPage === 'info' }]">
     <!-- 顶部导航 - 始终显示 -->
     <header class="topbar">
-      <!-- 左侧系统状态 -->
-      <div class="system-status">
-        <span class="side-label">系统状态</span>
-        <div class="side-value-group">
-          <span :class="['side-value', networkStatusClass]">{{ networkStatus }}</span>
-        </div>
-      </div>
+      <div class="topbar-glow"></div>
 
-      <!-- 左侧角框装饰 -->
-      <div class="header-corner left">
-        <div class="corner-bracket top-left"></div>
-        <div class="corner-bracket bottom-left"></div>
-      </div>
-
-      <!-- 左侧子页面导航按钮 -->
-      <div class="left-nav-buttons">
-        <div class="nav-btn" :class="{ active: currentPage === 'main' }" @click="goToGridOperator">网格化算子</div>
-        <div class="nav-btn" :class="{ active: currentPage === 'info' }" @click="goToInfoSystem">信息管理系统</div>
-      </div>
-
-      <!-- 中间标题 -->
-      <div class="topbar-center-wrapper">
-        <div class="topbar-center">
-          <!-- 左侧装饰线 - 与梯形斜边平行 -->
-          <div class="title-side-lines left">
-            <span class="side-line line-long"></span>
-            <span class="side-line line-short"></span>
-          </div>
-
-          <!-- 标题外框 - 梯形 -->
-          <div class="title-frame">
-            <div class="title-frame-inner">
-              <h1 class="main-title">低空路径智绘平台</h1>
-            </div>
-            <!-- 标题下方装饰线 -->
-            <div class="title-underline">
-              <span class="underline-line"></span>
-              <span class="underline-dot"></span>
-              <span class="underline-line"></span>
-            </div>
-          </div>
-
-          <!-- 右侧装饰线 - 与梯形斜边平行 -->
-          <div class="title-side-lines right">
-            <span class="side-line line-long"></span>
-            <span class="side-line line-short"></span>
-          </div>
-        </div>
-
-        <div class="title-action-buttons">
-          <div class="nav-btn title-nav-btn" :class="{ active: currentPage === 'monitoring' }" @click="goToMonitoring">实时监控大屏</div>
-          <div class="theme-dropdown" :class="{ open: isThemeMenuOpen }">
-            <button class="nav-btn theme-dropdown-trigger" type="button" @click="toggleThemeMenu">
-              <span>主题颜色</span>
-            </button>
-            <div v-if="isThemeMenuOpen" class="theme-dropdown-menu">
-              <button
-                v-for="option in themeOptions"
-                :key="option.value"
-                class="theme-dropdown-item"
-                :class="{ active: currentTheme === option.value }"
-                type="button"
-                @click="selectTheme(option.value)"
-              >
-                {{ option.label }}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <!-- 右侧角框装饰 -->
-      <div class="header-corner right">
-        <div class="corner-bracket top-right"></div>
-        <div class="corner-bracket bottom-right"></div>
-      </div>
-
-      <!-- 右侧时间 -->
-      <div class="topbar-side right">
+      <div class="topbar-left">
         <div class="time-box">
-          <MapPin :size="14" />
           <span>{{ timeText }}</span>
         </div>
       </div>
+
+      <div v-if="currentPage !== 'info'" class="topbar-center-wrapper">
+        <div class="title-frame">
+          <h1 class="main-title" data-text="低空路径智绘平台">低空路径智绘平台</h1>
+          <img class="title-flash" src="/screen/flash.png" alt="" />
+        </div>
+      </div>
+
+      <div class="topbar-right">
+        <div class="user-info" aria-label="当前用户">
+          <UserRound :size="17" :stroke-width="1.8" />
+          <span>欢迎您，</span>
+          <span>admin</span>
+        </div>
+        <button class="backend-btn" :class="{ active: currentPage === 'info' }" type="button" @click="toggleBackendPage">
+          {{ currentPage === 'info' ? '前台' : '后台' }}
+        </button>
+        <button class="settings-btn" type="button" aria-label="主题设置" @click="toggleThemeDrawer">
+          <Settings :size="20" :stroke-width="1.8" />
+        </button>
+      </div>
     </header>
 
-    <!-- 主页面 - 网格化算子 -->
-    <template v-if="currentPage === 'main'">
+    <div v-if="isThemeDrawerOpen" class="theme-drawer-mask" @click.self="closeThemeDrawer">
+      <aside class="theme-drawer">
+        <div class="theme-drawer-header">
+          <div>
+            <div class="theme-drawer-kicker">Settings</div>
+            <h2>主题颜色</h2>
+          </div>
+          <button class="drawer-close-btn" type="button" aria-label="关闭主题设置" @click="closeThemeDrawer">
+            <X :size="18" :stroke-width="1.8" />
+          </button>
+        </div>
+
+        <div class="theme-setting-group">
+          <div class="theme-setting-title">界面色彩</div>
+          <button
+            v-for="option in themeOptions"
+            :key="option.value"
+            class="theme-option"
+            :class="[`theme-option-${option.value}`, { active: currentTheme === option.value }]"
+            type="button"
+            @click="selectTheme(option.value)"
+          >
+            <span class="theme-swatch"></span>
+            <span>{{ option.label }}</span>
+          </button>
+        </div>
+
+        <div class="theme-setting-group layer-setting-group">
+          <div class="theme-setting-title">图层设置</div>
+          <button class="drawer-layer-option" type="button" @click="toggleHudStatus">
+            <span>HUD坐标</span>
+            <span class="drawer-toggle-switch" :class="{ active: layerSwitchState.hud }">
+              <span class="drawer-toggle-slider"></span>
+            </span>
+          </button>
+          <button class="drawer-layer-option" type="button" @click="toggleBuildingLayer">
+            <span>建筑白膜</span>
+            <span class="drawer-toggle-switch" :class="{ active: layerSwitchState.buildings }">
+              <span class="drawer-toggle-slider"></span>
+            </span>
+          </button>
+          <button class="drawer-layer-option" type="button" @click="toggle3DTileLayer">
+            <span>3D底图</span>
+            <span class="drawer-toggle-switch" :class="{ active: layerSwitchState.tiles3d }">
+              <span class="drawer-toggle-slider"></span>
+            </span>
+          </button>
+        </div>
+      </aside>
+    </div>
+
+    <!-- 主地图：网格化管理与实时监控大屏共用 -->
+    <template v-if="currentPage !== 'info'">
       <CesiumMap
         ref="cesiumMapRef"
+        :show-hud-status="showHudStatus"
         @point-selected="handleMapPointSelected"
         @box-select-start="handleBoxSelectStart"
         @box-select-end="handleBoxSelectEnd"
         @get-view-bounds="handleGetViewBounds"
       />
-      <main class="app-main">
-        <ServicePanel
-          ref="servicePanelRef"
-          panel-type="control"
-          :theme="currentTheme"
-          @show-point="handleShowPoint"
-          @show-grid="handleShowGrid"
-          @show-line="handleShowLine"
-          @show-polygon="handleShowPolygon"
-          @get-view-bounds="handleGetViewBounds"
-        />
-      </main>
-    </template>
 
-    <!-- 实时监控大屏 - 始终渲染，使用 v-show -->
-    <div v-show="currentPage === 'monitoring'" class="monitoring-wrapper">
-      <MonitoringScreen
-    ref="monitoringScreenRef"
-    :route-data="monitoredRoutesData"
-    :event-visualization="pendingEventVisualization"
-    :visible-no-fly-zones="visibleNoFlyZones"
-    :theme="activeTheme.monitoringTheme"
-    @switch_page="handleSwitchPage"
-    @visualize-event="handleVisualizeEvent"
-    @anomaly-triggered="handleAnomalyTriggered"
-  />
-    </div>
+      <div class="monitoring-layer">
+          <MonitoringScreen
+            ref="monitoringScreenRef"
+            embedded
+            :external-cesium-map="cesiumMapRef"
+            :route-data="monitoredRoutesData"
+            :event-visualization="pendingEventVisualization"
+            :visible-no-fly-zones="visibleNoFlyZones"
+            :theme="activeTheme.monitoringTheme"
+            @switch_page="handleSwitchPage"
+            @visualize-event="handleVisualizeEvent"
+            @anomaly-triggered="handleAnomalyTriggered"
+          />
+      </div>
+
+      <ServicePanel
+        ref="servicePanelRef"
+        display-mode="toolbar"
+        panel-type="control"
+        :theme="currentTheme"
+        @show-point="handleShowPoint"
+        @show-grid="handleShowGrid"
+        @show-line="handleShowLine"
+        @show-polygon="handleShowPolygon"
+        @get-view-bounds="handleGetViewBounds"
+      />
+    </template>
 
     <!-- 信息管理系统 - 始终渲染，使用 v-show 保持状态 -->
     <div v-show="currentPage === 'info'" class="info-page-wrapper">
@@ -467,6 +492,28 @@ function handleGetViewBounds() {
 </template>
 
 <style>
+@font-face {
+  font-family: 'YouSheBiaoTiHei';
+  src: url('/fonts/YouSheBiaoTiHei-2.ttf') format('truetype');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'MiSans';
+  src: url('/fonts/MiSans-Regular.woff') format('woff');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'MiSans';
+  src: url('/fonts/MiSans-Semibold.woff') format('woff');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -499,8 +546,6 @@ html, body, #app {
   --theme-nav-active-border: #4a90c2;
   --theme-nav-active-text: #1e6ba8;
   --theme-nav-active-shadow: 0 2px 10px rgba(60, 120, 180, 0.3);
-  --theme-side-label: rgba(30, 74, 110, 0.65);
-  --theme-side-label-secondary: rgba(30, 74, 110, 0.55);
   --theme-corner: rgba(70, 130, 180, 0.7);
   --theme-title-text: #1e4a6e;
   --theme-title-frame-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(235, 245, 252, 0.82));
@@ -513,14 +558,6 @@ html, body, #app {
   --theme-time-bg: rgba(255, 255, 255, 0.9);
   --theme-time-border: rgba(90, 150, 200, 0.45);
   --theme-time-text: #1e4a6e;
-  --theme-dropdown-bg: rgba(255, 255, 255, 0.96);
-  --theme-dropdown-border: rgba(90, 150, 200, 0.35);
-  --theme-dropdown-shadow: 0 10px 30px rgba(60, 120, 180, 0.18);
-  --theme-dropdown-item-bg: rgba(242, 248, 253, 0.92);
-  --theme-dropdown-item-text: #245277;
-  --theme-dropdown-item-hover-bg: #ffffff;
-  --theme-dropdown-item-hover-border: rgba(90, 150, 200, 0.45);
-  --theme-dropdown-item-hover-text: #1d628f;
 }
 
 .app-root.theme-tech-blue {
@@ -538,8 +575,6 @@ html, body, #app {
   --theme-nav-active-border: rgba(128, 240, 255, 0.9);
   --theme-nav-active-text: #f1fdff;
   --theme-nav-active-shadow: 0 8px 24px rgba(12, 111, 196, 0.42);
-  --theme-side-label: rgba(190, 228, 255, 0.8);
-  --theme-side-label-secondary: rgba(190, 228, 255, 0.68);
   --theme-corner: rgba(102, 219, 255, 0.9);
   --theme-title-text: #ecfbff;
   --theme-title-frame-bg: linear-gradient(180deg, rgba(9, 43, 84, 0.88), rgba(4, 24, 52, 0.94));
@@ -552,14 +587,6 @@ html, body, #app {
   --theme-time-bg: linear-gradient(180deg, rgba(8, 36, 74, 0.88), rgba(5, 23, 48, 0.94));
   --theme-time-border: rgba(91, 205, 255, 0.52);
   --theme-time-text: #dff8ff;
-  --theme-dropdown-bg: rgba(5, 25, 53, 0.96);
-  --theme-dropdown-border: rgba(76, 191, 255, 0.42);
-  --theme-dropdown-shadow: 0 16px 40px rgba(2, 15, 33, 0.42);
-  --theme-dropdown-item-bg: rgba(10, 41, 82, 0.78);
-  --theme-dropdown-item-text: #c9f4ff;
-  --theme-dropdown-item-hover-bg: rgba(17, 87, 156, 0.9);
-  --theme-dropdown-item-hover-border: rgba(111, 223, 255, 0.72);
-  --theme-dropdown-item-hover-text: #f6feff;
 }
 
 .app-root.theme-fresh-green {
@@ -577,8 +604,6 @@ html, body, #app {
   --theme-nav-active-border: rgba(94, 172, 125, 0.86);
   --theme-nav-active-text: #2f6a49;
   --theme-nav-active-shadow: 0 8px 24px rgba(106, 181, 136, 0.2);
-  --theme-side-label: rgba(53, 98, 74, 0.72);
-  --theme-side-label-secondary: rgba(53, 98, 74, 0.58);
   --theme-corner: rgba(116, 191, 145, 0.86);
   --theme-title-text: #315d46;
   --theme-title-frame-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(233, 248, 239, 0.84));
@@ -591,483 +616,553 @@ html, body, #app {
   --theme-time-bg: rgba(255, 255, 255, 0.88);
   --theme-time-border: rgba(122, 197, 150, 0.44);
   --theme-time-text: #3c6d53;
-  --theme-dropdown-bg: rgba(248, 253, 250, 0.97);
-  --theme-dropdown-border: rgba(122, 197, 150, 0.36);
-  --theme-dropdown-shadow: 0 16px 40px rgba(106, 181, 136, 0.18);
-  --theme-dropdown-item-bg: rgba(240, 250, 244, 0.92);
-  --theme-dropdown-item-text: #3b6a50;
-  --theme-dropdown-item-hover-bg: #ffffff;
-  --theme-dropdown-item-hover-border: rgba(122, 197, 150, 0.48);
-  --theme-dropdown-item-hover-text: #2f6a49;
 }
 
-/* 顶部导航 - 清新绿 */
+/* 顶部导航 - 迁移自 ShuntianFE 大屏头部 */
 .topbar {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 32px;
-  background: var(--theme-topbar-bg);
-  backdrop-filter: blur(8px);
-  border-bottom: 1px solid var(--theme-topbar-border);
+  height: 76px;
+  display: block;
+  padding: 0 24px;
+  background: linear-gradient(180deg, rgba(4, 18, 42, 0.92) 0%, rgba(5, 23, 54, 0.58) 58%, rgba(5, 23, 54, 0) 100%);
+  border-bottom: 0;
+  box-shadow: none;
+  overflow: visible;
   z-index: 100;
-  box-shadow: var(--theme-topbar-shadow);
 }
 
-.topbar::before {
+.topbar::after {
   content: '';
   position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 50%;
+  left: 0;
+  right: 0;
+  top: 0;
   height: 1px;
-  background: var(--theme-topbar-highlight);
+  background: linear-gradient(90deg, transparent, rgba(35, 206, 253, 0.65), transparent);
+  pointer-events: none;
 }
 
-/* 两侧区域 */
-.topbar-side {
-  width: 160px;
-  display: flex;
-  align-items: center;
-}
-
-.topbar-side.left {
-  gap: 10px;
-  justify-content: flex-end;
-}
-
-.topbar-side.right {
+.topbar-glow {
   position: absolute;
-  right: 0;
-  justify-content: flex-end;
-  gap: 10px;
+  inset: -150px 0 auto;
+  height: 220px;
+  background-color: rgb(8, 34, 62);
+  filter: blur(80px);
+  transform: translateY(-70px);
+  pointer-events: none;
+  z-index: -1;
 }
 
-/* 标题左右角框装饰 */
-.header-corner {
+.topbar-left,
+.topbar-right {
   position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.header-corner.left {
-  left: 120px;
-}
-
-.header-corner.right {
-  right: 180px;
-}
-
-/* 左侧子页面导航按钮 */
-.left-nav-buttons {
-  position: absolute;
-  left: 230px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  gap: 80px;
-  z-index: 10;
-}
-
-.nav-btn {
-  min-width: 132px;
-  padding: 8px 20px;
-  background: var(--theme-nav-bg);
-  border: 1px solid var(--theme-nav-border);
-  border-radius: 6px;
-  color: var(--theme-nav-text);
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.25s ease;
-  text-align: center;
-  white-space: nowrap;
-}
-
-.nav-btn:hover {
-  background: var(--theme-nav-hover-bg);
-  border-color: var(--theme-nav-hover-border);
-  color: var(--theme-nav-text);
-  box-shadow: var(--theme-nav-hover-shadow);
-  transform: translateY(-1px);
-}
-
-.nav-btn.active {
-  background: var(--theme-nav-active-bg);
-  border-color: var(--theme-nav-active-border);
-  color: var(--theme-nav-active-text);
-  box-shadow: var(--theme-nav-active-shadow);
-  font-weight: 600;
-}
-
-/* 系统状态 - 独立定位 */
-.system-status {
-  position: absolute;
-  left: 40px;
-  top: 50%;
-  transform: translateY(-50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-
-.side-label {
-  color: var(--theme-side-label);
-  font-size: 12px;
-}
-
-.side-value-group {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-/* 角落装饰 */
-.side-decoration {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.corner-bracket {
-  width: 14px;
-  height: 14px;
-  position: relative;
-}
-
-.corner-bracket::before,
-.corner-bracket::after {
-  content: '';
-  position: absolute;
-  background: var(--theme-corner);
-}
-
-.corner-bracket.top-left::before {
-  width: 10px;
-  height: 2px;
   top: 0;
-  left: 0;
-}
-
-.corner-bracket.top-left::after {
-  width: 2px;
-  height: 10px;
-  top: 0;
-  left: 0;
-}
-
-.corner-bracket.bottom-left::before {
-  width: 10px;
-  height: 2px;
-  bottom: 0;
-  left: 0;
-}
-
-.corner-bracket.bottom-left::after {
-  width: 2px;
-  height: 10px;
-  bottom: 0;
-  left: 0;
-}
-
-.corner-bracket.top-right::before {
-  width: 10px;
-  height: 2px;
-  top: 0;
-  right: 0;
-}
-
-.corner-bracket.top-right::after {
-  width: 2px;
-  height: 10px;
-  top: 0;
-  right: 0;
-}
-
-.corner-bracket.bottom-right::before {
-  width: 10px;
-  height: 2px;
-  bottom: 0;
-  right: 0;
-}
-
-.corner-bracket.bottom-right::after {
-  width: 2px;
-  height: 10px;
-  bottom: 0;
-  right: 0;
-}
-
-/* 侧边文字 */
-.side-text {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.side-label {
-  font-size: 9px;
-  color: var(--theme-side-label-secondary);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-}
-
-.side-value {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.side-value.online {
-  color: #10b981;
-}
-
-.side-value.online::before {
-  content: '';
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  background: #10b981;
-  border-radius: 50%;
-  margin-right: 5px;
-  animation: pulse-dot 2s infinite;
-}
-
-.side-value.offline {
-  color: #ef4444;
-}
-
-.side-value.offline::before {
-  content: '';
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  background: #ef4444;
-  border-radius: 50%;
-  margin-right: 5px;
-  animation: pulse-dot 2s infinite;
-}
-
-@keyframes pulse-dot {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
-/* 中间标题区域 */
-.topbar-center-wrapper {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  display: flex;
-  align-items: center;
-}
-
-.topbar-center {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-
-.title-action-buttons {
-  position: absolute;
-  left: calc(100% + 42px);
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 14px;
+  min-height: 44px;
+  padding-top: 11px;
+}
+
+.topbar-left {
+  left: clamp(18px, 1.8vw, 34px);
+  justify-content: flex-start;
+}
+
+.topbar-right {
+  right: clamp(18px, 1.8vw, 34px);
+  justify-content: flex-end;
+  gap: 10px;
+  transform: none;
+}
+
+.left-nav-buttons {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.nav-btn {
+  position: relative;
+  min-width: 148px;
+  height: 38px;
+  padding: 0 24px;
+  border: 1px solid rgba(35, 206, 253, 0.38);
+  border-radius: 2px;
+  background:
+    linear-gradient(180deg, rgba(5, 34, 74, 0.74), rgba(4, 22, 53, 0.62)),
+    linear-gradient(90deg, rgba(35, 206, 253, 0.05), rgba(35, 206, 253, 0.18), rgba(35, 206, 253, 0.05));
+  color: rgba(214, 245, 255, 0.88);
+  font-family: 'MiSans', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  font-style: normal;
+  letter-spacing: 0.5px;
+  line-height: 36px;
+  cursor: pointer;
+  transition: color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease, opacity 0.2s ease;
+  text-align: center;
+  text-shadow: 0 0 8px rgba(35, 206, 253, 0.22);
+  white-space: nowrap;
+  transform-origin: center;
+  box-shadow: inset 0 0 16px rgba(35, 206, 253, 0.05);
+  overflow: hidden;
+}
+
+.nav-btn > span {
+  display: inline-block;
+  position: relative;
+  z-index: 1;
+}
+
+.nav-btn-rect {
+  transform: none;
+}
+
+.nav-btn-rect > span {
+  transform: none;
+}
+
+.nav-btn-right-edge {
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 100%, 0 100%);
+  transform: none;
+}
+
+.nav-btn-right-edge > span {
+  transform: none;
+}
+
+.nav-btn-right {
+  clip-path: polygon(12px 0, 100% 0, 100% 100%, 0 100%);
+  transform: none;
+}
+
+.nav-btn-right > span {
+  transform: none;
+}
+
+.nav-btn:hover {
+  border-color: rgba(35, 206, 253, 0.72);
+  background:
+    linear-gradient(180deg, rgba(7, 48, 96, 0.82), rgba(4, 28, 64, 0.78)),
+    linear-gradient(90deg, rgba(35, 206, 253, 0.08), rgba(35, 206, 253, 0.22), rgba(35, 206, 253, 0.08));
+  box-shadow: 0 0 12px rgba(35, 206, 253, 0.16), inset 0 0 18px rgba(35, 206, 253, 0.08);
+  color: #ffffff;
+}
+
+.nav-btn.active {
+  border-color: rgba(35, 206, 253, 0.82);
+  background:
+    linear-gradient(180deg, rgba(8, 58, 112, 0.86), rgba(4, 32, 72, 0.82)),
+    linear-gradient(90deg, rgba(35, 206, 253, 0.08), rgba(35, 206, 253, 0.26), rgba(35, 206, 253, 0.08));
+  box-shadow: 0 0 14px rgba(35, 206, 253, 0.2), inset 0 0 18px rgba(35, 206, 253, 0.1);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.topbar-center-wrapper {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+  width: min(980px, 58vw);
+  padding: 0;
+  box-sizing: border-box;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.title-frame {
+  position: relative;
+  width: 100%;
+  height: clamp(82px, 6.2vw, 112px);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  background: url('/screen/top.png') no-repeat center top;
+  background-size: 100% 100%;
+  overflow: visible;
+}
+
+.main-title {
+  position: relative;
+  z-index: 4;
+  display: inline-block;
+  margin: 0;
+  padding-top: clamp(2px, calc(0.62vw - 3px), 8px);
+  font-family: 'YouSheBiaoTiHei', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  font-size: clamp(38px, 2.85vw, 54px);
+  font-weight: 400;
+  font-style: normal;
+  letter-spacing: 5px;
+  line-height: 1.25;
+  text-align: center;
+  color: #f7fbff;
+  text-shadow:
+    0 1px 1px rgba(1, 21, 38, 0.24),
+    0 0 5px rgba(87, 214, 255, 0.18);
+  white-space: nowrap;
+  filter: none;
+}
+
+.main-title::after {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  padding-top: inherit;
+  color: transparent;
+  background: radial-gradient(
+    ellipse 30% 26% at 50% 86%,
+    rgba(91, 209, 255, 0.34) 0%,
+    rgba(63, 181, 255, 0.2) 34%,
+    rgba(63, 181, 255, 0.08) 58%,
+    transparent 76%
+  );
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: none;
+  opacity: 0.58;
+  pointer-events: none;
+}
+
+.title-flash {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  width: min(42%, 420px);
+  height: 6px;
+  transform: translateX(-50%);
+  object-fit: fill;
+  opacity: 0.08;
+  mix-blend-mode: screen;
+  pointer-events: none;
 }
 
 .title-nav-btn {
+  min-width: 158px;
+  margin-left: 8px;
+}
+
+.time-box {
+  height: 34px;
+  width: max-content;
+  min-width: 0;
+  margin-left: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  border: 0;
+  background: transparent;
+  color: #23cefd;
+  font-size: 15px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 34px;
+  text-shadow: 0 0 8px rgba(35, 206, 253, 0.35);
+  white-space: nowrap;
+  transform: none;
+}
+
+.user-info {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 4px;
+  color: #23cefd;
+  font-family: 'MiSans', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  text-shadow: 0 0 8px rgba(35, 206, 253, 0.32);
   white-space: nowrap;
 }
 
-.theme-dropdown {
-  position: relative;
-  margin-left: 48px;
+.backend-btn {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid rgba(35, 206, 253, 0.36);
+  border-radius: 3px;
+  background: rgba(4, 24, 54, 0.48);
+  color: #23cefd;
+  cursor: pointer;
+  font-family: 'MiSans', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 26px;
+  text-shadow: 0 0 8px rgba(35, 206, 253, 0.28);
+  transition: color 0.2s ease, border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
 
-.theme-dropdown-trigger {
+.backend-btn:hover,
+.backend-btn.active {
+  border-color: rgba(35, 206, 253, 0.72);
+  background: rgba(7, 48, 96, 0.72);
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(35, 206, 253, 0.16);
+}
+
+.settings-btn {
+  width: 34px;
+  height: 34px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  border: 0;
+  background: transparent;
+  color: #23cefd;
+  cursor: pointer;
+  text-shadow: 0 0 8px rgba(35, 206, 253, 0.35);
+  margin-left: 0;
+  transform: none;
+  transition: color 0.2s ease, transform 0.2s ease, filter 0.2s ease;
 }
 
-.theme-dropdown-menu {
-  position: absolute;
-  top: calc(100% + 10px);
-  left: 0;
-  min-width: 100%;
-  padding: 8px;
+.settings-btn:hover {
+  color: #ffffff;
+  filter: drop-shadow(0 0 8px rgba(35, 206, 253, 0.72));
+  transform: rotate(18deg);
+}
+
+.app-root.info-mode .topbar {
+  height: 60px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.app-root.info-mode .topbar-glow {
+  display: none;
+}
+
+.app-root.info-mode .topbar::after {
+  display: none;
+}
+
+.app-root.info-mode .topbar-left,
+.app-root.info-mode .topbar-right {
+  min-height: 42px;
+  padding-top: 10px;
+}
+
+.theme-drawer-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  background: var(--theme-dropdown-bg);
-  border: 1px solid var(--theme-dropdown-border);
-  border-radius: 10px;
-  box-shadow: var(--theme-dropdown-shadow);
-  backdrop-filter: blur(12px);
-  z-index: 20;
+  justify-content: flex-end;
+  background: rgba(0, 8, 20, 0.16);
 }
 
-.theme-dropdown-item {
-  padding: 8px 14px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: var(--theme-dropdown-item-bg);
-  color: var(--theme-dropdown-item-text);
+.theme-drawer {
+  width: 320px;
+  height: 100%;
+  padding: 24px 22px;
+  background:
+    linear-gradient(180deg, rgba(5, 31, 72, 0.96), rgba(2, 13, 34, 0.96)),
+    radial-gradient(circle at 30% 0%, rgba(35, 206, 253, 0.18), transparent 42%);
+  border-left: 1px solid rgba(35, 206, 253, 0.38);
+  box-shadow: -18px 0 42px rgba(0, 8, 22, 0.42), inset 1px 0 0 rgba(255, 255, 255, 0.04);
+  color: #d6f3ff;
+}
+
+.theme-drawer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(35, 206, 253, 0.18);
+}
+
+.theme-drawer-kicker {
+  margin-bottom: 6px;
+  color: rgba(35, 206, 253, 0.72);
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.theme-drawer h2 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-shadow: 0 0 14px rgba(35, 206, 253, 0.48);
+}
+
+.drawer-close-btn {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(35, 206, 253, 0.22);
+  background: rgba(4, 22, 53, 0.55);
+  color: #23cefd;
+  cursor: pointer;
+}
+
+.drawer-close-btn:hover {
+  border-color: rgba(35, 206, 253, 0.72);
+  color: #ffffff;
+}
+
+.theme-setting-group {
+  margin-top: 24px;
+}
+
+.theme-setting-title {
+  margin-bottom: 12px;
+  color: rgba(202, 243, 255, 0.72);
   font-size: 13px;
-  text-align: left;
+}
+
+.theme-option {
+  width: 100%;
+  height: 42px;
+  margin-bottom: 10px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid rgba(35, 206, 253, 0.18);
+  background: rgba(6, 36, 79, 0.5);
+  color: rgba(202, 243, 255, 0.9);
+  font-size: 14px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
-.theme-dropdown-item:hover,
-.theme-dropdown-item.active {
-  background: var(--theme-dropdown-item-hover-bg);
-  border-color: var(--theme-dropdown-item-hover-border);
-  color: var(--theme-dropdown-item-hover-text);
+.theme-option:hover,
+.theme-option.active {
+  border-color: rgba(35, 206, 253, 0.76);
+  background: rgba(10, 67, 127, 0.78);
+  color: #ffffff;
+  box-shadow: inset 0 0 18px rgba(35, 206, 253, 0.12);
 }
 
-/* 标题两侧装饰线 */
-.title-side-lines {
+.theme-swatch {
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.58);
+  box-shadow: 0 0 10px rgba(35, 206, 253, 0.24);
+}
+
+.theme-option-white .theme-swatch {
+  background: linear-gradient(135deg, #edf7ff, #77b8e8);
+}
+
+.theme-option-techBlue .theme-swatch {
+  background: linear-gradient(135deg, #0a6fc8, #7cecff);
+}
+
+.theme-option-freshGreen .theme-swatch {
+  background: linear-gradient(135deg, #74bf91, #e8f8ee);
+}
+
+.layer-setting-group {
+  margin-top: 28px;
+}
+
+.drawer-layer-option {
+  width: 100%;
+  height: 46px;
+  margin-bottom: 10px;
+  padding: 0 14px;
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.title-side-lines.left {
-  align-items: flex-end;
-}
-
-.title-side-lines.right {
-  align-items: flex-start;
-}
-
-.side-line {
-  display: block;
-  background: linear-gradient(90deg, transparent 0%, var(--theme-title-side-line) 100%);
-}
-
-.title-side-lines.left .side-line {
-  background: linear-gradient(270deg, transparent 0%, var(--theme-title-side-line) 100%);
-}
-
-.line-long {
-  width: 60px;
-  height: 1px;
-}
-
-.line-short {
-  width: 30px;
-  height: 1px;
-}
-
-/* 标题框架 - 梯形 */
-.title-frame {
-  position: relative;
-  display: flex;
-  flex-direction: column;
   align-items: center;
-}
-
-.title-frame::before {
-  content: '';
-  position: absolute;
-  top: -8px;
-  left: -40px;
-  right: -40px;
-  bottom: -8px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--theme-title-frame-bg) 88%, white 12%), color-mix(in srgb, var(--theme-title-frame-bg) 72%, transparent 28%));
-  clip-path: polygon(8% 0%, 92% 0%, 100% 100%, 0% 100%);
-  z-index: -1;
-}
-
-.title-frame::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  border: 1px solid var(--theme-title-frame-border);
-  clip-path: polygon(8% 0%, 92% 0%, 100% 100%, 0% 100%);
-  z-index: -1;
-}
-
-.title-frame-inner {
-  padding: 6px 50px 4px;
-}
-
-/* 主标题 */
-.main-title {
-  font-size: 20px;
+  justify-content: space-between;
+  border: 1px solid rgba(35, 206, 253, 0.18);
+  background: rgba(6, 36, 79, 0.5);
+  color: rgba(202, 243, 255, 0.94);
+  cursor: pointer;
+  font-family: 'MiSans', 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  font-size: 14px;
   font-weight: 600;
-  color: var(--theme-title-text);
-  letter-spacing: 4px;
-  text-shadow: none;
-  margin: 0;
-  white-space: nowrap;
+  transition: all 0.2s ease;
 }
 
-/* 标题下划线装饰 */
-.title-underline {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin-top: 2px;
+.drawer-layer-option:hover {
+  border-color: rgba(35, 206, 253, 0.62);
+  background: rgba(10, 67, 127, 0.72);
+  color: #ffffff;
+  box-shadow: inset 0 0 18px rgba(35, 206, 253, 0.1);
 }
 
-.underline-line {
-  width: 80px;
-  height: 1px;
-  background: var(--theme-underline-line);
+.drawer-toggle-switch {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(101, 116, 139, 0.42);
+  transition: background 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
 }
 
-.underline-line:last-child {
-  background: linear-gradient(270deg, transparent 0%, var(--theme-title-side-line) 50%, transparent 100%);
+.drawer-toggle-switch.active {
+  border-color: rgba(117, 196, 255, 0.42);
+  background: rgba(45, 132, 255, 0.82);
+  box-shadow: 0 0 10px rgba(45, 132, 255, 0.24);
 }
 
-.underline-dot {
-  width: 6px;
-  height: 6px;
-  background: var(--theme-underline-dot);
+.drawer-toggle-slider {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  box-shadow: 0 0 6px color-mix(in srgb, var(--theme-underline-dot) 60%, transparent 40%);
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 0.25s ease;
 }
 
-/* 右侧时间盒子 */
-.time-box {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 14px;
-  background: var(--theme-time-bg);
-  border: 1px solid var(--theme-time-border);
-  border-radius: 6px;
-  color: var(--theme-time-text);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  backdrop-filter: blur(8px);
-  transition: all 0.25s ease;
+.drawer-toggle-switch.active .drawer-toggle-slider {
+  transform: translateX(18px);
 }
 
-.time-box:hover {
-  background: var(--theme-nav-hover-bg);
-  border-color: var(--theme-nav-hover-border);
-  box-shadow: var(--theme-nav-hover-shadow);
-}
+@media (max-width: 1420px) {
+  .topbar {
+    padding: 0 14px;
+  }
 
-.time-box svg {
-  color: var(--theme-nav-hover-border);
+  .topbar-center-wrapper {
+    width: min(900px, 58vw);
+  }
+
+  .nav-btn {
+    min-width: 124px;
+    padding: 0 16px;
+    font-size: 14px;
+  }
+
+  .time-box {
+    min-width: auto;
+    font-size: 13px;
+  }
+
+  .topbar-right {
+    gap: 8px;
+    right: 16px;
+    transform: none;
+  }
+
+  .settings-btn {
+    transform: none;
+  }
+
+  .settings-btn:hover {
+    transform: rotate(18deg);
+  }
 }
 
 .app-main {
@@ -1078,6 +1173,21 @@ html, body, #app {
   bottom: 0;
   z-index: 50;
   pointer-events: none;
+}
+
+.monitoring-layer {
+  position: fixed;
+  top: 96px;
+  left: 20px;
+  right: 20px;
+  bottom: 104px;
+  z-index: 70;
+  pointer-events: none;
+}
+
+.monitoring-layer > .app-root {
+  width: 100%;
+  height: 100%;
 }
 
 /* 信息管理系统全屏内容区 */
