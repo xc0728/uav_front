@@ -20,6 +20,17 @@ const demGridForm = reactive({
   maxLon: null,
   minLat: null,
   maxLat: null,
+  level: 14,
+})
+
+const levelOptions = [14, 16]
+
+// 存储原始精度边界数据（用于API调用）
+const rawBounds = ref({
+  minLon: null,
+  maxLon: null,
+  minLat: null,
+  maxLat: null,
 })
 
 const loading = ref(false)
@@ -35,6 +46,12 @@ function resetForm() {
   result.value = null
   queryStats.value = null
   gridsData.value = []
+  rawBounds.value = {
+    minLon: null,
+    maxLon: null,
+    minLat: null,
+    maxLat: null,
+  }
 }
 
 function setPointFromMap(lon, lat, height) {
@@ -46,29 +63,53 @@ function requestViewBounds() {
 }
 
 function setViewBounds(bounds) {
-  demGridForm.minLon = Number(bounds.west.toFixed(4))
-  demGridForm.maxLon = Number(bounds.east.toFixed(4))
-  demGridForm.minLat = Number(bounds.south.toFixed(4))
-  demGridForm.maxLat = Number(bounds.north.toFixed(4))
+  // 保留高精度用于API调用
+  rawBounds.value.minLon = bounds.west
+  rawBounds.value.maxLon = bounds.east
+  rawBounds.value.minLat = bounds.south
+  rawBounds.value.maxLat = bounds.north
+  
+  // 显示给用户时使用合理精度
+  demGridForm.minLon = Number(bounds.west.toFixed(6))
+  demGridForm.maxLon = Number(bounds.east.toFixed(6))
+  demGridForm.minLat = Number(bounds.south.toFixed(6))
+  demGridForm.maxLat = Number(bounds.north.toFixed(6))
 }
 
-defineExpose({ setViewBounds })
+// 设置从地图框选得到的边界（高精度）
+function setBoundsFromViewport(bounds) {
+  if (!bounds) return
+  
+  // 存储原始高精度值
+  rawBounds.value.minLon = bounds.west
+  rawBounds.value.maxLon = bounds.east
+  rawBounds.value.minLat = bounds.south
+  rawBounds.value.maxLat = bounds.north
+  
+  // 显示给用户时使用合理精度
+  demGridForm.minLon = Number(bounds.west.toFixed(6))
+  demGridForm.maxLon = Number(bounds.east.toFixed(6))
+  demGridForm.minLat = Number(bounds.south.toFixed(6))
+  demGridForm.maxLat = Number(bounds.north.toFixed(6))
+}
+
+defineExpose({ setViewBounds, setBoundsFromViewport })
 
 async function submitDemGridQuery() {
   error.value = ''
   result.value = null
   queryStats.value = null
 
-  if (demGridForm.minLon === null || demGridForm.maxLon === null ||
-      demGridForm.minLat === null || demGridForm.maxLat === null) {
+  // 直接使用用户输入的值进行查询
+  const minLon = demGridForm.minLon !== null ? Number(demGridForm.minLon) : null
+  const maxLon = demGridForm.maxLon !== null ? Number(demGridForm.maxLon) : null
+  const minLat = demGridForm.minLat !== null ? Number(demGridForm.minLat) : null
+  const maxLat = demGridForm.maxLat !== null ? Number(demGridForm.maxLat) : null
+
+  if (minLon === null || maxLon === null || minLat === null || maxLat === null) {
     error.value = '请先获取视图边界或手动输入边界参数'
     return
   }
-
-  const minLon = Number(demGridForm.minLon)
-  const maxLon = Number(demGridForm.maxLon)
-  const minLat = Number(demGridForm.minLat)
-  const maxLat = Number(demGridForm.maxLat)
 
   if (minLon >= maxLon || minLat >= maxLat) {
     error.value = '边界参数不合法'
@@ -78,11 +119,13 @@ async function submitDemGridQuery() {
   loading.value = true
 
   try {
+    // 请求第一页数据（后端可能每页都返回全部数据，所以只取第一页）
     const payload = {
       minLon: minLon,
       maxLon: maxLon,
       minLat: minLat,
       maxLat: maxLat,
+      level: Number(demGridForm.level),
     }
 
     console.log('[DEM网格查询] 发送 payload:', payload)
@@ -103,6 +146,7 @@ async function submitDemGridQuery() {
     result.value = data
     console.log('[DEM网格查询] 原始返回:', data)
 
+    // 获取数据（优先使用grids，其次使用cells）
     let rawGrids = null
     if (data?.data?.grids && data.data.grids.length > 0) {
       rawGrids = data.data.grids
@@ -116,13 +160,18 @@ async function submitDemGridQuery() {
       return
     }
 
+    const total = data?.data?.pagination?.total || rawGrids.length
+    const pageSize = data?.data?.pagination?.pageSize || rawGrids.length
+
+    console.log(`[DEM网格查询] 获取到 ${rawGrids.length} 条数据（总计 ${total} 条）`)
+
     gridsData.value = rawGrids
     totalCount = rawGrids.length
 
     queryStats.value = {
-      total: data?.data?.pagination?.total || totalCount,
-      page: data?.data?.pagination?.page || 1,
-      pageSize: data?.data?.pagination?.pageSize || 100,
+      total: total,
+      page: 1,
+      pageSize: pageSize,
       status: data?.status || 'success',
     }
 
@@ -143,6 +192,8 @@ async function submitDemGridQuery() {
       })
 
       console.log('[DEM网格查询] 转换后的 cells 前3条:', JSON.stringify(cells.slice(0, 3)))
+      console.log(`[DEM网格查询] 共 ${cells.length} 个网格，开始可视化...`)
+      
       emit('showGrid', { cells })
     }
   } catch (err) {
@@ -210,6 +261,19 @@ function clearGrids() {
         <button class="btn-view" @click="requestViewBounds" :disabled="loading">
           获取当前视图
         </button>
+      </div>
+
+      <div class="form-group">
+        <div class="group-title">网格层级</div>
+        <div class="coord-line">
+          <select
+            v-model.number="demGridForm.level"
+            class="param-select"
+            aria-label="层级选择"
+          >
+            <option v-for="lv in levelOptions" :key="lv" :value="lv">{{ lv }}级</option>
+          </select>
+        </div>
       </div>
 
       <!-- 操作按钮 -->
@@ -324,6 +388,23 @@ function clearGrids() {
 
 .btn-view:hover:not(:disabled) {
   background: #e8e8e8;
+}
+
+.param-select {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.param-select:focus {
+  outline: none;
+  border-color: #2563eb;
 }
 
 .btn-view:disabled {

@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { Loader2, Trash2, Plus } from 'lucide-vue-next'
 
@@ -22,7 +22,7 @@ function clearGrids() {
 
 // ===== 多边形网格化 =====
 const polygonForm = reactive({
-  level: 14,
+  level: 18,
   bottom: 0,
   top: 25,
 })
@@ -92,14 +92,14 @@ watch(
 )
 
 // ===== 层级选项 =====
-const levelOptions = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+const levelOptions = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
 
 // ===== 高度快选选项 =====
 const heightOptions = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]
 
 // ===== 多边形网格化（带洞）=====
 const polygonWithHolesForm = reactive({
-  level: 14,
+  level: 18,
   bottom: 0,
   top: 25,
 })
@@ -447,7 +447,7 @@ async function submitPolygonGridWithHoles() {
 
 // ===== 多边形表面网格化 =====
 const surfaceGridForm = reactive({
-  level: 14,
+  level: 18,
   bottom: 0,
   top: 20,
 })

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { MapPin } from 'lucide-vue-next'
 import ServicePanel from './data-screen/ServicePanel.vue'
 import InfoManagementPanel from './data-screen/functions/InfoManagementPanel.vue'
@@ -264,12 +264,34 @@ function handleAnomalyTriggered(payload) {
   }
 }
 
+function drawNoFlyZoneOnGridMap(zone) {
+  if (!cesiumMapRef.value || typeof cesiumMapRef.value.drawPolygon !== 'function') return
+  const boundary = zone.boundary
+  if (!boundary || boundary.length < 3) return
+  cesiumMapRef.value.drawPolygon({
+    type: 'noFlyZone',
+    zoneId: zone.zone_id,
+    points: boundary.map(coord => ({ lon: Number(coord[0]), lat: Number(coord[1]) })),
+    bottom: Number(zone.bottom ?? 0),
+    top: Number(zone.top ?? 120),
+    color: '#ef4444',
+  })
+}
+
+function removeNoFlyZoneFromGridMap(zoneId) {
+  if (!cesiumMapRef.value) return
+  if (typeof cesiumMapRef.value.removeNoFlyZonePrism === 'function') {
+    cesiumMapRef.value.removeNoFlyZonePrism(zoneId)
+  }
+}
+
 function handleShowNoFlyZone(zone) {
   if (!zone?.zone_id) return
   visibleNoFlyZones.value = { ...visibleNoFlyZones.value, [zone.zone_id]: zone }
   if (monitoringScreenRef.value && typeof monitoringScreenRef.value.addNoFlyZoneVisualization === 'function') {
     monitoringScreenRef.value.addNoFlyZoneVisualization(zone)
   }
+  drawNoFlyZoneOnGridMap(zone)
 }
 
 function handleHideNoFlyZone({ zoneId }) {
@@ -280,7 +302,18 @@ function handleHideNoFlyZone({ zoneId }) {
   if (monitoringScreenRef.value && typeof monitoringScreenRef.value.removeNoFlyZoneVisualization === 'function') {
     monitoringScreenRef.value.removeNoFlyZoneVisualization(zoneId)
   }
+  removeNoFlyZoneFromGridMap(zoneId)
 }
+
+// 当网格化算子页面的 CesiumMap 就绪时（用户切回该页面或首次加载），
+// 同步绘制当前所有已显示的禁飞区，保证跨页面状态一致
+watch(
+  () => cesiumMapRef.value?.isMapReady,
+  (ready) => {
+    if (!ready) return
+    Object.values(visibleNoFlyZones.value).forEach(zone => drawNoFlyZoneOnGridMap(zone))
+  },
+)
 
 // 处理地图框选开始
 function handleBoxSelectStart() {
@@ -418,6 +451,7 @@ function handleGetViewBounds() {
     <template v-if="currentPage === 'main'">
       <CesiumMap
         ref="cesiumMapRef"
+        :show-scenario-demo="false"
         @point-selected="handleMapPointSelected"
         @box-select-start="handleBoxSelectStart"
         @box-select-end="handleBoxSelectEnd"

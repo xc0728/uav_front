@@ -35,12 +35,32 @@ const aggregationResult = ref(null)
 
 // ==================== 倾斜摄影网格查询 ====================
 const triangleGridForm = reactive({
-  level: 9,
+  level: 18,
 })
 
 // 网格层级快选选项
 const levelOptions = [
+  { value: 1, label: '层级 1' },
+  { value: 2, label: '层级 2' },
+  { value: 3, label: '层级 3' },
+  { value: 4, label: '层级 4' },
+  { value: 5, label: '层级 5' },
+  { value: 6, label: '层级 6' },
+  { value: 7, label: '层级 7' },
+  { value: 8, label: '层级 8' },
   { value: 9, label: '层级 9' },
+  { value: 10, label: '层级 10' },
+  { value: 11, label: '层级 11' },
+  { value: 12, label: '层级 12' },
+  { value: 13, label: '层级 13' },
+  { value: 14, label: '层级 14' },
+  { value: 15, label: '层级 15' },
+  { value: 16, label: '层级 16' },
+  { value: 17, label: '层级 17' },
+  { value: 18, label: '层级 18' },
+  { value: 19, label: '层级 19' },
+  { value: 20, label: '层级 20' },
+  { value: 21, label: '层级 21' },
 ]
 
 // osgb网格化（同步入库）的层级选项

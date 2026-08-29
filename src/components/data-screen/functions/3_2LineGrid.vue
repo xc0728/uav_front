@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { Loader2, Trash2 } from 'lucide-vue-next'
 
@@ -22,13 +22,13 @@ function clearGrids() {
 
 // ===== 三维线网格化 =====
 const lineForm = reactive({
-  level: 14,
+  level: 18,
 })
 
 const points = ref([])
 
 // 层级选项
-const levelOptions = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+const levelOptions = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
 
 // 高度快选选项
 const heightOptions = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]
@@ -101,7 +101,7 @@ watch(
 
 // ===== 线矩形缓冲区（管道）网格化 =====
 const pipeForm = reactive({
-  level: 14,
+  level: 18,
   halfWidth: 15,
   halfHeight: 15,
   maxCheckCells: 200000,

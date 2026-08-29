@@ -18,12 +18,10 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-  target: 'https://idiocy-rerun-spooky.ngrok-free.dev',
-  changeOrigin: true,
-  headers: {
-    'ngrok-skip-browser-warning': 'true',
-  },
-},
+        //target: 'http://192.168.3.65:9997',
+        target: 'http://100.104.49.70:9997',
+        changeOrigin: true,
+      },
     }
   }
   

@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 import { reactive, ref, computed } from 'vue'
 import { Loader2, Trash2, Search, MapPin, Navigation, Database, X, Check } from 'lucide-vue-next'
 
@@ -25,7 +25,6 @@ const astarForm = reactive({
   level: 9, // 默认网格层级 9
   planeRadius: 0.75, // 默认无人机半径
   speed: 15.0, // 默认飞行速度
-  workHeight: 100, // 默认工作面高度
 })
 
 // 规则库开关状态
@@ -69,7 +68,7 @@ const storeError = ref('')
 const storeSuccess = ref(false)
 
 // 层级选项
-const levelOptions = [9, 14]
+const levelOptions = [13, 18]
 
 /** 高度快选：10–50 整十 */
 const heightPresetOptions = Array.from({ length: 5 }, (_, i) => (i + 1) * 10)
@@ -117,7 +116,6 @@ function resetForm() {
     astarForm.level = 9
     astarForm.planeRadius = 0.75
     astarForm.speed = 15.0
-    astarForm.workHeight = 100
     // 重置规则库开关
     const simpleKeys = ['hl', 'hlz', 'fx', 'gd', 'dt', 'dz', 'za']
     for (const key of simpleKeys) {
@@ -142,11 +140,9 @@ function resetForm() {
     conflictResult.value = null
     conflictStats.value = null
     conflictPoints.value = []
-    conflictForm.startTime = Math.floor(Date.now() / 1000)
-    conflictForm.level = 9
-    conflictForm.planeRadius = 0.75
+    conflictForm.startTime = 1787846400
+    conflictForm.level = 13
     conflictForm.speed = 15.0
-    conflictForm.workHeight = 100
     conflictForm.useGdConstraint = true
   }
 
@@ -154,11 +150,9 @@ function resetForm() {
     conflictFirstError.value = ''
     conflictFirstResult.value = null
     conflictFirstPoints.value = []
-    conflictFirstForm.startTime = Math.floor(Date.now() / 1000)
-    conflictFirstForm.level = 9
-    conflictFirstForm.planeRadius = 0.75
+    conflictFirstForm.startTime = 1787846400
+    conflictFirstForm.level = 13
     conflictFirstForm.speed = 15.0
-    conflictFirstForm.workHeight = 100
     conflictFirstForm.useGdConstraint = true
   }
 }
@@ -290,11 +284,9 @@ async function submitStoreRoute() {
 
 // 路径冲突检测（所有冲突）- 表单数据
 const conflictForm = reactive({
-  startTime: Math.floor(Date.now() / 1000), // 默认当前时间戳
-  level: 9, // 默认网格层级 9
-  planeRadius: 0.75, // 默认无人机半径
+  startTime: 1787846400, // 默认开始时间
+  level: 13, // 默认网格层级 13
   speed: 15.0, // 默认飞行速度
-  workHeight: 100, // 默认工作面高度
   useGdConstraint: true, // 默认启用实景三维障碍校验
 })
 
@@ -380,7 +372,6 @@ const canSubmitConflict = computed(() => {
   if (conflictPoints.value.length < 2) return false
   if (!Number.isFinite(Number(conflictForm.startTime))) return false
   if (!Number.isFinite(Number(conflictForm.level))) return false
-  if (!Number.isFinite(Number(conflictForm.workHeight))) return false
   return true
 })
 
@@ -401,9 +392,9 @@ async function submitConflictCheck() {
   try {
     // 构建约束条件
     const condition = {}
-    // 只有勾选了启用实景三维障碍校验，才传入 gd_9 参数
+    // 只有勾选了启用实景三维障碍校验，才传入 gd_${level} 参数
     if (conflictForm.useGdConstraint) {
-      condition.gd_9 = ""
+      condition[`gd_${conflictForm.level}`] = true
     }
 
     // 构建请求参数
@@ -411,9 +402,7 @@ async function submitConflictCheck() {
       startTime: Number(conflictForm.startTime),
       points: conflictPoints.value.map(p => [p.lon, p.lat, p.height]),
       level: Number(conflictForm.level),
-      planeRadius: Number(conflictForm.planeRadius),
       speed: Number(conflictForm.speed),
-      workHeight: Number(conflictForm.workHeight),
       condition: condition
     }
 
@@ -442,63 +431,22 @@ async function submitConflictCheck() {
         status: 'success'
       }
 
-      // 如果后端返回了路径网格数据，也进行可视化
-      if (data.grid && Array.isArray(data.grid) && data.grid.length > 0) {
-        const cells = data.grid.map(cell => ({
-          bounds: {
-            north: cell.maxlat,
-            south: cell.minlat,
-            east: cell.maxlon,
-            west: cell.minlon,
-            top: cell.top,
-            bottom: cell.bottom,
-          },
-          level: conflictForm.level,
-          color: '#22c55e' // 无冲突用绿色
-        }))
-        emit('showGrid', { cells })
-      }
-    } else if (resp.status === 400) {
-      // 有冲突
-      const grids = data.grid || []
-      conflictResult.value = {
-        status: 'has_conflict',
-        reason: '检测到冲突',
-        grids: grids
-      }
+      // 调用 getGridByLine 获取完整路径网格（蓝色显示）
+      try {
+        const linePoints = conflictPoints.value.map(p => [p.lon, p.lat, p.height])
+        const gridResp = await fetch('/api/multiSource/geometricGrid/getGridByLine', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            line: linePoints,
+            level: Number(conflictForm.level)
+          })
+        })
+        const gridData = await gridResp.json()
+        console.log('[路径冲突检测] 路径网格化结果:', gridData)
 
-      // 统计冲突信息
-      const conflictCount = grids.length
-      conflictStats.value = {
-        conflictCount: conflictCount,
-        gridCount: grids.length,
-        status: 'conflict_detected'
-      }
-
-      // 在地图上显示所有返回的网格
-      if (grids.length > 0) {
-        const cells = grids.map(cell => {
-          // 判断是否为冲突网格（有reason字段表示冲突）
-          const isConflict = cell.reason && cell.reason.trim() !== ''
-          // 冲突网格用红色，无冲突网格用绿色
-          let color = '#22c55e' // 默认绿色
-
-          if (isConflict) {
-            // 从 reason 字段提取冲突类型，使用对应颜色
-            const reasonLower = cell.reason.toLowerCase()
-            for (const [key, value] of Object.entries(conflictColors)) {
-              if (reasonLower.includes(key)) {
-                color = value
-                break
-              }
-            }
-            // 如果没有匹配到具体类型，使用默认红色
-            if (color === '#22c55e') {
-              color = conflictColors['default']
-            }
-          }
-
-          return {
+        if (gridData.status === 'success' && gridData.data && gridData.data.cells) {
+          const cells = gridData.data.cells.map(cell => ({
             bounds: {
               north: cell.maxlat,
               south: cell.minlat,
@@ -508,11 +456,101 @@ async function submitConflictCheck() {
               bottom: cell.bottom,
             },
             level: conflictForm.level,
-            color: color,
-            isConflict: isConflict,
-            reason: cell.reason || ''
-          }
+            color: '#3b82f6' // 完整路径用蓝色
+          }))
+          emit('showGrid', { cells })
+        }
+      } catch (lineErr) {
+        console.error('[路径冲突检测] 获取路径网格失败:', lineErr)
+      }
+    } else if (resp.status === 400) {
+      // 有冲突
+      const conflictGrids = data.grid || []
+      conflictResult.value = {
+        status: 'has_conflict',
+        reason: '检测到冲突',
+        grids: conflictGrids
+      }
+
+      // 统计冲突信息
+      const conflictCount = conflictGrids.length
+      conflictStats.value = {
+        conflictCount: conflictCount,
+        gridCount: conflictGrids.length,
+        status: 'conflict_detected'
+      }
+
+      // 构建冲突网格的 code 集合，用于后续识别
+      const conflictCodes = new Set(conflictGrids.map(c => c.code))
+
+      // 先获取完整路径网格（蓝色），然后将冲突网格标记为红色
+      try {
+        const linePoints = conflictPoints.value.map(p => [p.lon, p.lat, p.height])
+        const gridResp = await fetch('/api/multiSource/geometricGrid/getGridByLine', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            line: linePoints,
+            level: Number(conflictForm.level)
+          })
         })
+        const gridData = await gridResp.json()
+        console.log('[路径冲突检测] 路径网格化结果:', gridData)
+
+        if (gridData.status === 'success' && gridData.data && gridData.data.cells) {
+          const cells = gridData.data.cells.map(cell => {
+            const isConflict = conflictCodes.has(cell.code)
+            return {
+              bounds: {
+                north: cell.maxlat,
+                south: cell.minlat,
+                east: cell.maxlon,
+                west: cell.minlon,
+                top: cell.top,
+                bottom: cell.bottom,
+              },
+              level: conflictForm.level,
+              color: isConflict ? '#ef4444' : '#3b82f6', // 冲突红色，非冲突蓝色
+              isConflict: isConflict,
+              reason: isConflict ? (conflictGrids.find(c => c.code === cell.code)?.reason || '') : ''
+            }
+          })
+          emit('showGrid', { cells })
+        } else {
+          // 路径网格化失败时回退：只显示冲突网格
+          const cells = conflictGrids.map(cell => ({
+            bounds: {
+              north: cell.maxlat,
+              south: cell.minlat,
+              east: cell.maxlon,
+              west: cell.minlon,
+              top: cell.top,
+              bottom: cell.bottom,
+            },
+            level: conflictForm.level,
+            color: '#ef4444',
+            isConflict: true,
+            reason: cell.reason || ''
+          }))
+          emit('showGrid', { cells })
+        }
+      } catch (lineErr) {
+        console.error('[路径冲突检测] 获取路径网格失败:', lineErr)
+        // 失败时回退：只显示冲突网格
+        const cells = conflictGrids.map(cell => ({
+          bounds: {
+            north: cell.maxlat,
+            south: cell.minlat,
+            east: cell.maxlon,
+            west: cell.minlon,
+            top: cell.top,
+            bottom: cell.bottom,
+          },
+          level: conflictForm.level,
+          color: '#ef4444',
+          isConflict: true,
+          reason: cell.reason || ''
+        }))
         emit('showGrid', { cells })
       }
     } else {
@@ -528,11 +566,9 @@ async function submitConflictCheck() {
 
 // 路径冲突检测（首个冲突）- 表单数据
 const conflictFirstForm = reactive({
-  startTime: Math.floor(Date.now() / 1000), // 默认当前时间戳
-  level: 9, // 默认网格层级 9
-  planeRadius: 0.75, // 默认无人机半径
+  startTime: 1787846400, // 默认开始时间
+  level: 13, // 默认网格层级 13
   speed: 15.0, // 默认飞行速度
-  workHeight: 100, // 默认工作面高度
   useGdConstraint: true, // 默认启用实景三维障碍校验
 })
 
@@ -579,7 +615,6 @@ const canSubmitConflictFirst = computed(() => {
   if (conflictFirstPoints.value.length < 2) return false
   if (!Number.isFinite(Number(conflictFirstForm.startTime))) return false
   if (!Number.isFinite(Number(conflictFirstForm.level))) return false
-  if (!Number.isFinite(Number(conflictFirstForm.workHeight))) return false
   return true
 })
 
@@ -599,9 +634,9 @@ async function submitConflictFirstCheck() {
   try {
     // 构建约束条件
     const condition = {}
-    // 只有勾选了启用实景三维障碍校验，才传入 gd_9 参数
+    // 只有勾选了启用实景三维障碍校验，才传入 gd_${level} 参数
     if (conflictFirstForm.useGdConstraint) {
-      condition.gd_9 = ""
+      condition[`gd_${conflictFirstForm.level}`] = true
     }
 
     // 构建请求参数
@@ -609,9 +644,7 @@ async function submitConflictFirstCheck() {
       startTime: Number(conflictFirstForm.startTime),
       points: conflictFirstPoints.value.map(p => [p.lon, p.lat, p.height]),
       level: Number(conflictFirstForm.level),
-      planeRadius: Number(conflictFirstForm.planeRadius),
       speed: Number(conflictFirstForm.speed),
-      workHeight: Number(conflictFirstForm.workHeight),
       condition: condition
     }
 
@@ -634,43 +667,124 @@ async function submitConflictFirstCheck() {
         reason: data.reason || '检测通过，无冲突',
         grid: null
       }
+
+      // 调用 getGridByLine 获取完整路径网格（蓝色显示）
+      try {
+        const linePoints = conflictFirstPoints.value.map(p => [p.lon, p.lat, p.height])
+        const gridResp = await fetch('/api/multiSource/geometricGrid/getGridByLine', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            line: linePoints,
+            level: Number(conflictFirstForm.level)
+          })
+        })
+        const gridData = await gridResp.json()
+        console.log('[路径冲突检测-首个] 路径网格化结果:', gridData)
+
+        if (gridData.status === 'success' && gridData.data && gridData.data.cells) {
+          const cells = gridData.data.cells.map(cell => ({
+            bounds: {
+              north: cell.maxlat,
+              south: cell.minlat,
+              east: cell.maxlon,
+              west: cell.minlon,
+              top: cell.top,
+              bottom: cell.bottom,
+            },
+            level: conflictFirstForm.level,
+            color: '#3b82f6' // 完整路径用蓝色
+          }))
+          emit('showGrid', { cells })
+        }
+      } catch (lineErr) {
+        console.error('[路径冲突检测-首个] 获取路径网格失败:', lineErr)
+      }
     } else if (resp.status === 400) {
-      // 有冲突，返回单个冲突网格
-      const grid = data.grid
+      // 有冲突，返回首个冲突网格
+      const conflictGrid = data.grid
       conflictFirstResult.value = {
         status: 'has_conflict',
         reason: data.reason || '检测到冲突',
-        grid: grid
+        grid: conflictGrid
       }
 
-      // 在地图上显示冲突网格
-      if (grid) {
-        // 从 reason 字段提取冲突类型，使用对应颜色
-        let color = conflictColors['default']
-        if (data.reason) {
-          const reasonLower = data.reason.toLowerCase()
-          for (const [key, value] of Object.entries(conflictColors)) {
-            if (reasonLower.includes(key)) {
-              color = value
-              break
+      // 先获取完整路径网格（蓝色），再将冲突网格标记为红色
+      try {
+        const linePoints = conflictFirstPoints.value.map(p => [p.lon, p.lat, p.height])
+        const gridResp = await fetch('/api/multiSource/geometricGrid/getGridByLine', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            line: linePoints,
+            level: Number(conflictFirstForm.level)
+          })
+        })
+        const gridData = await gridResp.json()
+        console.log('[路径冲突检测-首个] 路径网格化结果:', gridData)
+
+        if (gridData.status === 'success' && gridData.data && gridData.data.cells) {
+          const cells = gridData.data.cells.map(cell => {
+            // 通过 code 判断是否冲突网格
+            const isConflict = conflictGrid && cell.code === conflictGrid.code
+            return {
+              bounds: {
+                north: cell.maxlat,
+                south: cell.minlat,
+                east: cell.maxlon,
+                west: cell.minlon,
+                top: cell.top,
+                bottom: cell.bottom,
+              },
+              level: conflictFirstForm.level,
+              color: isConflict ? '#ef4444' : '#3b82f6', // 冲突红色，非冲突蓝色
+              isConflict: isConflict,
+              reason: isConflict ? (data.reason || '') : ''
             }
+          })
+          emit('showGrid', { cells })
+        } else {
+          // 路径网格化失败时回退：只显示冲突网格
+          if (conflictGrid) {
+            emit('showGrid', {
+              cells: [{
+                bounds: {
+                  north: conflictGrid.maxlat,
+                  south: conflictGrid.minlat,
+                  east: conflictGrid.maxlon,
+                  west: conflictGrid.minlon,
+                  top: conflictGrid.top,
+                  bottom: conflictGrid.bottom,
+                },
+                level: conflictFirstForm.level,
+                color: '#ef4444',
+                isConflict: true,
+                reason: data.reason || ''
+              }]
+            })
           }
         }
-
-        const cells = [{
-          bounds: {
-            north: grid.maxlat,
-            south: grid.minlat,
-            east: grid.maxlon,
-            west: grid.minlon,
-            top: grid.top,
-            bottom: grid.bottom,
-          },
-          level: conflictFirstForm.level,
-          color: color,
-          reason: data.reason || ''
-        }]
-        emit('showGrid', { cells })
+      } catch (lineErr) {
+        console.error('[路径冲突检测-首个] 获取路径网格失败:', lineErr)
+        // 失败时回退：只显示冲突网格
+        if (conflictGrid) {
+          emit('showGrid', {
+            cells: [{
+              bounds: {
+                north: conflictGrid.maxlat,
+                south: conflictGrid.minlat,
+                east: conflictGrid.maxlon,
+                west: conflictGrid.minlon,
+                top: conflictGrid.top,
+                bottom: conflictGrid.bottom,
+              },
+              level: conflictFirstForm.level,
+              color: '#ef4444',
+              isConflict: true,
+              reason: data.reason || ''
+            }]
+          })
+        }
       }
     } else {
       throw new Error(`请求失败，状态码 ${resp.status}`)
@@ -690,7 +804,6 @@ const canSubmit = computed(() => {
   if (pathPoints.value.length < 2) return false // 至少需要起点和终点
   if (!Number.isFinite(Number(astarForm.startTime))) return false
   if (!Number.isFinite(Number(astarForm.level))) return false
-  if (!Number.isFinite(Number(astarForm.workHeight))) return false
   return true
 })
 
@@ -766,7 +879,6 @@ async function submitAstarPath() {
       level: Number(astarForm.level),
       planeRadius: Number(astarForm.planeRadius),
       speed: Number(astarForm.speed),
-      workHeight: Number(astarForm.workHeight),
       condition: condition
     }
 
@@ -926,16 +1038,6 @@ async function submitAstarPath() {
             step="1"
             class="param-input"
             placeholder="北京时间秒级时间戳"
-          >
-        </div>
-        <div class="param-line">
-          <span class="param-label">工作高度</span>
-          <input
-            v-model.number="astarForm.workHeight"
-            type="number"
-            step="any"
-            class="param-input"
-            placeholder="无人机作业基准高度"
           >
         </div>
         <div class="param-line">
@@ -1375,30 +1477,10 @@ async function submitAstarPath() {
           >
         </div>
         <div class="param-line">
-          <span class="param-label">工作高度</span>
-          <input
-            v-model.number="conflictForm.workHeight"
-            type="number"
-            step="any"
-            class="param-input"
-            placeholder="无人机作业基准高度"
-          >
-        </div>
-        <div class="param-line">
           <span class="param-label">网格层级</span>
           <select v-model.number="conflictForm.level" class="param-select">
             <option v-for="lvl in levelOptions" :key="lvl" :value="lvl">第 {{ lvl }} 级</option>
           </select>
-        </div>
-        <div class="param-line">
-          <span class="param-label">无人机半径</span>
-          <input
-            v-model.number="conflictForm.planeRadius"
-            type="number"
-            step="0.01"
-            class="param-input"
-            placeholder="机身半径(米)"
-          >
         </div>
         <div class="param-line">
           <span class="param-label">飞行速度</span>
@@ -1608,30 +1690,10 @@ async function submitAstarPath() {
           >
         </div>
         <div class="param-line">
-          <span class="param-label">工作高度</span>
-          <input
-            v-model.number="conflictFirstForm.workHeight"
-            type="number"
-            step="any"
-            class="param-input"
-            placeholder="无人机作业基准高度"
-          >
-        </div>
-        <div class="param-line">
           <span class="param-label">网格层级</span>
           <select v-model.number="conflictFirstForm.level" class="param-select">
             <option v-for="lvl in levelOptions" :key="lvl" :value="lvl">第 {{ lvl }} 级</option>
           </select>
-        </div>
-        <div class="param-line">
-          <span class="param-label">无人机半径</span>
-          <input
-            v-model.number="conflictFirstForm.planeRadius"
-            type="number"
-            step="0.01"
-            class="param-input"
-            placeholder="机身半径(米)"
-          >
         </div>
         <div class="param-line">
           <span class="param-label">飞行速度</span>

@@ -43,6 +43,10 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
+  showScenarioDemo: {
+    type: Boolean,
+    default: true,
+  },
 })
 
 // 框选相关变量
@@ -141,6 +145,11 @@ function drawGridBoundary(gridInfo) {
       if (!cell.bounds) return
       const { north, south, east, west, top = 0, bottom = 0 } = cell.bounds
 
+      // 前5个和最后5个网格打印位置分布
+      if (index < 5 || index >= gridInfo.cells.length - 5) {
+        console.log(`格网${index + 1}: W=${west.toFixed(6)}, S=${south.toFixed(6)}, E=${east.toFixed(6)}, N=${north.toFixed(6)}`)
+      }
+
       // 更新边界范围
       minLon = Math.min(minLon, west)
       maxLon = Math.max(maxLon, east)
@@ -153,21 +162,24 @@ function drawGridBoundary(gridInfo) {
       const cellColor = cell.color || '#3b82f6'
       const cellLevel = cell.level
 
-      // 前5个格网输出调试信息
-      if (index < 5) {
-        console.log(`[CesiumMap] 格网${index + 1}: color=${cellColor}, level=${cellLevel}, bounds=(W:${west.toFixed(6)}, S:${south.toFixed(6)}, E:${east.toFixed(6)}, N:${north.toFixed(6)})`)
-      }
-
       // 绘制每个网格边界
       const cellId = `grid-boundary-${index}`
+      
+      // 轻微扩展边界以消除Cesium渲染缝隙
+      const gapFix = 0.000001
       viewer.entities.add({
         id: cellId,
         rectangle: {
-          coordinates: Cesium.Rectangle.fromDegrees(west, south, east, north),
+          coordinates: Cesium.Rectangle.fromDegrees(
+            west - gapFix, 
+            south - gapFix, 
+            east + gapFix, 
+            north + gapFix
+          ),
           material: Cesium.Color.fromCssColorString(cellColor).withAlpha(0.5),
           outline: true,
           outlineColor: Cesium.Color.fromCssColorString(cellColor),
-          outlineWidth: 2,
+          outlineWidth: 1,
           height: bottom,
           extrudedHeight: top,
         },
@@ -3764,13 +3776,13 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- 一键场景演示按钮（飞行中显示取消按钮） -->
-      <div v-if="!scenarioState.flightActive" class="single-toggle-card scenario-demo-btn" @click="openScenarioDemo">
+      <div v-if="showScenarioDemo && !scenarioState.flightActive" class="single-toggle-card scenario-demo-btn" @click="openScenarioDemo">
         <span class="layer-label">一键场景演示</span>
         <svg class="scenario-demo-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M3 12h4l3-9 4 18 3-9h4" />
         </svg>
       </div>
-      <div v-else class="single-toggle-card scenario-demo-btn flight-cancel-btn" @click="cancelFlight">
+      <div v-else-if="showScenarioDemo" class="single-toggle-card scenario-demo-btn flight-cancel-btn" @click="cancelFlight">
         <span class="layer-label">取消飞行</span>
         <svg class="scenario-demo-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="18" y1="6" x2="6" y2="18" />

@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 import { computed, reactive, ref } from 'vue'
 import { Loader2, Trash2 } from 'lucide-vue-next'
 import LineGrid from './3_2LineGrid.vue'
@@ -33,7 +33,7 @@ const pointGridForm = reactive({
   longitude: 119.97336453966625,
   latitude: 30.51992806843684,
   height: 100,
-  level: 14,
+  level: 18,
   radius: 30,
 })
 
@@ -41,7 +41,7 @@ const pointGridForm = reactive({
 const heightOptions = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]
 
 // 层级选项
-const levelOptions = [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+const levelOptions = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
 
 // 半径快选选项
 const radiusOptions = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50]

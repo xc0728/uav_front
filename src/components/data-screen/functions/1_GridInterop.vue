@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 import { reactive, ref } from 'vue'
 
 const props = defineProps({
@@ -47,7 +47,7 @@ const heightOptions = [
   { value: 120, label: '120m' },
 ]
 
-// 层级下拉选项（4-14级）
+// 层级下拉选项（4-18级）
 const levelOptions = [
   { value: 4, label: '层级 4' },
   { value: 5, label: '层级 5' },
@@ -60,6 +60,10 @@ const levelOptions = [
   { value: 12, label: '层级 12' },
   { value: 13, label: '层级 13' },
   { value: 14, label: '层级 14' },
+  { value: 15, label: '层级 15' },
+  { value: 16, label: '层级 16' },
+  { value: 17, label: '层级 17' },
+  { value: 18, label: '层级 18' },
 ]
 
 // 高度快选
@@ -103,7 +107,7 @@ const parentGridLoading = ref(false)
 const parentGridError = ref('')
 const parentGridResult = ref(null)
 
-// 父网格层级下拉选项（4-14级）
+// 父网格层级下拉选项（4-18级）
 const parentLevelOptions = [
   { value: 4, label: '层级 4' },
   { value: 5, label: '层级 5' },
@@ -116,6 +120,10 @@ const parentLevelOptions = [
   { value: 12, label: '层级 12' },
   { value: 13, label: '层级 13' },
   { value: 14, label: '层级 14' },
+  { value: 15, label: '层级 15' },
+  { value: 16, label: '层级 16' },
+  { value: 17, label: '层级 17' },
+  { value: 18, label: '层级 18' },
 ]
 
 // 父网格层级选择

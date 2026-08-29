@@ -22,6 +22,7 @@ const noFlyZoneForm = reactive({
   bottom: 0,
   top: 120,
   description: '',
+  activateObstacle: false,
 })
 
 const points = ref([])
@@ -96,6 +97,7 @@ function resetForm() {
   noFlyZoneForm.bottom = 0
   noFlyZoneForm.top = 120
   noFlyZoneForm.description = ''
+  noFlyZoneForm.activateObstacle = false
   points.value = []
   emit('show-polygon', [])
 }
@@ -138,6 +140,44 @@ watch(
 )
 
 defineExpose({ resetForm, setPointFromMap })
+
+// 同步禁飞区网格到 Redis，作为障碍物参与路径规划
+async function syncNoFlyZoneToRedis() {
+  try {
+    const syncPayload = {
+      typeCode: noFlyZoneForm.typeCode,
+      level: Number(noFlyZoneForm.level),
+    }
+    console.log('[激活障碍] 同步禁飞区到 Redis:', syncPayload)
+
+    const resp = await fetch('/api/multiSource/redisSync/syncNoFlyZoneToRedis', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(syncPayload),
+    })
+
+    if (!resp.ok) {
+      const errText = await resp.text()
+      console.error('[激活障碍] 错误响应:', errText)
+      error.value = `禁飞区已保存，但障碍同步失败（状态码 ${resp.status}）: ${errText}`
+      return
+    }
+
+    const data = await resp.json()
+    console.log('[激活障碍] 同步返回:', data)
+
+    // 把同步统计附加到结果展示中
+    if (data?.status === 'success' && result.value) {
+      result.value = {
+        ...result.value,
+        syncStats: data.data,
+      }
+    }
+  } catch (err) {
+    console.error('[激活障碍] 请求错误:', err)
+    error.value = `禁飞区已保存，但障碍同步失败: ${err?.message || '请求失败'}`
+  }
+}
 
 async function submitSaveNoFlyZone() {
   error.value = ''
@@ -182,6 +222,11 @@ async function submitSaveNoFlyZone() {
 
     if (data?.status === 'success') {
       visualizeNoFlyZone(data.data || data)
+
+      // 若勾选"激活障碍"，则同步该禁飞区到 Redis 作为障碍物参与路径规划
+      if (noFlyZoneForm.activateObstacle) {
+        await syncNoFlyZoneToRedis()
+      }
     }
   } catch (err) {
     console.error('[保存禁飞区] 请求错误:', err)
@@ -349,6 +394,33 @@ async function submitSaveNoFlyZone() {
         <span class="result-label">类型</span>
         <span class="result-num">{{ result.type_name }}</span>
       </div>
+      <template v-if="result?.syncStats">
+        <div class="result-divider"></div>
+        <div class="result-row">
+          <span class="result-label">障碍同步</span>
+          <span class="result-status success">已同步</span>
+        </div>
+        <div v-if="result.syncStats.totalGroups != null" class="result-row">
+          <span class="result-label">总组数</span>
+          <span class="result-num">{{ result.syncStats.totalGroups }}</span>
+        </div>
+        <div v-if="result.syncStats.totalRecords != null" class="result-row">
+          <span class="result-label">总记录</span>
+          <span class="result-num">{{ result.syncStats.totalRecords }}</span>
+        </div>
+        <div v-if="result.syncStats.syncedCount != null" class="result-row">
+          <span class="result-label">同步成功</span>
+          <span class="result-num">{{ result.syncStats.syncedCount }}</span>
+        </div>
+        <div v-if="result.syncStats.failedCount != null" class="result-row">
+          <span class="result-label">失败</span>
+          <span class="result-num">{{ result.syncStats.failedCount }}</span>
+        </div>
+        <div v-if="result.syncStats.skippedCount != null" class="result-row">
+          <span class="result-label">跳过</span>
+          <span class="result-num">{{ result.syncStats.skippedCount }}</span>
+        </div>
+      </template>
     </div>
   </div>
 </template>
@@ -419,6 +491,33 @@ async function submitSaveNoFlyZone() {
 
 .param-line:last-child {
   margin-bottom: 0;
+}
+
+.param-line-checkbox {
+  margin-top: 4px;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #475569;
+  user-select: none;
+}
+
+.param-checkbox {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: #2563eb;
+}
+
+.result-divider {
+  height: 1px;
+  background: #e2e8f0;
+  margin: 8px 0;
 }
 
 .param-label {

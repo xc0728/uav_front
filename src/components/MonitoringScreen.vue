@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import CesiumMap from './data-screen/CesiumMap.vue'
 import ElectronicFence from './data-screen/functions/8_ElectronicFence.vue'
+import { useAircraftStore } from '../stores/aircraft'
 
 const now = ref(new Date())
 let clockTimer = null
@@ -24,39 +25,81 @@ const uavStatus = ref({
   heading: 0,
 })
 
-// 飞行器列表数据
-const aircraftList = ref([])
-const aircraftLoading = ref(false)
-const aircraftError = ref('')
+// 飞行器列表数据（来自共享状态，与信息管理系统实时同步）
+const { aircraftList } = useAircraftStore()
 
-async function fetchAircraftList() {
-  aircraftLoading.value = true
-  aircraftError.value = ''
-  try {
-    const resp = await fetch('/api/aircraft/list', {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-    })
-    if (!resp.ok) {
-      throw new Error(`请求失败: ${resp.status}`)
+// 当前选中的飞行器（用于列表项高亮）
+const selectedAircraftId = ref(null)
+
+// 各飞行器点击时生成的数值缓存（保证同机稳定、跨机唯一）
+const aircraftMetricsCache = ref(new Map())
+
+// 随机整数（含边界值）
+function randInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min
+}
+
+// 为指定飞行器生成唯一数值组合
+// 速度 3-15km/h、电量 40-95%、高度 10-120m、信号"正常"
+function generateUniqueMetrics(aircraftId) {
+  // 复用缓存：同一架无人机点击多次数值不变
+  if (aircraftMetricsCache.value.has(aircraftId)) {
+    return aircraftMetricsCache.value.get(aircraftId)
+  }
+  // 已被其他无人机占用的组合
+  const used = new Set(
+    [...aircraftMetricsCache.value.values()].map(m => `${m.speed}-${m.battery}-${m.altitude}`),
+  )
+  // 组合空间 13*56*111=80808，冲突概率极低，重试即可
+  let metrics = null
+  for (let i = 0; i < 200; i++) {
+    const candidate = {
+      speed: randInt(3, 15),
+      battery: randInt(40, 95),
+      altitude: randInt(10, 120),
+      signal: '正常',
     }
-    const data = await resp.json()
-    console.log('[飞行器列表] 返回数据:', data)
-    if (data?.status === 'success' && Array.isArray(data?.data)) {
-      aircraftList.value = data.data
-    } else if (Array.isArray(data)) {
-      aircraftList.value = data
-    } else {
-      aircraftList.value = []
+    const key = `${candidate.speed}-${candidate.battery}-${candidate.altitude}`
+    if (!used.has(key)) {
+      metrics = candidate
+      break
     }
-  } catch (err) {
-    console.error('[飞行器列表] 请求错误:', err)
-    aircraftError.value = err?.message || '获取飞行器列表失败'
-    aircraftList.value = []
-  } finally {
-    aircraftLoading.value = false
+  }
+  // 极端兜底
+  if (!metrics) metrics = { speed: 3, battery: 40, altitude: 10, signal: '正常' }
+  aircraftMetricsCache.value.set(aircraftId, metrics)
+  return metrics
+}
+
+// 点击飞行器列表项：在无人机状态面板显示该无人机的详细数值
+function selectAircraft(aircraft) {
+  selectedAircraftId.value = aircraft.id
+  const m = generateUniqueMetrics(aircraft.id)
+  uavStatus.value = {
+    online: true,
+    speed: m.speed,
+    battery: m.battery,
+    altitude: m.altitude,
+    signal: m.signal,
+    position: uavStatus.value.position,
+    heading: uavStatus.value.heading,
   }
 }
+
+// 飞行器被删除时清理对应缓存，避免幽灵数据
+watch(
+  () => aircraftList.value,
+  (list) => {
+    const ids = new Set(list.map(a => a.id))
+    for (const id of [...aircraftMetricsCache.value.keys()]) {
+      if (!ids.has(id)) aircraftMetricsCache.value.delete(id)
+    }
+    if (selectedAircraftId.value && !ids.has(selectedAircraftId.value)) {
+      selectedAircraftId.value = null
+    }
+  },
+  { deep: true },
+)
 
 const props = defineProps({
   routeData: {
@@ -217,36 +260,23 @@ const simulationParamsMap = ref({})
 
 const simulationParams = ref({
   user: {
-    level: 14,
-    eventTime: Date.now(),
-    warningRadiusMeters: 500,
-    maxRouteReturnGrids: 300,
-    maxRouteCheckGrids: 500,
-    persist: true,
-    cruisingSpeed: 15,
-    groundRescueSpeed: 12,
+    level: 18,
+    warningRadiusMeters: 20,
+    control: {
+      apply: true,
+      radiusMeters: 20,
+      ttlSeconds: 60,
+      maxCandidateCells: 10000,
+    },
   },
   auto: {
     eventType: 'lost_contact',
     telemetry: {
-      speed: 16,
       battery: 28,
       linkLostSeconds: 90,
       deviationMeters: 120,
     },
     position: [120.1234, 30.2345, 120],
-    flightPlan: {
-      home: [120.13, 30.22, 80],
-    },
-    control: {
-      apply: false,
-      radiusMeters: 500,
-      maxGridCount: 300,
-      ttlSeconds: 1800,
-    },
-    landingSites: [],
-    rescueResources: [],
-    condition: {},
   }
 })
 
@@ -280,9 +310,7 @@ onMounted(() => {
   isOnline.value = navigator.onLine
   window.addEventListener('online', handleOnline)
   window.addEventListener('offline', handleOffline)
-  
-  // 获取飞行器列表
-  fetchAircraftList()
+
   // 获取天气数据
   fetchWeather()
 })
@@ -304,13 +332,6 @@ watch(() => cesiumMapRef.value?.isMapReady, (ready) => {
     console.log('[MonitoringScreen] CesiumMap 就绪')
     drawAllRoutes()
   }
-})
-
-// 监听 CesiumMap 的飞行事件
-watch(cesiumMapRef, (ref) => {
-  if (!ref) return
-  ref.$on('flight-start', startFlightSimulation)
-  ref.$on('flight-end', stopFlightSimulation)
 })
 
 watch(() => props.routeData, () => {
@@ -558,33 +579,23 @@ function toggleSimulationRoute(routeId) {
 
 function resetSimulationParams() {
   simulationParams.value.user = {
-    level: 14,
-    warningRadiusMeters: 500,
-    maxRouteReturnGrids: 300,
-    maxRouteCheckGrids: 500,
-    persist: true,
+    level: 18,
+    warningRadiusMeters: 20,
+    control: {
+      apply: true,
+      radiusMeters: 20,
+      ttlSeconds: 60,
+      maxCandidateCells: 10000,
+    },
   }
   simulationParams.value.auto = {
     eventType: 'lost_contact',
     telemetry: {
-      speed: 16,
       battery: 28,
       linkLostSeconds: 90,
       deviationMeters: 120,
     },
     position: [120.1234, 30.2345, 120],
-    flightPlan: {
-      home: [120.13, 30.22, 80],
-    },
-    control: {
-      apply: false,
-      radiusMeters: 500,
-      maxGridCount: 300,
-      ttlSeconds: 1800,
-    },
-    landingSites: [],
-    rescueResources: [],
-    condition: {},
   }
 }
 
@@ -647,24 +658,11 @@ async function buildAutoSimulationParams(routeIds) {
   return {
     eventType: autoEventType,
     telemetry: {
-      speed: Math.max(5, Math.min(25, 12 + Math.round(Math.random() * 6))),
       battery: Math.max(10, Math.min(100, safeDeviation === 0 ? 42 : 26)),
       linkLostSeconds: Math.max(0, Math.min(600, safeDeviation === 0 ? 30 : 90)),
       deviationMeters: safeDeviation,
     },
     position: eventPoint || [120.1234, 30.2345, 120],
-    flightPlan: {
-      home: [120.13, 30.22, 80],
-    },
-    control: {
-      apply: false,
-      radiusMeters: 500,
-      maxGridCount: 300,
-      ttlSeconds: 1800,
-    },
-    landingSites: [],
-    rescueResources: [],
-    condition: {},
   }
 }
 
@@ -749,20 +747,10 @@ async function triggerAnomaly(routeId) {
   const requestBody = {
     position,
     eventType: params.auto.eventType,
-    level: params.user.level,
-    eventTime: params.user.eventTime || Date.now(),
     telemetry: params.auto.telemetry,
-    cruisingSpeed: params.user.cruisingSpeed,
-    groundRescueSpeed: params.user.groundRescueSpeed,
-    flightPlan: params.auto.flightPlan,
-    landingSites: params.auto.landingSites,
-    rescueResources: params.auto.rescueResources,
-    condition: params.auto.condition,
-    control: params.auto.control,
+    level: params.user.level,
     warningRadiusMeters: params.user.warningRadiusMeters,
-    maxRouteReturnGrids: params.user.maxRouteReturnGrids,
-    maxRouteCheckGrids: params.user.maxRouteCheckGrids,
-    persist: params.user.persist,
+    control: params.user.control,
   }
 
   try {
@@ -802,23 +790,7 @@ async function visualizeEmergencyResponse(responseData) {
 
   const allCells = []
 
-  // 事件网格
-  if (responseData.eventGrid) {
-    allCells.push({
-      bounds: {
-        west: responseData.eventGrid.minlon,
-        east: responseData.eventGrid.maxlon,
-        south: responseData.eventGrid.minlat,
-        north: responseData.eventGrid.maxlat,
-        top: responseData.eventGrid.top,
-        bottom: responseData.eventGrid.bottom,
-      },
-      color: '#ef4444',
-      level: responseData.warningArea?.gridLevel,
-    })
-  }
-
-  // 警戒区网格（从 gridCenters.data.cells 获取）
+  // 新 API 不再返回 eventGrid；警戒区网格从 warningArea.gridCenters.data.cells 获取
   const warningArea = responseData.warningArea
   const gridCells = warningArea?.gridCenters?.data?.cells
   if (Array.isArray(gridCells)) {
@@ -838,7 +810,7 @@ async function visualizeEmergencyResponse(responseData) {
     })
   }
 
-  console.log('[MonitoringScreen] 可视化网格总数:', allCells.length, '事件网格:', responseData.eventGrid ? 1 : 0, '警戒区网格:', Array.isArray(gridCells) ? gridCells.length : 0)
+  console.log('[MonitoringScreen] 可视化网格总数:', allCells.length, '警戒区网格:', Array.isArray(gridCells) ? gridCells.length : 0)
 
   // 统一使用 drawGridBoundary 绘制所有网格
   if (allCells.length > 0 && typeof cesiumMapRef.value.drawGridBoundary === 'function') {
@@ -847,13 +819,12 @@ async function visualizeEmergencyResponse(responseData) {
 
   // 绘制事件位置点和警戒区范围
   if (typeof cesiumMapRef.value.drawEventVisualization === 'function') {
-    const eg = responseData.eventGrid
     const waCenter = warningArea?.center
     cesiumMapRef.value.drawEventVisualization({
-      eventPoint: eg?.center ? {
-        lon: eg.center[0],
-        lat: eg.center[1],
-        height: eg.center[2] || 0,
+      eventPoint: waCenter && Array.isArray(waCenter) ? {
+        lon: waCenter[0],
+        lat: waCenter[1],
+        height: waCenter[2] || 0,
       } : null,
       warningArea: warningArea || null,
       warningCenter: waCenter && Array.isArray(waCenter) ? {
@@ -1003,6 +974,17 @@ const fenceTypeStats = computed(() => {
     return seg
   })
 
+  // 补足灰色"其他"段使环图闭合
+  if (segments.length > 0 && offset < circumference) {
+    const remainder = circumference - offset
+    segments.push({
+      type: '__remainder__',
+      color: 'rgba(255,255,255,0.25)',
+      dash: `${remainder.toFixed(2)} ${circumference.toFixed(2)}`,
+      offset: (circumference * 0.25 + offset).toFixed(2),
+    })
+  }
+
   return { total, legend, segments }
 })
 
@@ -1080,7 +1062,12 @@ defineExpose({
 
 <template>
   <div class="app-root" :class="`theme-${props.theme}`">
-    <CesiumMap ref="cesiumMapRef" :show3-d-toggle="false" />
+    <CesiumMap
+      ref="cesiumMapRef"
+      :show3-d-toggle="false"
+      @flight-start="startFlightSimulation"
+      @flight-end="stopFlightSimulation"
+    />
 
     <!-- 顶部导航 -->
     <header class="topbar">
@@ -1155,7 +1142,6 @@ defineExpose({
           <div class="fence-pie-wrapper">
             <div class="pie-chart" id="fence-pie-chart">
               <svg viewBox="0 0 100 100" class="pie-svg">
-                <circle class="pie-empty" cx="50" cy="50" r="40" />
                 <circle
                   v-for="seg in fenceTypeStats.segments"
                   :key="seg.type"
@@ -1275,7 +1261,7 @@ defineExpose({
               <div class="uav-metric-item">
                 <span class="uav-metric-label">速度</span>
                 <span class="uav-metric-value">
-                  {{ uavStatus.speed }}<span class="uav-metric-unit">m/s</span>
+                  {{ uavStatus.speed }}<span class="uav-metric-unit">km/h</span>
                 </span>
               </div>
               <div class="uav-metric-item">
@@ -1296,20 +1282,10 @@ defineExpose({
               </div>
               <div class="uav-metric-item">
                 <span class="uav-metric-label">信号</span>
-                <span class="uav-metric-value" :class="{
-                  'signal-strong': uavStatus.signal > 70,
-                  'signal-medium': uavStatus.signal > 30 && uavStatus.signal <= 70,
-                  'signal-weak': uavStatus.signal <= 30,
-                }">
-                  {{ uavStatus.signal }}<span class="uav-metric-unit">%</span>
+                <span class="uav-metric-value signal-normal">
+                  {{ uavStatus.signal }}
                 </span>
               </div>
-            </div>
-            <div class="uav-position-row">
-              <span class="uav-position-label">位置</span>
-              <span class="uav-position-value">
-                {{ uavStatus.position[0] }}, {{ uavStatus.position[1] }}
-              </span>
             </div>
           </div>
         </div>
@@ -1318,33 +1294,25 @@ defineExpose({
         <div class="aircraft-list-section">
           <div class="panel-header">
             <span class="panel-title">飞行器管理</span>
-            <button class="action-btn refresh-btn" type="button" @click="fetchAircraftList" :disabled="aircraftLoading">
-              <span v-if="aircraftLoading" class="loading-spinner"></span>
-              <span v-else>刷新</span>
-            </button>
           </div>
           <div class="aircraft-list">
-            <div v-if="aircraftLoading && aircraftList.length === 0" class="empty-list">
-              <span>加载中...</span>
-            </div>
-            <div v-else-if="aircraftError" class="empty-list error">
-              <span>{{ aircraftError }}</span>
-            </div>
-            <div v-else-if="aircraftList.length === 0" class="empty-list">
+            <div v-if="aircraftList.length === 0" class="empty-list">
               <span>暂无飞行器数据</span>
             </div>
             <div
               v-for="aircraft in aircraftList"
               :key="aircraft.id"
               class="aircraft-item"
+              :class="{ 'aircraft-item-active': selectedAircraftId === aircraft.id }"
+              @click="selectAircraft(aircraft)"
             >
               <div class="aircraft-info">
-                <span class="aircraft-name">{{ aircraft.name || aircraft.deviceName || '未知' }}</span>
+                <span class="aircraft-name">{{ aircraft.name || '未知' }}</span>
                 <span class="aircraft-model">{{ aircraft.model || '-' }}</span>
               </div>
               <div class="aircraft-sn">
                 <span class="sn-label">序列号</span>
-                <span class="sn-value">{{ aircraft.transponderNo || aircraft.serialNo || '-' }}</span>
+                <span class="sn-value">{{ aircraft.transponderNo || '-' }}</span>
               </div>
             </div>
           </div>
@@ -1397,22 +1365,26 @@ defineExpose({
                 <input v-model.number="simulationParams.user.warningRadiusMeters" type="number" min="0" />
               </div>
               <div class="param-field">
-                <label>返航格网上限</label>
-                <input v-model.number="simulationParams.user.maxRouteReturnGrids" type="number" min="1" />
-              </div>
-              <div class="param-field">
-                <label>路径检查格网上限</label>
-                <input v-model.number="simulationParams.user.maxRouteCheckGrids" type="number" min="1" />
-              </div>
-              <div class="param-field">
-                <label>是否落库</label>
-                <select v-model="simulationParams.user.persist">
-                  <option :value="true">true</option>
-                  <option :value="false">false</option>
+                <label>是否写入临时电子围栏</label>
+                <select v-model="simulationParams.user.control.apply">
+                  <option :value="true">是</option>
+                  <option :value="false">否</option>
                 </select>
               </div>
+              <div class="param-field">
+                <label>电子围栏半径 (m)</label>
+                <input v-model.number="simulationParams.user.control.radiusMeters" type="number" min="0" />
+              </div>
+              <div class="param-field">
+                <label>电子围栏有效期 (秒)</label>
+                <input v-model.number="simulationParams.user.control.ttlSeconds" type="number" min="60" />
+              </div>
+              <div class="param-field">
+                <label>候选网格计算上限</label>
+                <input v-model.number="simulationParams.user.control.maxCandidateCells" type="number" min="1" max="5000000" />
+              </div>
             </div>
-            <div class="param-tip">事件时间、巡航速度、地面救援速度、事件类型、电量、失联秒数、偏航距离等均由系统自动模拟，不在此窗口中展示。</div>
+            <div class="param-tip">事件类型、电量、失联秒数、偏航距离等均由系统自动模拟，不在此窗口中展示。</div>
           </div>
         </div>
 
@@ -2750,29 +2722,6 @@ defineExpose({
   margin-left: 2px;
 }
 
-.uav-position-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
-  border: 1px solid var(--monitor-stat-card-border);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.35);
-}
-
-.uav-position-label {
-  font-size: 11px;
-  color: #6b7280;
-  flex-shrink: 0;
-}
-
-.uav-position-value {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--monitor-panel-count);
-  font-family: monospace;
-}
-
 /* 电量颜色 */
 .battery-full { color: #16a34a; }
 .battery-mid { color: #ca8a04; }
@@ -2782,6 +2731,7 @@ defineExpose({
 .signal-strong { color: #16a34a; }
 .signal-medium { color: #ca8a04; }
 .signal-weak { color: #dc2626; }
+.signal-normal { color: #16a34a; font-weight: 600; }
 
 /* 飞行器列表区域 下1/4 */
 .aircraft-list-section {
@@ -2829,6 +2779,17 @@ defineExpose({
   background: rgba(255, 255, 255, 0.35);
   border: 1px solid var(--monitor-stat-card-border);
   border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.aircraft-item:hover {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.aircraft-item-active {
+  background: rgba(59, 130, 246, 0.18) !important;
+  border-color: #3b82f6 !important;
 }
 
 .aircraft-info {

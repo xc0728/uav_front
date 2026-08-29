@@ -1,13 +1,7 @@
-﻿<script setup>
+<script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
-import { ChevronLeft, Plane, AlertTriangle, FileCheck, Route, RefreshCw, Loader2, Shield, X, Trash2, Map } from 'lucide-vue-next'
-const DEBUG_ENDPOINT = 'http://127.0.0.1:7312/ingest/5e57985b-bd02-4287-9790-3766cef1de87'
-const SESSION_ID = '7ed241'
-function debugLog(location, message, data = {}) {
-  // #region agent log
-  fetch(DEBUG_ENDPOINT, {method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':SESSION_ID},body:JSON.stringify({sessionId:SESSION_ID,location,message,data,timestamp:Date.now()})}).catch(()=>{})
-  // #endregion
-}
+import { useAircraftStore } from '../../../stores/aircraft'
+import { ChevronLeft, Plane, AlertTriangle, FileCheck, Route, RefreshCw, Loader2, Shield, X, Trash2 } from 'lucide-vue-next'
 
 const FETCH_TIMEOUT_MS = 1000 * 20
 
@@ -84,16 +78,8 @@ const routeList = ref([])
 const routeError = ref('')
 
 // 飞行器管理数据
-const aircraftList = ref([
-  {
-    id: 'aircraft-001',
-    name: '大疆',
-    model: 'M3T',
-    transponderNo: '11111',
-    bindTime: '2024-12-02 10:06:50',
-    owner: '张三',
-  },
-])
+// 飞行器列表数据源：共享状态（与监控大屏右下角面板实时同步）
+const { aircraftList, upsertAircraft } = useAircraftStore()
 const aircraftFilters = ref({
   deviceName: '',
   bindTime: [],
@@ -518,11 +504,8 @@ function saveAircraft() {
     owner: form.owner || '-',
   }
 
-  if (aircraftSelected.value?.id) {
-    aircraftList.value = aircraftList.value.map(item => item.id === aircraftSelected.value.id ? record : item)
-  } else {
-    aircraftList.value.unshift(record)
-  }
+  // 通过共享状态新增/更新，监控大屏右下角面板会自动同步
+  upsertAircraft(record)
 
   aircraftSelected.value = record
   aircraftTotalCount.value = aircraftList.value.length
@@ -838,10 +821,8 @@ function handleVisualizeEvent() {
 
 // 获取航线列表
 async function fetchRoutes() {
-  debugLog('InfoManagementPanel.vue:fetchRoutes', 'fetchRoutes start', {})
   isRoutesLoading.value = true
   routeError.value = ''
-  const routeStart = Date.now()
 
   try {
     const resp = await fetch('/api/airRoute/routeManagement/listStoredRoutes', {
@@ -855,7 +836,6 @@ async function fetchRoutes() {
     }
 
     const data = await resp.json()
-    debugLog('InfoManagementPanel.vue:fetchRoutes', 'fetchRoutes response', {status:data?.status,hasData:!!data?.data,count:data?.data?.length,latency:Date.now()-routeStart})
 
     if (data?.status === 'success' && Array.isArray(data?.data)) {
       routeList.value = data.data
@@ -868,12 +848,9 @@ async function fetchRoutes() {
     }
   } catch (err) {
     console.error('[航线列表] 请求错误:', err)
-    debugLog('InfoManagementPanel.vue:fetchRoutes', 'fetchRoutes error', {message:err?.message,latency:Date.now()-routeStart})
     routeError.value = err?.message || '获取航线列表失败'
   } finally {
-    debugLog('InfoManagementPanel.vue:fetchRoutes', 'fetchRoutes finally', {isLoadingBefore:isRoutesLoading.value,latency:Date.now()-routeStart})
     isRoutesLoading.value = false
-    debugLog('InfoManagementPanel.vue:fetchRoutes', 'fetchRoutes finally after', {isLoadingAfter:isRoutesLoading.value,latency:Date.now()-routeStart})
   }
 }
 
@@ -897,13 +874,11 @@ let currentFetchId = 0
 let inFlightFetches = 0
 
 async function fetchFences() {
-  debugLog('InfoManagementPanel.vue:fetchFences', 'fetchFences start', {fenceTypeCode:fenceTypeCode.value,page:fenceCurrentPage.value,pageSize:fencePageSize.value,inFlight:inFlightFetches})
   isLoading.value = true
   isFencesLoading.value = true
   fenceError.value = ''
   const fetchId = ++currentFetchId
   inFlightFetches++
-  const fenceStart = Date.now()
 
   try {
     const page = fenceCurrentPage.value
@@ -927,9 +902,7 @@ async function fetchFences() {
 
       if (!resp.ok) throw new Error(`请求失败: ${resp.status}`)
       data = await resp.json()
-      debugLog('InfoManagementPanel.vue:fetchFences', 'fetchFences single response', {status:data?.status,hasData:!!data?.data,latency:Date.now()-fenceStart})
       if (fetchId !== currentFetchId) {
-        debugLog('InfoManagementPanel.vue:fetchFences', 'fetchFences single stale', {fetchId,currentFetchId})
         return
       }
 
@@ -946,7 +919,6 @@ async function fetchFences() {
       }
     } else {
       // 所有类型：直接调用后端的 'all' 类型
-      debugLog('InfoManagementPanel.vue:fetchFences', 'fetchFences all types start', {type:'all'})
       const ctrl = new AbortController()
       const resp = await withTimeout(() => fetch('/api/multiSource/airSpace/noFlyZone/list', {
         method: 'POST',
@@ -956,9 +928,7 @@ async function fetchFences() {
 
       if (!resp.ok) throw new Error(`请求失败: ${resp.status}`)
       data = await resp.json()
-      debugLog('InfoManagementPanel.vue:fetchFences', 'fetchFences all types response', {status:data?.status,hasData:!!data?.data,latency:Date.now()-fenceStart})
       if (fetchId !== currentFetchId) {
-        debugLog('InfoManagementPanel.vue:fetchFences', 'fetchFences all types stale', {fetchId,currentFetchId})
         return
       }
 
@@ -976,18 +946,15 @@ async function fetchFences() {
     }
   } catch (err) {
     console.error('[禁飞区列表] 请求错误:', err)
-    debugLog('InfoManagementPanel.vue:fetchFences', 'fetchFences error', {message:err?.message,latency:Date.now()-fenceStart})
     if (fetchId === currentFetchId) {
       fenceError.value = err?.message || '获取禁飞区列表失败'
     }
   } finally {
-    debugLog('InfoManagementPanel.vue:fetchFences', 'fetchFences finally', {fetchId,currentFetchId,isLoadingBefore:isFencesLoading.value,inFlight:inFlightFetches,latency:Date.now()-fenceStart})
     inFlightFetches = Math.max(0, inFlightFetches - 1)
     if (inFlightFetches === 0) {
       isFencesLoading.value = false
       isLoading.value = false
     }
-    debugLog('InfoManagementPanel.vue:fetchFences', 'fetchFences finally after', {fetchId,currentFetchId,isLoadingAfter:isFencesLoading.value,inFlight:inFlightFetches,latency:Date.now()-fenceStart})
   }
 }
 
@@ -1077,13 +1044,33 @@ async function syncNoFlyZoneToRedis() {
     const data = await resp.json()
     if (data?.status === 'success') {
       const d = data.data || {}
-      alert(`同步完成：共 ${d.totalGroups || 0} 组，${d.totalRecords || 0} 条记录，成功 ${d.syncedCount || 0}，失败 ${d.failedCount || 0}，跳过 ${d.skippedCount || 0}`)
+      const failed = d.failedCount ?? 0
+      const cleanup = d.redisCleanup || {}
+      const cleanupComplete = cleanup.complete === true
+      const cleanupDeleted = cleanup.deletedCount ?? 0
+      const cleanupPerformed = cleanup.performed === true
+
+      let msg = `激活避障完成：同步 ${d.syncedCount ?? 0} 条`
+      if (failed > 0) {
+        msg += `，失败 ${failed} 条`
+      }
+      if (cleanupPerformed) {
+        msg += `；Redis 清理完成(${cleanupComplete ? '完整' : '不完整'})，删除旧键 ${cleanupDeleted} 条`
+      }
+
+      if (failed !== 0) {
+        alert(`激活避障异常：存在失败项(${failed} 条)。\n${msg}`)
+      } else if (cleanupPerformed && !cleanupComplete) {
+        alert(`激活避障异常：Redis 清理未完成。\n${msg}`)
+      } else {
+        alert(msg)
+      }
     } else {
-      alert('同步失败：' + (data?.message || '未知错误'))
+      alert('激活避障失败：' + (data?.message || '未知错误'))
     }
   } catch (err) {
-    console.error('[禁飞区同步] 请求错误:', err)
-    alert('同步请求失败')
+    console.error('[激活避障] 请求错误:', err)
+    alert('激活避障请求失败')
   } finally {
     isSyncing.value = false
   }
@@ -1692,8 +1679,10 @@ defineExpose({
                   <option value="other_no_fly_zone">其他禁飞区</option>
                 </select>
                 <button class="btn-show-all" @click="showAllNoFlyZones" :disabled="isFencesLoading || fenceList.length === 0">
-                  <Map :size="14" />
                   一键显示
+                </button>
+                <button class="btn-activate-obstacle" @click="syncNoFlyZoneToRedis" :disabled="isSyncing">
+                  {{ isSyncing ? '激活中...' : '激活避障' }}
                 </button>
                 <button class="btn-refresh" @click="fetchFences" :disabled="isFencesLoading">
                   <Loader2 v-if="isFencesLoading" :size="14" class="spin" />
@@ -1737,7 +1726,6 @@ defineExpose({
                       />
                     </th>
                     <th>序号</th>
-                    <th>区域ID</th>
                     <th>名称</th>
                     <th>类型</th>
                     <th>底面高(m)</th>
@@ -1756,7 +1744,6 @@ defineExpose({
                       />
                     </td>
                     <td class="col-index">{{ (fenceCurrentPage - 1) * fencePageSize + index + 1 }}</td>
-                    <td class="col-id">{{ zone.zone_id }}</td>
                     <td class="col-name">{{ zone.name || '-' }}</td>
                     <td class="col-type">
                       <span class="type-badge type-polygon">
@@ -2244,6 +2231,30 @@ defineExpose({
 }
 
 .btn-show-all:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-activate-obstacle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid #fde68a;
+  border-radius: 6px;
+  background: #fffbeb;
+  color: #d97706;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-activate-obstacle:hover:not(:disabled) {
+  background: #fef3c7;
+  border-color: #fbbf24;
+}
+
+.btn-activate-obstacle:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
