@@ -1055,15 +1055,6 @@ watch(
       </div>
     </div>
   </div>
-
-  <!-- 不规则多面体网格化 -->
-  <div v-else-if="functionName === '不规则多面体网格化'" class="calc-content">
-    <div class="coming-soon">
-      <div class="coming-soon-icon">🚧</div>
-      <div class="coming-soon-text">功能开发中...</div>
-      <div class="coming-soon-desc">API信息暂未提供，敬请期待</div>
-    </div>
-  </div>
 </template>
 
 <style scoped>

@@ -45,10 +45,10 @@ const services = [
   {
     id: 'tilt-photogrammetry',
     name: '倾斜摄影网格化入库服务',
-    shortName: '倾斜摄影入库',
+    shortName: '倾斜摄影网格',
     icon: Map,
     component: TiltPhotogrammetry,
-    functions: ['osgb网格化（同步入库）', '倾斜摄影网格查询', 'osgb网格化聚合入库'],
+    functions: ['倾斜摄影网格查询'],
   },
   {
     id: 'grid-split',
@@ -64,7 +64,6 @@ const services = [
       '多边形网格化',
       '多边形网格化（带洞）',
       '多边形表面网格化',
-      '不规则多面体网格化',
       '立方体网格化',
     ],
   },
@@ -201,7 +200,7 @@ const activeComponent = computed(() => {
     if (fn === '三维线网格化' || fn === '线矩形缓冲区（管道）网格化') {
       return LineGrid
     }
-    if (fn === '多边形网格化' || fn === '多边形网格化（带洞）' || fn === '多边形表面网格化' || fn === '不规则多面体网格化') {
+    if (fn === '多边形网格化' || fn === '多边形网格化（带洞）' || fn === '多边形表面网格化') {
       return PolygonGrid
     }
     if (fn === '立方体网格化') {
@@ -244,7 +243,6 @@ function applyMapPointToActiveService(lon, lat, height) {
       || activeFunctionName.value === '多边形网格化'
       || activeFunctionName.value === '多边形网格化（带洞）'
       || activeFunctionName.value === '多边形表面网格化'
-      || activeFunctionName.value === '不规则多面体网格化'
       || activeFunctionName.value === '立方体网格化')
   ) {
     if (typeof activeComponentRef.value.setPointFromMap === 'function') {

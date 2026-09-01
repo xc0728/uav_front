@@ -5,6 +5,11 @@ import {
   loadDeqingBuildings,
   drawBuildingModelsOnMap,
 } from '../../utils/buildingModel.js'
+import {
+  BASE_LAYER_OPTIONS,
+  initBaseLayers,
+  switchBaseLayer,
+} from '../../utils/tdtBaseLayers.js'
 
 // 模块级别的存储（持久化，不随组件销毁而丢失）
 const routeGridEntities = {}
@@ -25,6 +30,21 @@ const height = ref(null)
 const show3DTiles = ref(true)
 const showBuildings = ref(false) // 建筑白膜开关
 const isMapReady = ref(false) // 地图是否准备就绪
+
+// ==================== 底图图源切换 ====================
+const currentBaseLayer = ref('default')
+const showBaseLayerPanel = ref(false)
+const baseLayerOptions = BASE_LAYER_OPTIONS
+
+function selectBaseLayer(type) {
+  if (type === currentBaseLayer.value) {
+    showBaseLayerPanel.value = false
+    return
+  }
+  switchBaseLayer(viewer, type)
+  currentBaseLayer.value = type
+  showBaseLayerPanel.value = false
+}
 
 // 电子围栏绘制状态
 let fenceDrawHandler = null
@@ -3591,6 +3611,8 @@ defineExpose({
   // 建筑白膜模型
   loadBuildingModels,
   toggleBuildingsOnMap,
+  // 底图图源切换
+  setBaseLayer: selectBaseLayer,
 })
 
 onMounted(async () => {
@@ -3628,6 +3650,9 @@ onMounted(async () => {
     })
 
     viewer.scene.globe.depthTestAgainstTerrain = false
+
+    // 记录默认影像图层，供底图切换使用
+    initBaseLayers(viewer)
 
     tileset = await Cesium.Cesium3DTileset.fromUrl('/dq3dtiles/tileset.json')
     viewer.scene.primitives.add(tileset)
@@ -3797,6 +3822,30 @@ onBeforeUnmount(() => {
           <div class="toggle-slider" />
         </div>
       </div>
+
+      <!-- 底图图源切换卡片 -->
+      <div class="single-toggle-card base-layer-card" @click.stop="showBaseLayerPanel = !showBaseLayerPanel">
+        <span class="layer-label">底图</span>
+        <span class="base-layer-current">{{ baseLayerOptions.find(o => o.id === currentBaseLayer)?.label }}</span>
+        <svg class="base-layer-chevron" :class="{ open: showBaseLayerPanel }" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+        <div v-if="showBaseLayerPanel" class="base-layer-panel" @click.stop>
+          <div
+            v-for="opt in baseLayerOptions"
+            :key="opt.id"
+            class="base-layer-option"
+            :class="{ active: opt.id === currentBaseLayer }"
+            @click="selectBaseLayer(opt.id)"
+          >
+            <span>{{ opt.label }}</span>
+            <span v-if="opt.id === currentBaseLayer" class="base-layer-check">&#10003;</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 点击面板外区域关闭底图选择面板 -->
+      <div v-if="showBaseLayerPanel" class="base-layer-mask" @click="showBaseLayerPanel = false" />
     </div>
   </section>
 
@@ -4082,6 +4131,75 @@ onBeforeUnmount(() => {
 
 .toggle-switch.active .toggle-slider {
   transform: translateX(16px);
+}
+
+/* ==================== 底图图源切换 ==================== */
+
+.base-layer-card {
+  position: relative;
+}
+
+.base-layer-current {
+  font-size: 12px;
+  color: #60a5fa;
+  min-width: 24px;
+  text-align: center;
+}
+
+.base-layer-chevron {
+  color: rgba(255, 255, 255, 0.6);
+  transition: transform 0.2s ease;
+}
+
+.base-layer-chevron.open {
+  transform: rotate(180deg);
+}
+
+.base-layer-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: 96px;
+  padding: 6px;
+  background: rgba(15, 23, 42, 0.95);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  z-index: 30;
+}
+
+.base-layer-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.base-layer-option:hover {
+  background: rgba(59, 130, 246, 0.2);
+  color: #fff;
+}
+
+.base-layer-option.active {
+  color: #60a5fa;
+}
+
+.base-layer-check {
+  font-size: 11px;
+}
+
+.base-layer-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
 }
 
 /* ==================== 一键场景演示样式 ==================== */

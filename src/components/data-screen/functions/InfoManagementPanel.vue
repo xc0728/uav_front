@@ -34,7 +34,7 @@ const isLoading = ref(false)
 const isRoutesLoading = ref(false)
 const isFencesLoading = ref(false)
 
-// 信息管理系统功能模块
+// 信息归集服务功能模块
 const infoModules = [
   {
     id: 'aircraft-status',
@@ -1336,7 +1336,7 @@ defineExpose({
     <!-- 左侧导航栏 -->
     <aside class="sidebar">
       <div class="sidebar-header">
-        <h2>信息管理</h2>
+        <h2>信息归集服务</h2>
       </div>
       <nav class="sidebar-nav">
         <button
@@ -1360,7 +1360,7 @@ defineExpose({
         <div class="breadcrumb">
           <span class="breadcrumb-item">智绘平台</span>
           <span class="breadcrumb-separator">/</span>
-          <span class="breadcrumb-item">信息管理系统</span>
+          <span class="breadcrumb-item">信息归集服务</span>
           <span class="breadcrumb-separator">/</span>
           <span class="breadcrumb-item current">飞行器管理</span>
         </div>
@@ -1431,7 +1431,7 @@ defineExpose({
         <div class="breadcrumb">
           <span class="breadcrumb-item">智绘平台</span>
           <span class="breadcrumb-separator">/</span>
-          <span class="breadcrumb-item">信息管理系统</span>
+          <span class="breadcrumb-item">信息归集服务</span>
           <span class="breadcrumb-separator">/</span>
           <span class="breadcrumb-item current">飞行资质管理</span>
         </div>
@@ -1531,7 +1531,7 @@ defineExpose({
         <div class="breadcrumb">
           <span class="breadcrumb-item">智绘平台</span>
           <span class="breadcrumb-separator">/</span>
-          <span class="breadcrumb-item">信息管理系统</span>
+          <span class="breadcrumb-item">信息归集服务</span>
           <span class="breadcrumb-separator">/</span>
           <span class="breadcrumb-item current">航线信息管理</span>
         </div>
@@ -1659,7 +1659,7 @@ defineExpose({
           <div class="breadcrumb">
             <span class="breadcrumb-item">智绘平台</span>
             <span class="breadcrumb-separator">/</span>
-            <span class="breadcrumb-item">信息管理系统</span>
+            <span class="breadcrumb-item">信息归集服务</span>
             <span class="breadcrumb-separator">/</span>
             <span class="breadcrumb-item current">禁飞区管理</span>
           </div>
@@ -1792,7 +1792,7 @@ defineExpose({
         <div class="breadcrumb">
           <span class="breadcrumb-item">智绘平台</span>
           <span class="breadcrumb-separator">/</span>
-          <span class="breadcrumb-item">信息管理系统</span>
+          <span class="breadcrumb-item">信息归集服务</span>
           <span class="breadcrumb-separator">/</span>
           <span class="breadcrumb-item current">异常事件管理</span>
         </div>

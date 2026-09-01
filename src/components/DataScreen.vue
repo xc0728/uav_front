@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { MapPin } from 'lucide-vue-next'
 import ServicePanel from './data-screen/ServicePanel.vue'
 import InfoManagementPanel from './data-screen/functions/InfoManagementPanel.vue'
+import StorageServicePanel from './data-screen/functions/StorageServicePanel.vue'
 import CesiumMap from './data-screen/CesiumMap.vue'
 import MonitoringScreen from './MonitoringScreen.vue'
 
@@ -32,7 +33,7 @@ const pendingEventVisualization = ref(null)
 const pendingAnomalyEvents = ref([])
 const visibleNoFlyZones = ref({})
 
-const currentPage = ref('main') // 'main' | 'monitoring' | 'info'
+const currentPage = ref('main') // 'main' | 'monitoring' | 'info' | 'storage'
 const currentTheme = ref('white')
 const isThemeMenuOpen = ref(false)
 
@@ -168,6 +169,10 @@ function goToInfoSystem() {
   currentPage.value = 'info'
 }
 
+function goToStorageService() {
+  currentPage.value = 'storage'
+}
+
 function toggleThemeMenu() {
   isThemeMenuOpen.value = !isThemeMenuOpen.value
 }
@@ -184,6 +189,8 @@ function handleSwitchPage(page) {
     currentPage.value = 'monitoring'
   } else if (page === 'info') {
     currentPage.value = 'info'
+  } else if (page === 'storage') {
+    currentPage.value = 'storage'
   }
 }
 
@@ -230,7 +237,7 @@ function handleRouteMonitorStop(payload) {
   delete monitoredRoutes.value[id]
 }
 
-// 信息管理系统事件处理
+// 信息归集服务事件处理
 function handleInfoShowPoint(payload) {
   console.log('[DataScreen] 收到 info showPoint 事件:', payload)
   if (!payload || !cesiumMapRef.value) return
@@ -305,7 +312,7 @@ function handleHideNoFlyZone({ zoneId }) {
   removeNoFlyZoneFromGridMap(zoneId)
 }
 
-// 当网格化算子页面的 CesiumMap 就绪时（用户切回该页面或首次加载），
+// 当网格算子服务页面的 CesiumMap 就绪时（用户切回该页面或首次加载），
 // 同步绘制当前所有已显示的禁飞区，保证跨页面状态一致
 watch(
   () => cesiumMapRef.value?.isMapReady,
@@ -378,8 +385,9 @@ function handleGetViewBounds() {
 
       <!-- 左侧子页面导航按钮 -->
       <div class="left-nav-buttons">
-        <div class="nav-btn" :class="{ active: currentPage === 'main' }" @click="goToGridOperator">网格化算子</div>
-        <div class="nav-btn" :class="{ active: currentPage === 'info' }" @click="goToInfoSystem">信息管理系统</div>
+        <div class="nav-btn" :class="{ active: currentPage === 'main' }" @click="goToGridOperator">网格算子服务</div>
+        <div class="nav-btn" :class="{ active: currentPage === 'info' }" @click="goToInfoSystem">信息归集服务</div>
+        <div class="nav-btn" :class="{ active: currentPage === 'storage' }" @click="goToStorageService">数据管理服务</div>
       </div>
 
       <!-- 中间标题 -->
@@ -447,7 +455,7 @@ function handleGetViewBounds() {
       </div>
     </header>
 
-    <!-- 主页面 - 网格化算子 -->
+    <!-- 主页面 - 网格算子服务 -->
     <template v-if="currentPage === 'main'">
       <CesiumMap
         ref="cesiumMapRef"
@@ -485,7 +493,7 @@ function handleGetViewBounds() {
   />
     </div>
 
-    <!-- 信息管理系统 - 始终渲染，使用 v-show 保持状态 -->
+    <!-- 信息归集服务 - 始终渲染，使用 v-show 保持状态 -->
     <div v-show="currentPage === 'info'" class="info-page-wrapper">
       <InfoManagementPanel
     ref="infoManagementPanelRef"
@@ -496,6 +504,11 @@ function handleGetViewBounds() {
     @show-no-fly-zone="handleShowNoFlyZone"
     @hide-no-fly-zone="handleHideNoFlyZone"
   />
+    </div>
+
+    <!-- 数据管理服务 - 始终渲染，使用 v-show 保持状态 -->
+    <div v-show="currentPage === 'storage'" class="storage-page-wrapper">
+      <StorageServicePanel />
     </div>
   </div>
 </template>
@@ -704,12 +717,18 @@ html, body, #app {
 /* 左侧子页面导航按钮 */
 .left-nav-buttons {
   position: absolute;
-  left: 230px;
+  left: 165px;
   top: 50%;
   transform: translateY(-50%);
   display: flex;
-  gap: 80px;
+  gap: 16px;
   z-index: 10;
+}
+
+/* 收窄按钮宽度，避免与中间标题重叠 */
+.left-nav-buttons .nav-btn {
+  min-width: 108px;
+  padding: 8px 12px;
 }
 
 .nav-btn {
@@ -1114,7 +1133,7 @@ html, body, #app {
   pointer-events: none;
 }
 
-/* 信息管理系统全屏内容区 */
+/* 信息归集服务全屏内容区 */
 .info-main {
   position: fixed;
   top: 60px;
@@ -1125,8 +1144,20 @@ html, body, #app {
   background: #f8fafc;
 }
 
-/* 信息管理系统页面包装器 - 覆盖在主内容区之上 */
+/* 信息归集服务页面包装器 - 覆盖在主内容区之上 */
 .info-page-wrapper {
+  position: fixed;
+  top: 60px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  background: #ffffff;
+  overflow: auto;
+}
+
+/* 数据管理服务页面包装器 - 覆盖在主内容区之上 */
+.storage-page-wrapper {
   position: fixed;
   top: 60px;
   left: 0;

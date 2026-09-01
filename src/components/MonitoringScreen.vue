@@ -25,7 +25,7 @@ const uavStatus = ref({
   heading: 0,
 })
 
-// 飞行器列表数据（来自共享状态，与信息管理系统实时同步）
+// 飞行器列表数据（来自共享状态，与信息归集服务实时同步）
 const { aircraftList } = useAircraftStore()
 
 // 当前选中的飞行器（用于列表项高亮）
@@ -1073,9 +1073,9 @@ defineExpose({
     <header class="topbar">
       <!-- 左侧导航按钮 -->
       <div class="left-nav-buttons">
-        <div class="nav-btn" @click="$emit('switch_page', 'grid')">网格化算子</div>
+        <div class="nav-btn" @click="$emit('switch_page', 'grid')">网格算子服务</div>
         <div class="nav-btn active">实时监控大屏</div>
-        <div class="nav-btn" @click="$emit('switch_page', 'info')">信息管理系统</div>
+        <div class="nav-btn" @click="$emit('switch_page', 'info')">信息归集服务</div>
       </div>
 
       <!-- 中间标题 -->
@@ -2273,11 +2273,11 @@ defineExpose({
 }
 
 .simulation-modal {
-  width: min(920px, calc(100vw - 40px));
-  max-height: min(86vh, 920px);
+  width: min(1180px, calc(100vw - 48px));
+  max-height: min(92vh, 1120px);
   background: #f8fbff;
-  border-radius: 14px;
-  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.28);
+  border-radius: 16px;
+  box-shadow: 0 24px 72px rgba(15, 23, 42, 0.3);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -2287,50 +2287,51 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+  padding: 22px 26px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.28);
   background: linear-gradient(90deg, #1a365d, #2c5282);
   color: #fff;
 }
 
 .simulation-modal-title {
-  font-size: 16px;
+  font-size: 20px;
   font-weight: 700;
+  letter-spacing: 0.5px;
 }
 
 .simulation-modal-body {
-  padding: 18px 20px 10px;
+  padding: 26px 28px 14px;
   overflow: auto;
 }
 
 .simulation-section {
-  margin-bottom: 18px;
-  padding: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.2);
-  border-radius: 12px;
+  margin-bottom: 22px;
+  padding: 20px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 14px;
   background: #fff;
 }
 
 .section-title {
-  font-size: 14px;
+  font-size: 17px;
   font-weight: 700;
   color: #1e3a5f;
-  margin-bottom: 10px;
+  margin-bottom: 14px;
 }
 
 .route-select-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
 }
 
 .route-select-item {
   border: 1px solid rgba(148, 163, 184, 0.24);
-  border-radius: 10px;
-  padding: 10px 12px;
+  border-radius: 12px;
+  padding: 14px 16px;
   background: #f8fafc;
   display: flex;
-  gap: 8px;
+  gap: 10px;
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -2348,44 +2349,44 @@ defineExpose({
 .route-select-main {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .route-select-name {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 600;
   color: #1e293b;
 }
 
 .route-select-meta {
-  font-size: 12px;
+  font-size: 13px;
   color: #64748b;
 }
 
 .param-columns {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 18px;
 }
 
 .param-group {
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 10px;
-  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 12px;
+  padding: 16px;
   background: #f8fafc;
 }
 
 .param-group-title {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: #334155;
-  margin-bottom: 10px;
+  margin-bottom: 14px;
 }
 
 .param-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 14px;
 }
 
 .param-grid.single-grid {
@@ -2399,12 +2400,13 @@ defineExpose({
 .param-field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .param-field label {
-  font-size: 12px;
-  color: #475569;
+  font-size: 14px;
+  color: #334155;
+  font-weight: 500;
 }
 
 .param-field input,
@@ -2412,42 +2414,43 @@ defineExpose({
 .param-field textarea {
   width: 100%;
   border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  padding: 8px 10px;
-  font-size: 13px;
+  border-radius: 10px;
+  padding: 11px 13px;
+  font-size: 14px;
   background: #fff;
   color: #0f172a;
   outline: none;
 }
 
 .param-field textarea {
-  min-height: 84px;
+  min-height: 110px;
   resize: vertical;
 }
 
 .param-tip {
-  margin-top: 8px;
-  font-size: 12px;
+  margin-top: 10px;
+  font-size: 13px;
   color: #64748b;
-  line-height: 1.6;
+  line-height: 1.7;
 }
 
 .simulation-modal-footer {
-  padding: 14px 20px 18px;
+  padding: 18px 28px 24px;
   display: flex;
   justify-content: flex-end;
-  gap: 10px;
-  border-top: 1px solid rgba(148, 163, 184, 0.22);
+  gap: 14px;
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
   background: #fff;
 }
 
 .modal-btn {
-  min-width: 88px;
-  padding: 9px 16px;
-  border-radius: 8px;
+  min-width: 104px;
+  padding: 11px 20px;
+  border-radius: 10px;
   border: 1px solid transparent;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .modal-btn.secondary {

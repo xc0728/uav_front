@@ -104,9 +104,6 @@ const pipeForm = reactive({
   level: 18,
   halfWidth: 15,
   halfHeight: 15,
-  maxCheckCells: 200000,
-  collisionLimit: 200,
-  includeBufferCells: false,
 })
 
 const canSubmitPipe = computed(() => points.value.length >= 2 &&
@@ -161,22 +158,22 @@ async function submitLinePipeGrid() {
       level: Number(pipeForm.level),
       halfWidth: Number(pipeForm.halfWidth),
       halfHeight: Number(pipeForm.halfHeight),
-      maxCheckCells: Number(pipeForm.maxCheckCells) || 200000,
-      collisionLimit: Number(pipeForm.collisionLimit) || 200,
-      includeBufferCells: !!pipeForm.includeBufferCells,
     }
     if (payload.line.length < 2) throw new Error('请至少选择 2 个点组成线')
     if (Number.isNaN(payload.level)) throw new Error('请填写合法的层级 level')
     if (Number.isNaN(payload.halfWidth) || payload.halfWidth <= 0) throw new Error('请填写合法的半宽')
     if (Number.isNaN(payload.halfHeight) || payload.halfHeight <= 0) throw new Error('请填写合法的半高')
 
-    const resp = await fetch('/api/multiSource/geometricGrid/checkPolylineRectOsgbCollision', {
+    const resp = await fetch('/api/multiSource/geometricGrid/getGridByPolylineAndRect', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
 
     if (!resp.ok) {
+      if (resp.status === 404) {
+        throw new Error('后端暂未提供线矩形缓冲区（管道）网格化计算接口，请联系管理员确认后端服务已部署该功能')
+      }
       let errMsg = `请求失败，状态码 ${resp.status}`
       try {
         const errData = await resp.json()
@@ -188,19 +185,13 @@ async function submitLinePipeGrid() {
     const data = await resp.json()
     result.value = data
 
-    // 根据 includeBufferCells 决定展示哪些网格
-    const cellsToShow = []
-    const collisionCodes = new Set()
-
-    // 收集所有碰撞网格的 code
-    if (data?.data?.collisions?.length) {
-      data.data.collisions.forEach(c => collisionCodes.add(c.code))
-    }
-
-    // 如果请求了缓冲区网格，添加到展示列表
+    // 与三维线网格化一致：最多展示 10000 个网格，防止大缓冲区渲染卡顿
+    const MAX_CELLS = 10000
     if (data?.data?.cells?.length) {
-      data.data.cells.forEach(cell => {
-        cellsToShow.push({
+      // 计算后仅展示格网：清除绘制的线
+      emit('show-line', [])
+      emit('showGrid', {
+        cells: data.data.cells.slice(0, MAX_CELLS).map(cell => ({
           bounds: {
             north: cell.maxlat,
             south: cell.minlat,
@@ -211,33 +202,9 @@ async function submitLinePipeGrid() {
           },
           code: cell.code,
           center: cell.center,
-          collidesOsgb: cell.collidesOsgb || collisionCodes.has(cell.code),
-        })
+        })),
       })
     }
-
-    // 如果没有请求缓冲区网格，但有碰撞网格，也展示碰撞网格
-    if (cellsToShow.length === 0 && data?.data?.collisions?.length) {
-      data.data.collisions.forEach(cell => {
-        cellsToShow.push({
-          bounds: {
-            north: cell.maxlat,
-            south: cell.minlat,
-            east: cell.maxlon,
-            west: cell.minlon,
-            top: cell.top,
-            bottom: cell.bottom,
-          },
-          code: cell.code,
-          center: cell.center,
-          collidesOsgb: true,
-        })
-      })
-    }
-
-    // 计算后仅展示格网：清除绘制的线
-    emit('show-line', [])
-    emit('showGrid', { cells: cellsToShow })
   } catch (err) {
     error.value = err?.message || '请求失败，请稍后重试'
   } finally {
@@ -452,39 +419,6 @@ async function submit() {
         </div>
       </div>
 
-      <!-- OSGB 碰撞检测参数 -->
-      <div class="form-group">
-        <div class="group-title">OSGB 碰撞检测</div>
-        <div class="param-line">
-          <span class="param-label">最大检测</span>
-          <input
-            v-model.number="pipeForm.maxCheckCells"
-            type="number"
-            step="10000"
-            min="1"
-            class="param-input"
-            placeholder="200000"
-          >
-        </div>
-        <div class="param-line">
-          <span class="param-label">碰撞上限</span>
-          <input
-            v-model.number="pipeForm.collisionLimit"
-            type="number"
-            step="10"
-            min="1"
-            class="param-input"
-            placeholder="200"
-          >
-        </div>
-        <div class="param-line">
-          <label class="checkbox-label">
-            <input type="checkbox" v-model="pipeForm.includeBufferCells">
-            <span>返回全部缓冲区网格</span>
-          </label>
-        </div>
-      </div>
-
       <!-- 线节点列表 -->
       <div class="form-group">
         <div class="group-title-row">
@@ -553,27 +487,14 @@ async function submit() {
       <div v-if="result" class="result-box">
         <div class="result-row">
           <span class="result-label">缓冲区网格数</span>
-          <span class="result-num">{{ result.data?.bufferCellCount ?? result.data?.count ?? '-' }}</span>
-        </div>
-        <div class="result-row">
-          <span class="result-label">碰撞网格数</span>
-          <span class="result-num" :class="{ 'has-collision': result.data?.collides }">
-            {{ result.data?.collisionCount ?? '-' }}
-          </span>
-        </div>
-        <div class="result-row">
-          <span class="result-label">碰撞状态</span>
-          <span class="result-status" :class="result.data?.collides ? 'danger' : 'success'">
-            {{ result.data?.collides ? '存在碰撞' : '无碰撞' }}
-          </span>
+          <span class="result-num">{{ result.data?.count ?? '-' }}</span>
         </div>
         <div class="result-row">
           <span class="result-label">状态</span>
           <span class="result-status success">{{ result.status }}</span>
         </div>
-        <div v-if="result.data?.collisionLimit" class="result-row collision-hint">
-          <span class="collision-info">碰撞详情上限: {{ result.data.collisionLimit }}</span>
-          <span v-if="result.data.collisionResultTruncated" class="collision-warning">结果已截断</span>
+        <div v-if="result.data?.count > 10000" class="result-row">
+          <span class="field-hint">网格较多，地图最多展示前 10000 个</span>
         </div>
       </div>
     </template>
@@ -960,28 +881,6 @@ async function submit() {
 
 .result-status.danger {
   color: #dc2626;
-}
-
-.result-num.has-collision {
-  color: #dc2626;
-  font-weight: 600;
-}
-
-.collision-hint {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.collision-info {
-  font-size: 12px;
-  color: #64748b;
-}
-
-.collision-warning {
-  font-size: 12px;
-  color: #dc2626;
-  font-weight: 500;
 }
 
 .checkbox-label {
