@@ -164,6 +164,7 @@ async function submitLinePipeGrid() {
     if (Number.isNaN(payload.halfWidth) || payload.halfWidth <= 0) throw new Error('请填写合法的半宽')
     if (Number.isNaN(payload.halfHeight) || payload.halfHeight <= 0) throw new Error('请填写合法的半高')
 
+    const t0 = performance.now()
     const resp = await fetch('/api/multiSource/geometricGrid/getGridByPolylineAndRect', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -183,6 +184,7 @@ async function submitLinePipeGrid() {
     }
 
     const data = await resp.json()
+    const runtime = performance.now() - t0
     result.value = data
 
     // 与三维线网格化一致：最多展示 10000 个网格，防止大缓冲区渲染卡顿
@@ -203,6 +205,8 @@ async function submitLinePipeGrid() {
           code: cell.code,
           center: cell.center,
         })),
+        level: Number(pipeForm.level),
+        runtime,
       })
     }
   } catch (err) {
@@ -226,6 +230,7 @@ async function submit() {
     if (payload.line.length < 2) throw new Error('请至少选择 2 个点组成线')
     if (Number.isNaN(payload.level)) throw new Error('请填写合法的层级 level')
 
+    const t0 = performance.now()
     const resp = await fetch('/api/multiSource/geometricGrid/getGridByLine', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -242,6 +247,7 @@ async function submit() {
     }
 
     const data = await resp.json()
+    const runtime = performance.now() - t0
     result.value = data
 
     const MAX_CELLS = 10000
@@ -261,6 +267,8 @@ async function submit() {
           code: cell.code,
           center: cell.center,
         })),
+        level: Number(lineForm.level),
+        runtime,
       })
     }
   } catch (err) {

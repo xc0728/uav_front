@@ -17,7 +17,12 @@ window.fetch = async function (...args) {
     console.log(`[接口耗时] ${method} ${url}: ${(performance.now() - t0).toFixed(1)} ms (HTTP ${resp.status})`)
     return resp
   } catch (err) {
-    console.error(`[接口耗时] ${method} ${url} 请求失败: ${(performance.now() - t0).toFixed(1)} ms`, err)
+    // AbortError 是动态缩放等场景主动取消请求，不算真正失败，降级为 debug 日志
+    if (err?.name === 'AbortError') {
+      console.debug(`[接口耗时] ${method} ${url} 已取消: ${(performance.now() - t0).toFixed(1)} ms`)
+    } else {
+      console.error(`[接口耗时] ${method} ${url} 请求失败: ${(performance.now() - t0).toFixed(1)} ms`, err)
+    }
     throw err
   }
 }

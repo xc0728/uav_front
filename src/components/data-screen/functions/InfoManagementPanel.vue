@@ -1035,13 +1035,21 @@ async function showAllNoFlyZones() {
 
 async function syncNoFlyZoneToRedis() {
   isSyncing.value = true
+  const CH_AIRSPACE = 'Deqing_Airspace'
+  const CH_LEVEL = 16
+
   try {
+    // ① Redis 同步（A星航路规划使用）
     const resp = await fetch('/api/multiSource/redisSync/syncNoFlyZoneToRedis', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({}),
     })
     const data = await resp.json()
+
+    let redisOk = false
+    let redisMsg = ''
+
     if (data?.status === 'success') {
       const d = data.data || {}
       const failed = d.failedCount ?? 0
@@ -1050,27 +1058,47 @@ async function syncNoFlyZoneToRedis() {
       const cleanupDeleted = cleanup.deletedCount ?? 0
       const cleanupPerformed = cleanup.performed === true
 
-      let msg = `激活避障完成：同步 ${d.syncedCount ?? 0} 条`
-      if (failed > 0) {
-        msg += `，失败 ${failed} 条`
-      }
+      redisMsg = `Redis 同步 ${d.syncedCount ?? 0} 条`
+      if (failed > 0) redisMsg += `，失败 ${failed} 条`
       if (cleanupPerformed) {
-        msg += `；Redis 清理完成(${cleanupComplete ? '完整' : '不完整'})，删除旧键 ${cleanupDeleted} 条`
+        redisMsg += `；Redis 清理(${cleanupComplete ? '完整' : '不完整'})，删除旧键 ${cleanupDeleted} 条`
       }
-
-      if (failed !== 0) {
-        alert(`激活避障异常：存在失败项(${failed} 条)。\n${msg}`)
-      } else if (cleanupPerformed && !cleanupComplete) {
-        alert(`激活避障异常：Redis 清理未完成。\n${msg}`)
-      } else {
-        alert(msg)
-      }
+      redisOk = (failed === 0)
     } else {
-      alert('激活避障失败：' + (data?.message || '未知错误'))
+      redisMsg = 'Redis 同步失败：' + (data?.message || '未知错误')
+    }
+
+    // ② ClickHouse attach 同步（冲突检测使用，无论 Redis 成功与否都执行）
+    let chMsg = ''
+    let chOk = false
+    try {
+      const chResp = await fetch('/api/multiSource/airSpaceDB/grid/noFlyZone/attach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ airspaceId: CH_AIRSPACE, level: CH_LEVEL }),
+      })
+      const chData = await chResp.json()
+      if (chResp.ok && (chData?.success === true || chData?.status === 'success')) {
+        chMsg = `ClickHouse 同步成功：封禁 ${chData?.blocked_grid_rows ?? 0} 个网格`
+        chOk = true
+      } else {
+        chMsg = `ClickHouse 同步失败：${chData?.message || '未知错误'}`
+      }
+    } catch (chErr) {
+      chMsg = `ClickHouse 同步请求异常：${chErr?.message || ''}`
+    }
+
+    // 汇总结果
+    const allOk = redisOk && chOk
+    let summary = `${redisMsg}\n${chMsg}`
+    if (allOk) {
+      alert(`激活避障完成\n${summary}`)
+    } else {
+      alert(`激活避障部分失败\n${summary}`)
     }
   } catch (err) {
     console.error('[激活避障] 请求错误:', err)
-    alert('激活避障请求失败')
+    alert('激活避障请求失败：' + (err?.message || ''))
   } finally {
     isSyncing.value = false
   }

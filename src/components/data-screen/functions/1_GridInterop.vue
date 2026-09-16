@@ -361,6 +361,7 @@ async function submitGridInfo() {
     const payload = { gridCode: String(gridInfoForm.gridCode || '').trim() }
     if (!payload.gridCode) throw new Error('请先填写网格编码')
 
+    const t0 = performance.now()
     const resp = await fetch('/api/multiSource/basicGrid/getGridBoundaryByCode', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -370,6 +371,7 @@ async function submitGridInfo() {
     if (!resp.ok) throw new Error(`请求失败，状态码 ${resp.status}`)
 
     const data = await resp.json()
+    const runtime = performance.now() - t0
     gridInfoResult.value = data
 
     // 计算成功后，通知父组件在地图上显示网格和中心点
@@ -391,6 +393,8 @@ async function submitGridInfo() {
           top: gridData.top,
           bottom: gridData.bottom,
         },
+        level: Number(pointToGridForm.level),
+        runtime,
       })
     }
   } catch (err) {

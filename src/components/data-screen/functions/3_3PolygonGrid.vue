@@ -252,9 +252,11 @@ function resetFormHoles() {
 async function loadDemoData() {
   loadingDemo.value = true
   try {
+    const t0 = performance.now()
     const resp = await fetch('/response(1).json')
     if (!resp.ok) throw new Error('加载失败')
     const data = await resp.json()
+    const runtime = performance.now() - t0
 
     if (data?.data?.cells?.length) {
       emit('show-polygon', null)
@@ -271,6 +273,8 @@ async function loadDemoData() {
           code: cell.code,
           center: cell.center,
         })),
+        level: Number(polygonWithHolesForm.level),
+        runtime,
       })
     }
   } catch (err) {
@@ -328,6 +332,7 @@ async function submitPolygonGrid() {
     if (Number.isNaN(payload.top)) throw new Error('请填写合法的顶面高度')
     if (payload.top <= payload.bottom) throw new Error('顶面高度必须大于底面高度')
 
+    const t0 = performance.now()
     const resp = await fetch('/api/multiSource/geometricGrid/getGridByPolygonAndHeight', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -336,6 +341,7 @@ async function submitPolygonGrid() {
     if (!resp.ok) throw new Error(`请求失败，状态码 ${resp.status}`)
 
     const data = await resp.json()
+    const runtime = performance.now() - t0
     result.value = data
 
     const MAX_CELLS = 10000
@@ -354,6 +360,8 @@ async function submitPolygonGrid() {
           code: cell.code,
           center: cell.center,
         })),
+        level: Number(polygonForm.level),
+        runtime,
       })
     }
   } catch (err) {
@@ -410,6 +418,7 @@ async function submitPolygonGridWithHoles() {
     if (Number.isNaN(payload.top)) throw new Error('请填写合法的顶面高度')
     if (payload.top <= payload.bottom) throw new Error('顶面高度必须大于底面高度')
 
+    const t0 = performance.now()
     const resp = await fetch('/api/multiSource/geometricGrid/getGridByPolygonWithHoles', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -418,6 +427,7 @@ async function submitPolygonGridWithHoles() {
     if (!resp.ok) throw new Error(`请求失败，状态码 ${resp.status}`)
 
     const data = await resp.json()
+    const runtime = performance.now() - t0
     resultHoles.value = data
 
     const MAX_CELLS = 10000
@@ -436,6 +446,8 @@ async function submitPolygonGridWithHoles() {
           code: cell.code,
           center: cell.center,
         })),
+        level: Number(polygonWithHolesForm.level),
+        runtime,
       })
     }
   } catch (err) {
@@ -526,6 +538,7 @@ async function submitSurfaceGrid() {
     if (Number.isNaN(payload.top)) throw new Error('请填写合法的顶面高度')
     if (payload.top <= payload.bottom) throw new Error('顶面高度必须大于底面高度')
 
+    const t0 = performance.now()
     const resp = await fetch('/api/multiSource/geometricGrid/getSurfaceGridByPolygonAndHeight', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -534,6 +547,7 @@ async function submitSurfaceGrid() {
     if (!resp.ok) throw new Error(`请求失败，状态码 ${resp.status}`)
 
     const data = await resp.json()
+    const runtime = performance.now() - t0
     surfaceResult.value = data
 
     const MAX_CELLS = 10000
@@ -552,6 +566,8 @@ async function submitSurfaceGrid() {
           code: cell.code,
           center: cell.center,
         })),
+        level: Number(surfaceGridForm.level),
+        runtime,
       })
     }
   } catch (err) {

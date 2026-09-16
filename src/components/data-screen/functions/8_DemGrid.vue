@@ -130,6 +130,7 @@ async function submitDemGridQuery() {
 
     console.log('[DEM网格查询] 发送 payload:', payload)
 
+    const t0 = performance.now()
     const resp = await fetch('/api/multiSource/queryDemGridByBounds', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -143,6 +144,7 @@ async function submitDemGridQuery() {
     }
 
     const data = await resp.json()
+    const runtime = performance.now() - t0
     result.value = data
     console.log('[DEM网格查询] 原始返回:', data)
 
@@ -194,7 +196,7 @@ async function submitDemGridQuery() {
       console.log('[DEM网格查询] 转换后的 cells 前3条:', JSON.stringify(cells.slice(0, 3)))
       console.log(`[DEM网格查询] 共 ${cells.length} 个网格，开始可视化...`)
       
-      emit('showGrid', { cells })
+      emit('showGrid', { cells, level: Number(demGridForm.level), runtime })
     }
   } catch (err) {
     if (err.message.includes('边界参数不合法')) {

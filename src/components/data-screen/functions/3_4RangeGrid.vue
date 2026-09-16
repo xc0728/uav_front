@@ -153,6 +153,7 @@ async function submitRangeGrid() {
     if (Number.isNaN(payload.top)) throw new Error('请填写合法的顶面高度')
     if (payload.top <= payload.bottom) throw new Error('顶面高度必须大于底面高度')
 
+    const t0 = performance.now()
     const resp = await fetch('/api/multiSource/basicGrid/cubeRegionToGridcode', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -161,6 +162,7 @@ async function submitRangeGrid() {
     if (!resp.ok) throw new Error(`请求失败，状态码 ${resp.status}`)
 
     const data = await resp.json()
+    const runtime = performance.now() - t0
     result.value = data
 
     const MAX_CELLS = 10000
@@ -179,6 +181,8 @@ async function submitRangeGrid() {
           code: cell.code,
           center: cell.center,
         })),
+        level: Number(rangeForm.level),
+        runtime,
       })
     }
   } catch (err) {

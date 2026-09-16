@@ -1,4 +1,4 @@
-﻿<script setup>
+﻿﻿﻿﻿﻿﻿﻿﻿<script setup>
 import { reactive, ref, computed, watch } from 'vue'
 import { Loader2, Trash2, MapPin } from 'lucide-vue-next'
 
@@ -156,8 +156,8 @@ function getColorBySpan(lonSpan, latSpan) {
   const logMax = Math.log10(maxSpan)
   const logSpan = Math.log10(Math.max(minSpan, Math.min(maxSpan, avgSpan)))
 
-  // 归一化到 0-21
-  const normalized = (logSpan - logMin) / (logMax - logMin)
+  // 归一化到 0-21：大跨度（log 大）→低索引（暖色），小跨度→高索引（冷色）
+  const normalized = (logMax - logSpan) / (logMax - logMin)
   const colorIndex = Math.round(normalized * 21)
 
   return aggLevelColors[Math.max(0, Math.min(21, colorIndex))]
@@ -387,34 +387,46 @@ async function submitOsgbAggGridQuery() {
 
     // 如果返回了格网数据，通知地图组件显示
     if (osgbAggGridsData.value.length > 0) {
-      // 先计算所有网格的跨度分布，用于确定大小分级
-      const spans = osgbAggGridsData.value.map(cell => {
-        const lonSpan = Math.abs(cell.maxlon - cell.minlon)
-        const latSpan = Math.abs(cell.maxlat - cell.minlat)
-        return (lonSpan + latSpan) / 2
+      // 统一成可算跨度的原始字段，兼容已有 bounds / maxlon 两种返回
+      const rawCells = osgbAggGridsData.value.map((cell) => {
+        if (cell.maxlon != null && cell.minlon != null && cell.maxlat != null && cell.minlat != null) {
+          return cell
+        }
+        const b = cell.bounds
+        if (b) {
+          return {
+            ...cell,
+            maxlon: b.east,
+            minlon: b.west,
+            maxlat: b.north,
+            minlat: b.south,
+            top: cell.top ?? b.top,
+            bottom: cell.bottom ?? b.bottom,
+          }
+        }
+        return cell
       })
-      const minSpan = Math.min(...spans)
-      const maxSpan = Math.max(...spans)
-      console.log(`[倾斜摄影多源聚合网格查询] 跨度范围: min=${minSpan.toFixed(8)}, max=${maxSpan.toFixed(8)}`)
 
-      const cells = osgbAggGridsData.value.map((cell, idx) => {
-        if (cell.bounds) return cell
+      const allSpans = rawCells.map((c) => {
+        const ls = Math.abs(c.maxlon - c.minlon)
+        const las = Math.abs(c.maxlat - c.minlat)
+        return (ls + las) / 2
+      })
+      const minSpan = Math.min(...allSpans)
+      const maxSpan = Math.max(...allSpans)
+      const uniqueSpanCount = new Set(allSpans.map((s) => s.toFixed(8))).size
+      console.log(`[倾斜摄影多源聚合网格查询] 跨度统计: 最小=${minSpan.toFixed(8)}, 最大=${maxSpan.toFixed(8)}, 不同跨度数=${uniqueSpanCount}`)
 
-        // 计算网格跨度
-        const lonSpan = Math.abs(cell.maxlon - cell.minlon)
-        const latSpan = Math.abs(cell.maxlat - cell.minlat)
-        const avgSpan = (lonSpan + latSpan) / 2
+      // 与多粒度混合格网建模一致：按实际跨度估算层级并取色（后端 z 常为查询最大层级，不能区分大小）
+      const cells = rawCells.map((cell, idx) => {
+        const level = estimateLevel(cell, rawCells)
+        const color = getColorByLevel(level)
+        const span = (Math.abs(cell.maxlon - cell.minlon) + Math.abs(cell.maxlat - cell.minlat)) / 2
 
-        // 根据跨度获取颜色
-        const color = getColorBySpan(lonSpan, latSpan)
-
-        // 前5个格网输出调试信息
         if (idx < 5) {
-          console.log(`[倾斜摄影多源聚合网格查询] 格网${idx + 1}: code=${cell.code}, z=${cell.z}, span=${avgSpan.toFixed(8)}, color=${color}, bounds=(W:${cell.minlon?.toFixed(6)}, S:${cell.minlat?.toFixed(6)}, E:${cell.maxlon?.toFixed(6)}, N:${cell.maxlat?.toFixed(6)})`)
+          console.log(`[倾斜摄影多源聚合网格查询] 格网${idx + 1}: code=${cell.code}, z=${cell.z}, span=${span.toFixed(8)} -> level=${level} -> 颜色=${color}`)
         }
 
-        // 后端返回的字段：center, minlat, maxlat, minlon, maxlon, top, bottom
-        // 需要转换为 bounds 格式：north, south, east, west, top, bottom
         return {
           bounds: {
             north: cell.maxlat,
@@ -424,20 +436,19 @@ async function submitOsgbAggGridQuery() {
             top: cell.top !== undefined ? cell.top : (cell.center ? cell.center[2] : 0),
             bottom: cell.bottom !== undefined ? cell.bottom : 0,
           },
+          level,
           z: cell.z,
-          color: color
+          color,
         }
       })
 
-      // 统计颜色分布（用于验证）
-      const colorCount = {}
-      cells.forEach(c => {
-        colorCount[c.color] = (colorCount[c.color] || 0) + 1
+      const levelCount = {}
+      cells.forEach((c) => {
+        levelCount[c.level] = (levelCount[c.level] || 0) + 1
       })
-      console.log('[倾斜摄影多源聚合网格查询] 颜色分布:', colorCount)
+      console.log('[倾斜摄影多源聚合网格查询] 层级分布:', levelCount)
 
-      console.log('[倾斜摄影多源聚合网格查询] 转换后的 cells 前3条:', JSON.stringify(cells.slice(0, 3)))
-      emit('showGrid', { cells })
+      emit('showGrid', { cells, level: Number(osgbAggGridForm.level) })
     } else {
       console.log('[倾斜摄影多源聚合网格查询] gridsData 为空，不发送 showGrid 事件')
     }
@@ -579,7 +590,7 @@ async function submitPolygonGrid() {
       })
       console.log('[多粒度混合适网建模] 层级分布:', levelCount)
 
-      emit('showGrid', { cells: convertedCells })
+      emit('showGrid', { cells: convertedCells, level: Number(polygonForm.level) })
     }
   } catch (err) {
     console.error('[多粒度混合适网建模] 请求错误:', err)

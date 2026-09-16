@@ -242,6 +242,7 @@ async function submitTriangleGridQuery() {
 
     console.log('[倾斜摄影网格查询] 发送 payload:', payload)
 
+    const t0 = performance.now()
     const resp = await fetch('/api/multiSource/triangleGrid/queryOsgbGrid', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -255,6 +256,7 @@ async function submitTriangleGridQuery() {
     }
 
     const data = await resp.json()
+    const runtime = performance.now() - t0
     console.log('[倾斜摄影网格查询] 原始返回:', data)
     triangleGridResult.value = data
 
@@ -314,7 +316,7 @@ async function submitTriangleGridQuery() {
       })
 
       console.log('[倾斜摄影网格查询] 转换后的 cells 前3条:', JSON.stringify(cells.slice(0, 3)))
-      emit('showGrid', { cells })
+      emit('showGrid', { cells, level: Number(triangleGridForm.level), runtime })
     } else {
       console.log('[倾斜摄影网格查询] gridsData 为空，不发送 showGrid 事件')
     }

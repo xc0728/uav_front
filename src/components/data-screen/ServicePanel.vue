@@ -334,10 +334,21 @@ function setViewBoundsToActiveService(bounds) {
   }
 }
 
+// 地图动态缩放时通知当前激活的服务（仅空域网格查询支持）
+function onActiveServiceViewBoundsChanged(bounds) {
+  if (!activeComponentRef.value || !bounds) return
+  if (activeServiceId.value === 'airspace-grid-query') {
+    if (typeof activeComponentRef.value.onViewBoundsChanged === 'function') {
+      activeComponentRef.value.onViewBoundsChanged(bounds)
+    }
+  }
+}
+
 defineExpose({
   applyMapPointToActiveService,
   applyBoundsToActiveService,
   setViewBoundsToActiveService,
+  onActiveServiceViewBoundsChanged,
 })
 </script>
 

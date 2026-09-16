@@ -110,6 +110,7 @@ async function submitPointGrid() {
       level: Number(pointGridForm.level),
     }
 
+    const t0 = performance.now()
     const resp = await fetch('/api/multiSource/basicGrid/getGridByPoint', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -119,6 +120,7 @@ async function submitPointGrid() {
     if (!resp.ok) throw new Error(`请求失败，状态码 ${resp.status}`)
 
     const data = await resp.json()
+    const runtime = performance.now() - t0
     pointGridResult.value = data
 
     // 计算成功后，在地图上显示中心点和网格范围
@@ -150,6 +152,8 @@ async function submitPointGrid() {
           top: gridData.top,
           bottom: gridData.bottom,
         },
+        level: Number(pointGridForm.level),
+        runtime,
       })
     }
   } catch (err) {
@@ -180,6 +184,7 @@ async function submitPointBufferGrid() {
       level: Number(pointGridForm.level),
     }
 
+    const t0 = performance.now()
     const resp = await fetch('/api/multiSource/geometricGrid/getGridByPointAndRadius', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -189,6 +194,7 @@ async function submitPointBufferGrid() {
     if (!resp.ok) throw new Error(`请求失败，状态码 ${resp.status}`)
 
     const data = await resp.json()
+    const runtime = performance.now() - t0
     pointGridResult.value = data
 
     // 计算成功后，在地图上显示所有网格边界
@@ -210,6 +216,8 @@ async function submitPointBufferGrid() {
           code: cell.code,
           center: cell.center,
         })),
+        level: Number(pointGridForm.level),
+        runtime,
       })
     }
   } catch (err) {

@@ -110,7 +110,7 @@ function handleShowGrid(payload) {
     return
   }
   if (cesiumMapRef.value && typeof cesiumMapRef.value.drawGridBoundary === 'function') {
-    cesiumMapRef.value.drawGridBoundary(payload)
+    cesiumMapRef.value.drawGridBoundary(payload, { skipFlyTo: payload.skipFlyTo === true })
   } else {
     console.log('[DataScreen] drawGridBoundary 方法不存在')
   }
@@ -363,6 +363,15 @@ function handleGetViewBounds() {
     panel.setViewBoundsToActiveService(bounds)
   }
 }
+
+// 处理地图动态缩放时的视图边界变化（400ms debounce 后触发）
+function handleViewBoundsChanged(bounds) {
+  if (!servicePanelRef.value) return
+  const panel = servicePanelRef.value
+  if (panel && typeof panel.onActiveServiceViewBoundsChanged === 'function') {
+    panel.onActiveServiceViewBoundsChanged(bounds)
+  }
+}
 </script>
 
 <template>
@@ -464,6 +473,7 @@ function handleGetViewBounds() {
         @box-select-start="handleBoxSelectStart"
         @box-select-end="handleBoxSelectEnd"
         @get-view-bounds="handleGetViewBounds"
+        @view-bounds-changed="handleViewBoundsChanged"
       />
       <main class="app-main">
         <ServicePanel

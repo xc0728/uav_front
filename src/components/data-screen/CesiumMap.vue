@@ -31,6 +31,17 @@ const show3DTiles = ref(true)
 const showBuildings = ref(false) // 建筑白膜开关
 const isMapReady = ref(false) // 地图是否准备就绪
 
+// ==================== 查询结果图例 + 比例尺（仅在查询出网格后显示） ====================
+const gridResultState = reactive({
+  visible: false,
+  levels: [],        // 多层级数组: [{ level, count, color, sizeLabel }]
+  total: 0,          // 网格总数
+  runtime: '',       // 计算运行时间（如 "1.23 s"）
+  scalePixels: 120,
+  scaleLabel: '',
+})
+let scaleBarTimer = null
+
 // ==================== 底图图源切换 ====================
 const currentBaseLayer = ref('default')
 const showBaseLayerPanel = ref(false)
@@ -56,7 +67,7 @@ let sphereGridCells = [] // 球形围栏网格数据
 let lineGridCells = [] // 线状围栏网格数据
 const onFenceConfirmCallback = ref(null)
 
-const emit = defineEmits(['point-selected', 'fence-confirm', 'box-select-start', 'box-select-end', 'get-view-bounds', 'flight-start', 'flight-end'])
+const emit = defineEmits(['point-selected', 'fence-confirm', 'box-select-start', 'box-select-end', 'get-view-bounds', 'flight-start', 'flight-end', 'view-bounds-changed'])
 
 const props = defineProps({
   show3DToggle: {
@@ -142,12 +153,13 @@ function flyToPoint(lon, lat, height = 0) {
   }
 }
 
-function drawGridBoundary(gridInfo) {
+function drawGridBoundary(gridInfo, options = {}) {
   if (!viewer || !gridInfo) {
     console.log('[CesiumMap] drawGridBoundary: viewer 或 gridInfo 不存在')
     return
   }
 
+  const { skipFlyTo = false } = options
   console.log('[CesiumMap] drawGridBoundary gridInfo:', JSON.stringify(gridInfo).slice(0, 500))
 
   // 先清除之前的网格边界和中心点
@@ -162,12 +174,33 @@ function drawGridBoundary(gridInfo) {
     let minHeight = Infinity, maxHeight = -Infinity
 
     gridInfo.cells.forEach((cell, index) => {
-      if (!cell.bounds) return
-      const { north, south, east, west, top = 0, bottom = 0 } = cell.bounds
+      // 兼容多种数据格式：优先从 bounds 取，其次直接从 cell 取
+      let north, south, east, west, top = 0, bottom = 0
+      if (cell.bounds) {
+        north = cell.bounds.north
+        south = cell.bounds.south
+        east = cell.bounds.east
+        west = cell.bounds.west
+        top = cell.bounds.top ?? 0
+        bottom = cell.bounds.bottom ?? 0
+      }
+      // Fallback: 直接从 cell 取字段（某些接口返回 maxlon/minlon 等）
+      if (north === undefined) north = cell.maxlat
+      if (south === undefined) south = cell.minlat
+      if (east === undefined) east = cell.maxlon
+      if (west === undefined) west = cell.minlon
+      if (top === undefined || top === 0) top = cell.top ?? 0
+      if (bottom === undefined) bottom = cell.bottom ?? 0
+
+      // 跳过无法获取有效边界的网格
+      if (north == null || south == null || east == null || west == null) {
+        console.warn(`[CesiumMap] 网格${index + 1} 缺少边界信息，跳过:`, { code: cell.code })
+        return
+      }
 
       // 前5个和最后5个网格打印位置分布
       if (index < 5 || index >= gridInfo.cells.length - 5) {
-        console.log(`格网${index + 1}: W=${west.toFixed(6)}, S=${south.toFixed(6)}, E=${east.toFixed(6)}, N=${north.toFixed(6)}`)
+        console.log(`格网${index + 1}: W=${west?.toFixed(6)}, S=${south?.toFixed(6)}, E=${east?.toFixed(6)}, N=${north?.toFixed(6)}`)
       }
 
       // 更新边界范围
@@ -180,7 +213,7 @@ function drawGridBoundary(gridInfo) {
 
       // 使用格网携带的颜色，如果没有则使用默认颜色
       const cellColor = cell.color || '#3b82f6'
-      const cellLevel = cell.level
+      const cellLevel = cell.level ?? cell.z
 
       // 绘制每个网格边界
       const cellId = `grid-boundary-${index}`
@@ -213,14 +246,22 @@ function drawGridBoundary(gridInfo) {
       const centerLat = (minLat + maxLat) / 2
       const centerHeight = (minHeight + maxHeight) / 2
 
-      // 飞行到网格区域中心位置
-      viewer.camera.flyTo({
-        destination: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, centerHeight + 3000),
-        duration: 1.5,
-      })
+      // 飞行到网格区域中心位置（动态缩放模式下跳过，避免触发 camera.changed 死循环）
+      if (!skipFlyTo) {
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, centerHeight + 3000),
+          duration: 1.5,
+        })
+      }
     }
 
     console.log('[CesiumMap] 已绘制多个网格边界:', gridInfo.cells.length)
+    // 更新查询结果图例（支持多层级）
+    gridResultState.levels = collectGridLevels(gridInfo.cells, gridInfo.level)
+    gridResultState.total = gridInfo.cells.length
+    gridResultState.runtime = formatRuntime(gridInfo.runtime)
+    gridResultState.visible = true
+    updateScaleBar()
     return
   }
 
@@ -238,11 +279,13 @@ function drawGridBoundary(gridInfo) {
   // 中心高程应该是上下边界的中间，而不是底部
   const centerHeight = (top + bottom) / 2
 
-  // 飞行到网格中心位置
-  viewer.camera.flyTo({
-    destination: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, centerHeight + 2000),
-    duration: 1.5,
-  })
+  // 飞行到网格中心位置（动态缩放模式下跳过，避免触发 camera.changed 死循环）
+  if (!skipFlyTo) {
+    viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, centerHeight + 2000),
+      duration: 1.5,
+    })
+  }
 
   // 绘制网格边界（使用矩形 entity）
   viewer.entities.add({
@@ -283,6 +326,15 @@ function drawGridBoundary(gridInfo) {
   }
 
   console.log('[CesiumMap] 已绘制网格边界:', gridInfo)
+  // 更新查询结果图例（单层级）
+  const singleSizeLabel = computeCellSizeLabel({ bounds })
+  gridResultState.levels = gridInfo.level != null
+    ? [{ level: Number(gridInfo.level), count: 1, color: '#3b82f6', sizeLabel: singleSizeLabel }]
+    : []
+  gridResultState.total = 1
+  gridResultState.runtime = formatRuntime(gridInfo.runtime)
+  gridResultState.visible = true
+  updateScaleBar()
 }
 
 function drawLinePath(linePoints) {
@@ -859,6 +911,131 @@ function clearGridVisual() {
   if (gridCenterEntity) {
     viewer.entities.remove(gridCenterEntity)
   }
+
+  // 隐藏查询结果图例 + 比例尺
+  gridResultState.visible = false
+  gridResultState.levels = []
+  gridResultState.total = 0
+  gridResultState.runtime = ''
+}
+
+// ==================== 比例尺 + 查询结果图例辅助函数 ====================
+
+// 格式化距离：m → "x.xx m" 或 "x.xx km"
+function formatDistance(m) {
+  if (m >= 1000) return (m / 1000).toFixed(2) + ' km'
+  if (m >= 10) return m.toFixed(1) + ' m'
+  return m.toFixed(2) + ' m'
+}
+
+// 格式化运行时间：ms → "x.xx s" 或 "x ms"
+function formatRuntime(ms) {
+  if (ms == null || isNaN(ms)) return ''
+  if (ms >= 1000) return (ms / 1000).toFixed(2) + ' s'
+  return Math.round(ms) + ' ms'
+}
+
+// 计算比例尺：选"漂亮"整数刻度，像素长度 80-200px
+function computeScaleBar(viewportMeters, canvasPx) {
+  const metersPerPixel = viewportMeters / canvasPx
+  const targetMeters = 120 * metersPerPixel
+  const steps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000,
+                 10000, 20000, 50000, 100000, 200000, 500000, 1000000]
+  let chosen = steps[0]
+  for (const s of steps) {
+    if (s <= targetMeters) chosen = s
+  }
+  const pixelWidth = chosen / metersPerPixel
+  return { meters: chosen, pixels: Math.round(pixelWidth), label: formatDistance(chosen) }
+}
+
+// 比例尺更新（始终生效，地图就绪后持续刷新当前视口比例尺）
+function updateScaleBar() {
+  if (!viewer) return
+  const bounds = getViewBounds()
+  if (!bounds) return
+  const { west, south, east, north } = bounds
+  if (east <= west || (east - west) > 180) return
+  const midLat = (north + south) / 2
+  const cosLat = Math.cos(midLat * Math.PI / 180)
+  const viewportWidthM = (east - west) * 111320 * cosLat
+  if (viewportWidthM <= 0) return
+  const canvas = viewer.scene.canvas
+  const sb = computeScaleBar(viewportWidthM, canvas.width)
+  gridResultState.scalePixels = sb.pixels
+  gridResultState.scaleLabel = sb.label
+}
+
+// 节流：120ms 合并 camera.changed 高频触发
+function scheduleScaleBarUpdate() {
+  if (scaleBarTimer) return
+  scaleBarTimer = setTimeout(() => {
+    scaleBarTimer = null
+    updateScaleBar()
+  }, 120)
+}
+
+// 动态缩放：400ms debounce 合并 camera.changed，避免滚轮连续缩放时疯狂请求
+let viewBoundsDebounceTimer = null
+function scheduleViewBoundsEmit() {
+  if (viewBoundsDebounceTimer) clearTimeout(viewBoundsDebounceTimer)
+  viewBoundsDebounceTimer = setTimeout(() => {
+    viewBoundsDebounceTimer = null
+    const bounds = getViewBounds()
+    if (bounds) {
+      // 附带相机高度，供上层做自动层级映射
+      const height = viewer?.camera?.positionCartographic?.height ?? 0
+      emit('view-bounds-changed', { ...bounds, cameraHeight: height })
+    }
+  }, 400)
+}
+
+// 根据网格 bounds 计算格网尺寸（取经向/纬向的代表边长，单位米）
+function computeCellSizeLabel(cell) {
+  const b = cell.bounds
+  if (!b) return ''
+  const { north, south, east, west } = b
+  if (north == null || south == null || east == null || west == null) return ''
+  const midLat = (north + south) / 2
+  const cosLat = Math.cos(midLat * Math.PI / 180)
+  const latSize = (north - south) * 111320
+  const lonSize = (east - west) * 111320 * cosLat
+  // 取经向/纬向边长的较大值作为格网代表尺寸
+  const sizeM = Math.max(Math.abs(latSize), Math.abs(lonSize))
+  if (!isFinite(sizeM) || sizeM <= 0) return ''
+  return formatDistance(sizeM)
+}
+
+// 从 cells 中提取层级信息（支持多层级：聚合服务的 cells 携带 level/z + color）
+function collectGridLevels(cells, fallbackLevel) {
+  const levelMap = {}
+  let hasCellLevel = false
+  cells.forEach(cell => {
+    // 优先用 cell.level，其次 cell.z（倾斜摄影聚合返回的字段）
+    const lv = cell.level ?? cell.z ?? null
+    const color = cell.color || '#3b82f6'
+    if (lv !== null && lv !== undefined) {
+      hasCellLevel = true
+      if (!levelMap[lv]) {
+        levelMap[lv] = {
+          level: Number(lv),
+          count: 0,
+          color,
+          sizeLabel: computeCellSizeLabel(cell),
+        }
+      }
+      levelMap[lv].count++
+    }
+  })
+  if (hasCellLevel) {
+    return Object.values(levelMap).sort((a, b) => a.level - b.level)
+  }
+  // cells 无层级字段时，用 payload 顶层 level（单层级）
+  if (fallbackLevel != null) {
+    const sizeLabel = cells.length > 0 ? computeCellSizeLabel(cells[0]) : ''
+    return [{ level: Number(fallbackLevel), count: cells.length, color: '#3b82f6', sizeLabel }]
+  }
+  return []
 }
 
 function clearCenterPoint() {
@@ -3740,10 +3917,26 @@ onMounted(async () => {
   // 地图初始化完成
   isMapReady.value = true
   console.log('[CesiumMap] 地图初始化完成')
+
+  // 比例尺：监听相机变化，随缩放实时更新（始终显示）
+  viewer.camera.percentageChanged = 0.01
+  viewer.camera.changed.addEventListener(scheduleScaleBarUpdate)
+  // 动态缩放格网查询：同一 camera.changed 触发，400ms debounce
+  viewer.camera.changed.addEventListener(scheduleViewBoundsEmit)
+  // 初始化比例尺
+  updateScaleBar()
 })
 
 onBeforeUnmount(() => {
   stopUavAnimation()
+  if (scaleBarTimer) {
+    clearTimeout(scaleBarTimer)
+    scaleBarTimer = null
+  }
+  if (viewBoundsDebounceTimer) {
+    clearTimeout(viewBoundsDebounceTimer)
+    viewBoundsDebounceTimer = null
+  }
   if (handler) {
     handler.destroy()
     handler = null
@@ -3846,6 +4039,36 @@ onBeforeUnmount(() => {
 
       <!-- 点击面板外区域关闭底图选择面板 -->
       <div v-if="showBaseLayerPanel" class="base-layer-mask" @click="showBaseLayerPanel = false" />
+    </div>
+
+    <!-- 查询网格图例（右下角，支持多层级：层级+颜色+尺寸、运行时间） -->
+    <div class="grid-result-legend" v-if="gridResultState.visible">
+      <div class="legend-title">查询网格</div>
+      <!-- 表头 -->
+      <div class="legend-row legend-head">
+        <span class="legend-swatch-col"></span>
+        <span class="legend-level-col">层级</span>
+        <span class="legend-size-col">格网尺寸</span>
+      </div>
+      <!-- 各级网格行 -->
+      <div v-for="item in gridResultState.levels" :key="item.level" class="legend-row">
+        <span class="legend-swatch legend-swatch-col" :style="{ background: item.color }" />
+        <span class="legend-label legend-level-col">L{{ item.level }}</span>
+        <span class="legend-size legend-size-col">{{ item.sizeLabel || '—' }}</span>
+      </div>
+      <div class="legend-divider" />
+      <div class="legend-row legend-metric" v-if="gridResultState.runtime">
+        <span>计算耗时</span>
+        <span class="legend-value">{{ gridResultState.runtime }}</span>
+      </div>
+    </div>
+
+    <!-- 比例尺（左下角，始终显示，独立于图例） -->
+    <div class="ref-scale-bar" v-if="isMapReady">
+      <div class="scale-track">
+        <div class="scale-fill" :style="{ width: gridResultState.scalePixels + 'px' }" />
+      </div>
+      <div class="scale-label">{{ gridResultState.scaleLabel }}</div>
     </div>
   </section>
 
@@ -4952,5 +5175,117 @@ onBeforeUnmount(() => {
   font-size: 13px;
   flex: 1;
   justify-content: center;
+}
+
+/* ==================== 查询网格图例 + 比例尺 ==================== */
+.grid-result-legend {
+  position: absolute;
+  right: 16px;
+  bottom: 20px;
+  padding: 10px 14px;
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.85);
+  pointer-events: none;
+  min-width: 180px;
+  z-index: 5;
+  backdrop-filter: blur(6px);
+}
+.legend-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: #fff;
+  letter-spacing: 0.5px;
+}
+/* 表头行 */
+.legend-row.legend-head {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 11px;
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+.legend-row {
+  display: grid;
+  grid-template-columns: 20px 46px 1fr;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+}
+.legend-swatch {
+  width: 16px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+.legend-swatch-col { justify-self: start; }
+.legend-level-col { justify-self: start; }
+.legend-size-col { justify-self: start; }
+.legend-label {
+  font-family: 'SF Mono', 'Monaco', monospace;
+  font-size: 12px;
+  color: #fff;
+  font-weight: 500;
+}
+.legend-size {
+  font-family: 'SF Mono', 'Monaco', monospace;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.8);
+}
+.legend-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 6px 0;
+}
+.legend-row.legend-metric {
+  display: flex;
+  justify-content: space-between;
+  grid-template-columns: none;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 11px;
+}
+.legend-row.legend-metric .legend-value {
+  color: #fff;
+  font-weight: 600;
+  font-family: 'SF Mono', 'Monaco', monospace;
+}
+.legend-hint { color: rgba(255,255,255,0.55); font-size: 10px; }
+
+.ref-scale-bar {
+  position: absolute;
+  left: 16px;
+  bottom: 20px;
+  padding: 8px 12px;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  z-index: 5;
+  pointer-events: none;
+}
+.scale-track {
+  width: 120px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+  position: relative;
+}
+.scale-fill {
+  position: absolute;
+  left: 0; top: 0;
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #fff);
+  border-radius: 3px;
+  max-width: 100%;
+}
+.scale-label {
+  margin-top: 4px;
+  font-size: 11px;
+  font-family: 'SF Mono', 'Monaco', monospace;
+  color: #fff;
+  text-align: center;
 }
 </style>
