@@ -26,6 +26,7 @@ const now = ref(new Date())
 let clockTimer = null
 
 const servicePanelRef = ref(null)
+const servicePanelWidth = ref(60)
 const infoManagementPanelRef = ref(null)
 const cesiumMapRef = ref(null)
 const monitoringScreenRef = ref(null)
@@ -468,6 +469,7 @@ function handleViewBoundsChanged(bounds) {
     <template v-if="currentPage === 'main'">
       <CesiumMap
         ref="cesiumMapRef"
+        :left-panel-width="servicePanelWidth"
         :show-scenario-demo="false"
         @point-selected="handleMapPointSelected"
         @box-select-start="handleBoxSelectStart"
@@ -480,6 +482,7 @@ function handleViewBoundsChanged(bounds) {
           ref="servicePanelRef"
           panel-type="control"
           :theme="currentTheme"
+          @panel-width-change="servicePanelWidth = $event"
           @show-point="handleShowPoint"
           @show-grid="handleShowGrid"
           @show-line="handleShowLine"

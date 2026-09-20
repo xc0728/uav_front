@@ -1,6 +1,7 @@
 ﻿﻿﻿﻿﻿﻿﻿﻿<script setup>
 import { reactive, ref, computed, watch } from 'vue'
 import { Loader2, Trash2, MapPin } from 'lucide-vue-next'
+import { errorMessage } from '../../../utils/http'
 
 const props = defineProps({
   serviceName: {
@@ -352,9 +353,7 @@ async function submitOsgbAggGridQuery() {
     })
 
     if (!resp.ok) {
-      const errText = await resp.text()
-      console.error('[倾斜摄影多源聚合网格查询] 错误响应:', errText)
-      throw new Error(`请求失败，状态码 ${resp.status}: ${errText}`)
+      throw new Error(await errorMessage(resp, `请求失败，状态码 ${resp.status}`))
     }
 
     const data = await resp.json()
@@ -527,9 +526,7 @@ async function submitPolygonGrid() {
     })
 
     if (!resp.ok) {
-      const errText = await resp.text()
-      console.error('[多粒度混合适网建模] 错误响应:', errText)
-      throw new Error(`请求失败，状态码 ${resp.status}: ${errText}`)
+      throw new Error(await errorMessage(resp, `请求失败，状态码 ${resp.status}`))
     }
 
     const data = await resp.json()

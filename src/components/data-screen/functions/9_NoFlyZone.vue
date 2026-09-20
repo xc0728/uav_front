@@ -1,6 +1,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { Loader2, Trash2 } from 'lucide-vue-next'
+import { errorMessage } from '../../../utils/http'
 
 const props = defineProps({
   serviceName: {
@@ -16,19 +17,30 @@ const props = defineProps({
 const emit = defineEmits(['close', 'showPoint', 'showGrid', 'show-polygon', 'get-view-bounds'])
 
 const noFlyZoneForm = reactive({
+  zoneId: '',
   name: '',
   typeCode: 'unit_organization',
-  level: 14,
+  level: 16,
   bottom: 0,
   top: 120,
   description: '',
-  activateObstacle: false,
+  // ClickHouse 回填参数：save 只改 PostgreSQL，冲突检测读的是 ClickHouse grid_current.no_fly_zone
+  airspaceId: 'Deqing_Airspace',
+  version: '',
+  force: false,
 })
 
 const points = ref([])
 const loading = ref(false)
+const redisActivating = ref(false)
+const clickHouseActivating = ref(false)
+const saveElapsedMs = ref(null)
+const redisElapsedMs = ref(null)
+const clickHouseElapsedMs = ref(null)
 const error = ref('')
 const result = ref(null)
+const attachResult = ref(null)
+const attachError = ref('')
 const hasVisualization = ref(false)
 
 const typeCodeOptions = [
@@ -81,6 +93,11 @@ function removePoint(idx) {
 function clearAll() {
   points.value = []
   result.value = null
+  attachResult.value = null
+  attachError.value = ''
+  saveElapsedMs.value = null
+  redisElapsedMs.value = null
+  clickHouseElapsedMs.value = null
   error.value = ''
   hasVisualization.value = false
   emitPolygon()
@@ -90,14 +107,19 @@ function resetForm() {
   loading.value = false
   error.value = ''
   result.value = null
+  attachResult.value = null
+  attachError.value = ''
   hasVisualization.value = false
+  noFlyZoneForm.zoneId = ''
   noFlyZoneForm.name = ''
   noFlyZoneForm.typeCode = 'unit_organization'
-  noFlyZoneForm.level = 14
+  noFlyZoneForm.level = 16
   noFlyZoneForm.bottom = 0
   noFlyZoneForm.top = 120
   noFlyZoneForm.description = ''
-  noFlyZoneForm.activateObstacle = false
+  noFlyZoneForm.airspaceId = 'Deqing_Airspace'
+  noFlyZoneForm.version = ''
+  noFlyZoneForm.force = false
   points.value = []
   emit('show-polygon', [])
 }
@@ -143,6 +165,9 @@ defineExpose({ resetForm, setPointFromMap })
 
 // 同步禁飞区网格到 Redis，作为障碍物参与路径规划
 async function syncNoFlyZoneToRedis() {
+  const startedAt = performance.now()
+  redisActivating.value = true
+  error.value = ''
   try {
     const syncPayload = {
       typeCode: noFlyZoneForm.typeCode,
@@ -157,9 +182,7 @@ async function syncNoFlyZoneToRedis() {
     })
 
     if (!resp.ok) {
-      const errText = await resp.text()
-      console.error('[激活障碍] 错误响应:', errText)
-      error.value = `禁飞区已保存，但障碍同步失败（状态码 ${resp.status}）: ${errText}`
+      error.value = `Redis 激活失败: ${await errorMessage(resp, `状态码 ${resp.status}`)}`
       return
     }
 
@@ -175,13 +198,74 @@ async function syncNoFlyZoneToRedis() {
     }
   } catch (err) {
     console.error('[激活障碍] 请求错误:', err)
-    error.value = `禁飞区已保存，但障碍同步失败: ${err?.message || '请求失败'}`
+    error.value = `Redis 激活失败: ${err?.message || '请求失败'}`
+  } finally {
+    redisElapsedMs.value = Math.round(performance.now() - startedAt)
+    redisActivating.value = false
+  }
+}
+
+// 手动激活到 ClickHouse；force 仅在用户勾选时发送。
+async function attachToClickHouse(level) {
+  const airspaceId = String(noFlyZoneForm.airspaceId || '').trim()
+  if (!airspaceId) return null
+
+  const payload = {
+    airspaceId,
+    level: Number(level),
+  }
+  const version = Number(noFlyZoneForm.version)
+  if (Number.isFinite(version) && version > 0) payload.version = version
+  if (noFlyZoneForm.force) payload.force = true
+
+  console.log('[回填禁飞区] attach payload:', payload)
+
+  const resp = await fetch('/api/multiSource/airSpaceDB/grid/noFlyZone/attach', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const text = await resp.text()
+  let json = null
+  try { json = text ? JSON.parse(text) : null } catch { /* 非 JSON 响应 */ }
+
+  if (!resp.ok) {
+    if (resp.status === 404 || /no grid version/i.test(text)) {
+      throw new Error(
+        `ClickHouse 中不存在空域「${airspaceId}」第 ${payload.level} 级的网格版本，` +
+        `请检查空域ID/版本是否正确，并确认该层级网格已入库`
+      )
+    }
+    throw new Error(json?.message || `ClickHouse 回填失败(${resp.status}): ${text}`)
+  }
+  if (json?.success === false || (json?.status && json.status !== 'success')) {
+    throw new Error(`回填接口返回失败: ${json?.message || text || JSON.stringify(json)}`)
+  }
+  console.log('[回填禁飞区] attach 返回:', json)
+  return json
+}
+
+async function activateToClickHouse() {
+  const startedAt = performance.now()
+  clickHouseActivating.value = true
+  attachError.value = ''
+  try {
+    attachResult.value = await attachToClickHouse(Number(noFlyZoneForm.level))
+  } catch (err) {
+    console.error('[激活 ClickHouse] 失败:', err)
+    attachError.value = `ClickHouse 激活失败: ${err?.message || '请求失败'}`
+  } finally {
+    clickHouseElapsedMs.value = Math.round(performance.now() - startedAt)
+    clickHouseActivating.value = false
   }
 }
 
 async function submitSaveNoFlyZone() {
+  const startedAt = performance.now()
   error.value = ''
   result.value = null
+  attachResult.value = null
+  attachError.value = ''
   loading.value = true
 
   try {
@@ -197,6 +281,9 @@ async function submitSaveNoFlyZone() {
       top: parseFloat(Number(noFlyZoneForm.top).toFixed(1)),
       boundary: boundary,
     }
+    if (noFlyZoneForm.zoneId.trim()) {
+      payload.zoneId = noFlyZoneForm.zoneId.trim()
+    }
 
     if (noFlyZoneForm.description.trim()) {
       payload.description = noFlyZoneForm.description.trim()
@@ -211,9 +298,7 @@ async function submitSaveNoFlyZone() {
     })
 
     if (!resp.ok) {
-      const errText = await resp.text()
-      console.error('[保存禁飞区] 错误响应:', errText)
-      throw new Error(`请求失败，状态码 ${resp.status}: ${errText}`)
+      throw new Error(await errorMessage(resp, `请求失败，状态码 ${resp.status}`))
     }
 
     const data = await resp.json()
@@ -223,15 +308,13 @@ async function submitSaveNoFlyZone() {
     if (data?.status === 'success') {
       visualizeNoFlyZone(data.data || data)
 
-      // 若勾选"激活障碍"，则同步该禁飞区到 Redis 作为障碍物参与路径规划
-      if (noFlyZoneForm.activateObstacle) {
-        await syncNoFlyZoneToRedis()
-      }
+      // 保存只写 PostgreSQL；Redis 与 ClickHouse 均由用户手动激活。
     }
   } catch (err) {
     console.error('[保存禁飞区] 请求错误:', err)
     error.value = err?.message || '请求失败，请稍后重试'
   } finally {
+    saveElapsedMs.value = Math.round(performance.now() - startedAt)
     loading.value = false
   }
 }
@@ -269,6 +352,15 @@ async function submitSaveNoFlyZone() {
             type="text"
             class="param-input"
             placeholder="可选，禁飞区描述"
+          >
+        </div>
+        <div class="param-line">
+          <span class="param-label">区域ID</span>
+          <input
+            v-model="noFlyZoneForm.zoneId"
+            type="text"
+            class="param-input"
+            placeholder="可选，留空由服务端生成"
           >
         </div>
       </div>
@@ -328,6 +420,36 @@ async function submitSaveNoFlyZone() {
       </div>
 
       <div class="form-group">
+        <div class="group-title">ClickHouse 激活参数</div>
+        <div class="param-line">
+          <span class="param-label">空域ID</span>
+          <input
+            v-model="noFlyZoneForm.airspaceId"
+            type="text"
+            class="param-input"
+            placeholder="回填目标空域ID"
+          >
+        </div>
+        <div class="param-line">
+          <span class="param-label">网格版本</span>
+          <input
+            v-model="noFlyZoneForm.version"
+            type="number"
+            min="1"
+            step="1"
+            class="param-input"
+            placeholder="留空=已激活版本"
+          >
+        </div>
+        <div class="param-line param-line-checkbox">
+          <label class="checkbox-label">
+            <input v-model="noFlyZoneForm.force" type="checkbox" class="param-checkbox">
+            <span>强制完整回填 force</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="form-group">
         <div class="group-title-row">
           <span class="group-title">边界节点</span>
           <span class="group-sub">({{ points.length }})</span>
@@ -371,9 +493,22 @@ async function submitSaveNoFlyZone() {
           清除
         </button>
       </div>
+
+      <div v-if="result?.status === 'success'" class="btn-row">
+        <button type="button" class="btn-query" :disabled="redisActivating || clickHouseActivating" @click="syncNoFlyZoneToRedis">
+          <Loader2 v-if="redisActivating" :size="16" class="spin" />
+          {{ redisActivating ? 'Redis 激活中...' : '激活到 Redis' }}
+        </button>
+        <button type="button" class="btn-query" :disabled="redisActivating || clickHouseActivating" @click="activateToClickHouse">
+          <Loader2 v-if="clickHouseActivating" :size="16" class="spin" />
+          {{ clickHouseActivating ? 'ClickHouse 激活中...' : '激活到 ClickHouse' }}
+        </button>
+      </div>
     </form>
 
     <div v-if="error" class="error-box">{{ error }}</div>
+
+    <div v-if="attachError" class="error-box">{{ attachError }}</div>
 
     <div v-if="result" class="result-box">
       <div class="result-row">
@@ -394,11 +529,49 @@ async function submitSaveNoFlyZone() {
         <span class="result-label">类型</span>
         <span class="result-num">{{ result.type_name }}</span>
       </div>
+      <div v-if="saveElapsedMs !== null" class="result-row">
+        <span class="result-label">保存耗时</span>
+        <span class="result-num">{{ saveElapsedMs }} ms</span>
+      </div>
+      <template v-if="attachResult">
+        <div class="result-divider"></div>
+        <div class="result-row">
+          <span class="result-label">ClickHouse 激活</span>
+          <span class="result-status success">已激活</span>
+        </div>
+        <div v-if="clickHouseElapsedMs !== null" class="result-row">
+          <span class="result-label">激活耗时</span>
+          <span class="result-num">{{ clickHouseElapsedMs }} ms</span>
+        </div>
+        <div v-if="attachResult.skipped !== undefined" class="result-row">
+          <span class="result-label">skipped</span>
+          <span class="result-num">{{ attachResult.skipped }}</span>
+        </div>
+        <div v-if="attachResult.statistics_collected !== undefined" class="result-row">
+          <span class="result-label">statistics_collected</span>
+          <span class="result-num">{{ attachResult.statistics_collected }}</span>
+        </div>
+        <div v-if="attachResult.blocked_grid_rows !== undefined" class="result-row">
+          <span class="result-label">blocked_grid_rows</span>
+          <span class="result-num">{{ attachResult.blocked_grid_rows }}</span>
+        </div>
+        <div v-if="attachResult.active_zone_count !== undefined" class="result-row">
+          <span class="result-label">活动禁飞区</span>
+          <span class="result-num">{{ attachResult.active_zone_count }}</span>
+        </div>
+        <div v-if="Number(attachResult.blocked_grid_rows) === 0" class="warn-hint">
+          回填未封禁任何网格：请确认高度范围/多边形与该空域版本的网格重叠。
+        </div>
+      </template>
       <template v-if="result?.syncStats">
         <div class="result-divider"></div>
         <div class="result-row">
-          <span class="result-label">障碍同步</span>
-          <span class="result-status success">已同步</span>
+          <span class="result-label">Redis 激活</span>
+          <span class="result-status success">已激活</span>
+        </div>
+        <div v-if="redisElapsedMs !== null" class="result-row">
+          <span class="result-label">激活耗时</span>
+          <span class="result-num">{{ redisElapsedMs }} ms</span>
         </div>
         <div v-if="result.syncStats.totalGroups != null" class="result-row">
           <span class="result-label">总组数</span>
@@ -518,6 +691,16 @@ async function submitSaveNoFlyZone() {
   height: 1px;
   background: #e2e8f0;
   margin: 8px 0;
+}
+
+.warn-hint {
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #b45309;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 6px;
 }
 
 .param-label {

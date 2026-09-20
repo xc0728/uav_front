@@ -1,6 +1,7 @@
 <script setup>
 import { reactive, ref } from 'vue'
 import { ZoomIn, Loader2 } from 'lucide-vue-next'
+import { errorMessage } from '../../../utils/http'
 
 const props = defineProps({
   serviceName: {
@@ -117,8 +118,7 @@ async function onViewBoundsChanged(bounds) {
     })
 
     if (!resp.ok) {
-      const errText = await resp.text()
-      throw new Error(`状态码 ${resp.status}: ${errText}`)
+      throw new Error(await errorMessage(resp, `状态码 ${resp.status}`))
     }
 
     const data = await resp.json()
@@ -347,9 +347,7 @@ async function submitAirspaceGridQuery() {
     })
 
     if (!resp.ok) {
-      const errText = await resp.text()
-      console.error('[空域网格查询] 错误响应:', errText)
-      throw new Error(`请求失败，状态码 ${resp.status}: ${errText}`)
+      throw new Error(await errorMessage(resp, `请求失败，状态码 ${resp.status}`))
     }
 
     const data = await resp.json()

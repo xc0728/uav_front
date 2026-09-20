@@ -18,8 +18,9 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        //target: 'http://192.168.3.65:9997',
-        target: 'http://100.104.49.70:9997',
+        // target: 'http://100.104.49.70:9997', //虚拟局域网802主机
+        target: 'http://192.168.100.214:9992', //莫干山服务器-湖南服务
+        // target: 'http://192.168.100.214:9990', //莫干山服务器-浙江服务
         changeOrigin: true,
       },
     }

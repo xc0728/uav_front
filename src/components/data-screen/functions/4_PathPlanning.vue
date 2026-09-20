@@ -1,6 +1,7 @@
 <script setup>
 import { reactive, ref, computed } from 'vue'
 import { Loader2, Trash2, Search, MapPin, Navigation, Database, X, Check } from 'lucide-vue-next'
+import { errorMessage } from '../../../utils/http'
 
 const props = defineProps({
   serviceName: {
@@ -146,19 +147,29 @@ function resetForm() {
     conflictForm.level = 16
     conflictForm.speed = 15.0
     conflictForm.airspaceId = 'Deqing_Airspace'
+    conflictForm.version = ''
+    conflictForm.mode = 'ALL'
+    conflictForm.useMissingGrid = true
     conflictForm.useGdConstraint = true
     conflictForm.useDzConstraint = true
     // 重置禁飞区绘制状态
     conflictNoFlyMode.value = false
     conflictNoFlyPoints.value = []
     conflictNoFlyForm.airspaceId = 'Deqing_Airspace'
+    conflictNoFlyForm.version = ''
     conflictNoFlyForm.typeCode = 'other_no_fly_zone'
+    conflictNoFlyForm.zoneId = ''
     conflictNoFlyForm.bottom = 0
     conflictNoFlyForm.top = 120
+    conflictNoFlyForm.force = false
     conflictNoFlyRuntime.value = 0
     conflictNoFlyZoneId.value = ''
+    conflictNoFlyTypeCode.value = ''
     conflictNoFlyBlockedRows.value = null
     conflictNoFlyActiveZones.value = null
+    conflictNoFlySkipped.value = null
+    conflictNoFlyStatsCollected.value = null
+    conflictNoFlyAttachMsg.value = ''
     showConflictNoFlyModal.value = false
   }
 
@@ -246,8 +257,7 @@ async function applyNoFlyZone() {
       body: JSON.stringify(savePayload),
     })
     if (!saveResp.ok) {
-      const errText = await saveResp.text()
-      throw new Error(`保存失败(${saveResp.status}): ${errText}`)
+      throw new Error(await errorMessage(saveResp, `保存失败(${saveResp.status})`))
     }
     const saveData = await saveResp.json()
     console.log('[禁飞区] ① 保存返回:', saveData)
@@ -268,8 +278,7 @@ async function applyNoFlyZone() {
       body: JSON.stringify(syncPayload),
     })
     if (!syncResp.ok) {
-      const errText = await syncResp.text()
-      throw new Error(`障碍同步失败(${syncResp.status}): ${errText}`)
+      throw new Error(await errorMessage(syncResp, `障碍同步失败(${syncResp.status})`))
     }
     const syncData = await syncResp.json()
     console.log('[禁飞区] ② 同步返回:', syncData)
@@ -460,6 +469,9 @@ const conflictForm = reactive({
   level: 16, // Deqing_Airspace 冲突检测固定使用 level=16
   speed: 15.0, // 默认飞行速度
   airspaceId: 'Deqing_Airspace', // ClickHouse 冲突检测所需空域ID
+  version: '', // 目标网格版本，留空由后端取已激活版本；attach 与检测必须使用同一版本
+  mode: 'ALL', // ALL=返回全部冲突；FIRST=仅返回首个冲突（对应 firstConflict）
+  useMissingGrid: true, // 缺失网格校验；单独验证禁飞区时需置 false，排除 missingGrid 原因干扰
   useGdConstraint: true, // 默认启用实景三维障碍校验
   useDzConstraint: true, // 默认启用禁飞区校验（绘制禁飞区后可检出冲突）
 })
@@ -529,16 +541,59 @@ const conflictNoFlyMode = ref(false)        // 是否处于禁飞区绘制模式
 const conflictNoFlyPoints = ref([])         // 禁飞区顶点
 const conflictNoFlyForm = reactive({
   airspaceId: 'Deqing_Airspace',            // attach 同步所需空域ID（须与已入库网格版本一致）
+  version: '',                              // attach 目标网格版本，留空由后端取已激活版本
   typeCode: 'other_no_fly_zone',
+  zoneId: '',                               // 留空时自动生成，便于后续按 zoneId 删除
   bottom: 0,
   top: 120,
+  force: false,                             // 强制完整回填（绕过来源指纹不变的 skip 判定）
 })
 const showConflictNoFlyModal = ref(false)    // 禁飞区信息弹窗
 const conflictNoFlyRuntime = ref(0)          // 保存+同步耗时(ms)
 const conflictNoFlySaving = ref(false)
 const conflictNoFlyZoneId = ref('')          // 保存成功后记录的禁飞区ID（供后续关闭使用）
+const conflictNoFlyTypeCode = ref('')        // 删除时需与 zoneId 一并提交
 const conflictNoFlyBlockedRows = ref(null)   // attach 实际封禁网格数（null=未返回）
 const conflictNoFlyActiveZones = ref(null)   // attach 识别到的活动禁飞区数
+const conflictNoFlySkipped = ref(null)       // attach 是否跳过（true 表示认为 PG 活动禁飞区未变化）
+const conflictNoFlyStatsCollected = ref(null)// attach 是否采集了统计信息
+const conflictNoFlyRebuilding = ref(false)   // 关闭/回填中（delete→attach 或强制 attach）
+const conflictNoFlyAttachMsg = ref('')       // 回填结果提示
+
+// 回填禁飞区到 ClickHouse：save/delete 只改 PostgreSQL，必须 attach 后冲突检测才生效
+// force 仅在用户选择强制回填时发送。
+async function attachNoFlyZone(airspaceId, level, version, force) {
+  const payload = {
+    airspaceId: String(airspaceId || '').trim(),
+    level: Number(level),
+  }
+  const ver = Number(version)
+  if (Number.isFinite(ver) && ver > 0) payload.version = ver
+  if (force) payload.force = true
+
+  const resp = await fetch('/api/multiSource/airSpaceDB/grid/noFlyZone/attach', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  const text = await resp.text()
+  let json = null
+  try { json = text ? JSON.parse(text) : null } catch { /* 非 JSON 响应 */ }
+
+  if (!resp.ok) {
+    if (resp.status === 404 || /no grid version/i.test(text)) {
+      throw new Error(
+        `ClickHouse 中不存在空域「${payload.airspaceId}」第 ${payload.level} 级的网格版本。` +
+        `请检查空域ID/版本是否正确，并确认该层级网格已入库`
+      )
+    }
+    throw new Error(json?.message || `ClickHouse同步失败(${resp.status}): ${text}`)
+  }
+  if (json?.success === false || (json?.status && json.status !== 'success')) {
+    throw new Error(`同步接口返回失败: ${json?.message || text || JSON.stringify(json)}`)
+  }
+  return json
+}
 
 function emitConflictNoFlyPreview() {
   if (conflictNoFlyPoints.value.length >= 3) {
@@ -587,7 +642,9 @@ async function applyConflictNoFlyZone() {
     const queryLevel = Number(conflictForm.level)
 
     // ① 保存禁飞区（必须先完成，attach 要读取这条 active 记录）
+    const genZoneId = `conflict-no-fly-${Date.now()}`
     const savePayload = {
+      zoneId: conflictNoFlyForm.zoneId.trim() || genZoneId,
       name: `冲突检测禁飞区_${Date.now()}`,
       typeCode: conflictNoFlyForm.typeCode,
       level: queryLevel,  // 与冲突检测同层级
@@ -603,8 +660,7 @@ async function applyConflictNoFlyZone() {
       body: JSON.stringify(savePayload),
     })
     if (!saveResp.ok) {
-      const errText = await saveResp.text()
-      throw new Error(`保存失败(${saveResp.status}): ${errText}`)
+      throw new Error(await errorMessage(saveResp, `保存失败(${saveResp.status})`))
     }
     const saveData = await saveResp.json()
     console.log('[冲突检测-禁飞区] ① 保存返回:', saveData)
@@ -613,40 +669,19 @@ async function applyConflictNoFlyZone() {
     }
     // 记录 zoneId（兼容多种返回结构，供后续关闭禁飞区使用）
     conflictNoFlyZoneId.value = String(
-      saveData?.data?.zoneId || saveData?.data?.zone_id || saveData?.zoneId || saveData?.zone_id || ''
+      saveData?.data?.zoneId || saveData?.data?.zone_id || saveData?.zoneId || saveData?.zone_id || savePayload.zoneId
     )
+    conflictNoFlyTypeCode.value = conflictNoFlyForm.typeCode
 
     // ② attach 同步到 ClickHouse（重建 no_fly_zone_grid_map，同步 mutation 成功才表示对冲突检测生效）
-    const attachPayload = {
-      airspaceId: conflictNoFlyForm.airspaceId.trim(),
-      level: queryLevel,
-    }
-    console.log('[冲突检测-禁飞区] ② ClickHouse attach payload:', attachPayload)
-
-    const attachResp = await fetch('/api/multiSource/airSpaceDB/grid/noFlyZone/attach', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(attachPayload),
-    })
-    const attachText = await attachResp.text()
-    let attachJson = null
-    try { attachJson = attachText ? JSON.parse(attachText) : null } catch { /* 非 JSON 响应 */ }
-
-    if (!attachResp.ok) {
-      // 404 通常是该空域+层级在 ClickHouse 没有已入库的网格版本
-      if (attachResp.status === 404 || /no grid version/i.test(attachText)) {
-        throw new Error(
-          `ClickHouse 中不存在空域「${conflictNoFlyForm.airspaceId.trim()}」第 ${queryLevel} 级的网格版本。` +
-          `请检查空域ID是否正确（当前数据对应 Deqing_Airspace），并确认该层级网格已入库`
-        )
-      }
-      throw new Error(`ClickHouse同步失败(${attachResp.status}): ${attachText}`)
-    }
-    const attachData = attachJson
+    console.log('[冲突检测-禁飞区] ② ClickHouse attach:', conflictNoFlyForm.airspaceId, queryLevel)
+    const attachData = await attachNoFlyZone(
+      conflictNoFlyForm.airspaceId,
+      queryLevel,
+      conflictNoFlyForm.version,
+      conflictNoFlyForm.force,
+    )
     console.log('[冲突检测-禁飞区] ② attach 返回:', attachData)
-    if (attachData?.success === false || (attachData?.status && attachData.status !== 'success')) {
-      throw new Error(`同步接口返回失败: ${attachData?.message || attachText || JSON.stringify(attachData)}`)
-    }
 
     conflictNoFlyRuntime.value = Math.round(performance.now() - t0)
     console.log(`[冲突检测-禁飞区] 串行总耗时: ${conflictNoFlyRuntime.value}ms`)
@@ -657,6 +692,11 @@ async function applyConflictNoFlyZone() {
     conflictNoFlyActiveZones.value = Number.isFinite(Number(attachData?.active_zone_count))
       ? Number(attachData.active_zone_count)
       : null
+    conflictNoFlySkipped.value = typeof attachData?.skipped === 'boolean' ? attachData.skipped : null
+    conflictNoFlyStatsCollected.value = typeof attachData?.statistics_collected === 'boolean'
+      ? attachData.statistics_collected
+      : null
+    conflictNoFlyAttachMsg.value = ''
     showConflictNoFlyModal.value = true
   } catch (err) {
     console.error('[冲突检测-禁飞区] 保存/同步失败:', err)
@@ -674,6 +714,99 @@ async function confirmConflictNoFlyAndRecheck() {
   // 重新检测后确保禁飞区棱柱仍显示（与路径网格叠加）
   if (conflictNoFlyPoints.value.length >= 3) {
     emitConflictNoFlyPreview()
+  }
+}
+
+// 关闭禁飞区：④ delete（只改 PG）→ ⑤ attach（重置 ClickHouse 标记）→ ⑥ 自动复测
+async function closeConflictNoFlyZone() {
+  const zoneId = conflictNoFlyZoneId.value
+  if (!zoneId) {
+    conflictError.value = '没有可关闭的禁飞区：缺少 zoneId'
+    return
+  }
+  if (!window.confirm(`确定删除禁飞区「${zoneId}」并回填 ClickHouse 吗？`)) return
+
+  conflictNoFlyRebuilding.value = true
+  conflictError.value = ''
+  try {
+    // ④ 删除
+    const delResp = await fetch('/api/multiSource/airSpace/noFlyZone/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        zoneId: zoneId,
+        typeCode: conflictNoFlyTypeCode.value || conflictNoFlyForm.typeCode,
+        cleanupRedis: false,
+      }),
+    })
+    const delText = await delResp.text()
+    let delJson = null
+    try { delJson = delText ? JSON.parse(delText) : null } catch { /* 非 JSON 响应 */ }
+    if (!delResp.ok) throw new Error(delJson?.message || `删除失败(${delResp.status}): ${delText}`)
+    if (delJson?.status && delJson.status !== 'success') {
+      throw new Error(`删除接口返回失败: ${delJson?.message || delText}`)
+    }
+
+    // ⑤ 再次 attach：删除改变活动禁飞区指纹，应返回 skipped=false 并清除旧标记
+    const attachData = await attachNoFlyZone(
+      conflictNoFlyForm.airspaceId,
+      Number(conflictForm.level),
+      conflictNoFlyForm.version,
+      conflictNoFlyForm.force,
+    )
+    conflictNoFlySkipped.value = typeof attachData?.skipped === 'boolean' ? attachData.skipped : null
+    conflictNoFlyBlockedRows.value = Number.isFinite(Number(attachData?.blocked_grid_rows))
+      ? Number(attachData.blocked_grid_rows)
+      : null
+    conflictNoFlyActiveZones.value = Number.isFinite(Number(attachData?.active_zone_count))
+      ? Number(attachData.active_zone_count)
+      : null
+    conflictNoFlyAttachMsg.value = attachData?.skipped === true
+      ? '回填被跳过（skipped=true）：ClickHouse 标记未更新，请勾选“强制回填”后重试'
+      : `已回填，当前封禁 ${conflictNoFlyBlockedRows.value ?? 0} 个网格`
+
+    conflictNoFlyZoneId.value = ''
+    conflictNoFlyTypeCode.value = ''
+    conflictNoFlyPoints.value = []
+    conflictNoFlyMode.value = false
+    emit('show-polygon', [])
+
+    // ⑥ 用同一请求体复测，预期 conflict=false
+    await submitConflictCheck()
+  } catch (err) {
+    console.error('[冲突检测-禁飞区] 关闭失败:', err)
+    conflictError.value = `禁飞区关闭失败: ${err?.message || '请求失败'}`
+  } finally {
+    conflictNoFlyRebuilding.value = false
+  }
+}
+
+// 仅重新回填 ClickHouse（不改 PG 数据）；skipped=true 时可勾选“强制回填”绕过来历指纹
+async function rebuildConflictNoFlyZone() {
+  conflictNoFlyRebuilding.value = true
+  conflictError.value = ''
+  try {
+    const attachData = await attachNoFlyZone(
+      conflictNoFlyForm.airspaceId,
+      Number(conflictForm.level),
+      conflictNoFlyForm.version,
+      conflictNoFlyForm.force,
+    )
+    conflictNoFlySkipped.value = typeof attachData?.skipped === 'boolean' ? attachData.skipped : null
+    conflictNoFlyBlockedRows.value = Number.isFinite(Number(attachData?.blocked_grid_rows))
+      ? Number(attachData.blocked_grid_rows)
+      : null
+    conflictNoFlyActiveZones.value = Number.isFinite(Number(attachData?.active_zone_count))
+      ? Number(attachData.active_zone_count)
+      : null
+    conflictNoFlyAttachMsg.value = attachData?.skipped === true
+      ? '回填被跳过（skipped=true）：PG 活动禁飞区来源被认为未变化，可勾选“强制回填”'
+      : `回填完成，封禁 ${conflictNoFlyBlockedRows.value ?? 0} 个网格`
+  } catch (err) {
+    console.error('[冲突检测-禁飞区] 回填失败:', err)
+    conflictError.value = `ClickHouse 回填失败: ${err?.message || '请求失败'}`
+  } finally {
+    conflictNoFlyRebuilding.value = false
   }
 }
 
@@ -722,9 +855,9 @@ async function submitConflictCheck() {
   try {
     const queryLevel = Number(conflictForm.level)
 
-    // 按 动态禁飞区化设.md 第 3 步构建 checks
+    // 按 动态禁飞区化设.md 第 3 步构建 checks；单独验证禁飞区时关闭其它项以免干扰
     const checks = {
-      missingGrid: true,
+      missingGrid: conflictForm.useMissingGrid !== false,
       [`dz_${queryLevel}`]: conflictForm.useDzConstraint,
       [`gd_${queryLevel}`]: conflictForm.useGdConstraint,
       [`za_${queryLevel}`]: false,
@@ -736,10 +869,13 @@ async function submitConflictCheck() {
     const payload = {
       airspaceId: conflictForm.airspaceId.trim(),
       level: queryLevel,
-      mode: 'ALL',
+      mode: conflictForm.mode === 'FIRST' ? 'FIRST' : 'ALL',
       points: conflictPoints.value.map(p => [p.lon, p.lat, p.height]),
       checks: checks,
     }
+    // version 必须与 attach 目标版本一致；留空由后端取已激活版本
+    const queryVersion = Number(conflictForm.version)
+    if (Number.isFinite(queryVersion) && queryVersion > 0) payload.version = queryVersion
 
     console.log('[路径冲突检测] 发送 payload:', payload)
 
@@ -750,8 +886,17 @@ async function submitConflictCheck() {
       body: JSON.stringify(payload),
     })
 
-    const data = await resp.json()
+    const rawText = await resp.text()
+    let data = null
+    try { data = rawText ? JSON.parse(rawText) : null } catch { /* 非 JSON 响应 */ }
     console.log('[路径冲突检测] 返回数据:', data)
+
+    if (!resp.ok) {
+      throw new Error(`冲突检测失败(${resp.status}): ${data?.message || data?.error || rawText}`)
+    }
+    if (data?.success === false || (data?.status && data.status !== 'success' && data.status !== 'error')) {
+      throw new Error(`冲突检测接口返回失败: ${data?.message || rawText}`)
+    }
 
     // 调用 getGridByLine 获取完整路径网格用于可视化
     let pathCells = []
@@ -1207,9 +1352,7 @@ async function submitAstarPath() {
     })
 
     if (!resp.ok) {
-      const errText = await resp.text()
-      console.error('[A星航路规划] 错误响应:', errText)
-      throw new Error(`请求失败，状态码 ${resp.status}: ${errText}`)
+      throw new Error(await errorMessage(resp, `请求失败，状态码 ${resp.status}`))
     }
 
     const data = await resp.json()
@@ -1706,6 +1849,24 @@ async function submitAstarPath() {
           </select>
         </div>
         <div class="param-line">
+          <span class="param-label">网格版本</span>
+          <input
+            v-model="conflictForm.version"
+            type="number"
+            min="1"
+            step="1"
+            class="param-input"
+            placeholder="留空=已激活版本"
+          >
+        </div>
+        <div class="param-line">
+          <span class="param-label">检测模式</span>
+          <select v-model="conflictForm.mode" class="param-select">
+            <option value="ALL">ALL-全部冲突</option>
+            <option value="FIRST">FIRST-首个冲突</option>
+          </select>
+        </div>
+        <div class="param-line">
           <span class="param-label">飞行速度</span>
           <input
             v-model.number="conflictForm.speed"
@@ -1728,6 +1889,16 @@ async function submitAstarPath() {
               class="checkbox-input"
             >
             <span class="checkbox-text">启用实景三维障碍校验</span>
+          </label>
+        </div>
+        <div class="param-line-checkbox">
+          <label class="checkbox-label">
+            <input
+              type="checkbox"
+              v-model="conflictForm.useMissingGrid"
+              class="checkbox-input"
+            >
+            <span class="checkbox-text">启用缺失网格校验</span>
           </label>
         </div>
         <div class="param-line-checkbox">
@@ -1774,6 +1945,22 @@ async function submitAstarPath() {
               <select v-model="conflictNoFlyForm.typeCode" class="param-select-sm" aria-label="禁飞区类型">
                 <option v-for="opt in noFlyTypeOptions" :key="`c-${opt.value}`" :value="opt.value">{{ opt.label }}</option>
               </select>
+              <input
+                v-model="conflictNoFlyForm.zoneId"
+                type="text"
+                class="param-input-sm conflict-nofly-airspace"
+                placeholder="zoneId（留空自动生成）"
+                aria-label="禁飞区ID"
+              >
+              <input
+                v-model="conflictNoFlyForm.version"
+                type="number"
+                min="1"
+                step="1"
+                class="param-input-sm"
+                placeholder="版本(留空=激活)"
+                aria-label="ClickHouse网格版本"
+              >
               <!-- 网格层级：与冲突检测基础参数同步 -->
               <div class="nofly-level-row">
                 <span class="nofly-level-label">网格层级</span>
@@ -1785,6 +1972,10 @@ async function submitAstarPath() {
                 <span class="nofly-sep">~</span>
                 <input v-model.number="conflictNoFlyForm.top" type="number" step="any" min="0" class="param-input-sm" placeholder="顶高" aria-label="顶面高度">
               </div>
+              <label class="checkbox-label nofly-force-row">
+                <input type="checkbox" v-model="conflictNoFlyForm.force" class="checkbox-input">
+                <span class="checkbox-text">强制回填 force</span>
+              </label>
             </div>
 
             <div class="btn-row">
@@ -1795,6 +1986,54 @@ async function submitAstarPath() {
               </button>
               <button type="button" class="btn-clear" @click="exitConflictNoFlyMode" :disabled="conflictNoFlySaving">取消</button>
             </div>
+          </div>
+        </div>
+
+        <!-- 禁飞区回填状态 / 删除并回填 -->
+        <div v-if="conflictNoFlyZoneId" class="nofly-status-box">
+          <div class="nofly-status-row">
+            <span class="nofly-status-label">当前禁飞区</span>
+            <span class="nofly-status-value">{{ conflictNoFlyZoneId }}</span>
+          </div>
+          <div v-if="conflictNoFlySkipped !== null" class="nofly-status-row">
+            <span class="nofly-status-label">skipped</span>
+            <span class="nofly-status-value" :class="{ 'warn-text': conflictNoFlySkipped === true }">
+              {{ conflictNoFlySkipped }}
+            </span>
+          </div>
+          <div v-if="conflictNoFlyStatsCollected !== null" class="nofly-status-row">
+            <span class="nofly-status-label">statistics_collected</span>
+            <span class="nofly-status-value">{{ conflictNoFlyStatsCollected }}</span>
+          </div>
+          <div v-if="conflictNoFlyBlockedRows !== null" class="nofly-status-row">
+            <span class="nofly-status-label">blocked_grid_rows</span>
+            <span class="nofly-status-value" :class="{ 'warn-text': conflictNoFlyBlockedRows === 0 }">
+              {{ conflictNoFlyBlockedRows }}
+            </span>
+          </div>
+          <div v-if="conflictNoFlyActiveZones !== null" class="nofly-status-row">
+            <span class="nofly-status-label">活动禁飞区</span>
+            <span class="nofly-status-value">{{ conflictNoFlyActiveZones }}</span>
+          </div>
+          <div v-if="conflictNoFlyAttachMsg" class="nofly-attach-msg">{{ conflictNoFlyAttachMsg }}</div>
+          <div class="btn-row nofly-status-actions">
+            <button
+              type="button"
+              class="btn-query"
+              @click="closeConflictNoFlyZone"
+              :disabled="conflictNoFlyRebuilding || conflictLoading"
+            >
+              <Loader2 v-if="conflictNoFlyRebuilding" :size="14" class="spin" />
+              {{ conflictNoFlyRebuilding ? '处理中...' : '删除并回填' }}
+            </button>
+            <button
+              type="button"
+              class="btn-clear"
+              @click="rebuildConflictNoFlyZone"
+              :disabled="conflictNoFlyRebuilding"
+            >
+              重新回填
+            </button>
           </div>
         </div>
       </div>
@@ -1897,11 +2136,25 @@ async function submitAstarPath() {
                   <span class="modal-row-label">同步空域</span>
                   <span class="modal-row-value">{{ conflictNoFlyForm.airspaceId }} / 第 {{ conflictForm.level }} 级</span>
                 </div>
+                <div class="modal-row" v-if="conflictNoFlySkipped !== null">
+                  <span class="modal-row-label">skipped</span>
+                  <span class="modal-row-value" :class="{ 'warn-text': conflictNoFlySkipped === true }">
+                    {{ conflictNoFlySkipped }}
+                  </span>
+                </div>
+                <div class="modal-row" v-if="conflictNoFlyStatsCollected !== null">
+                  <span class="modal-row-label">statistics_collected</span>
+                  <span class="modal-row-value">{{ conflictNoFlyStatsCollected }}</span>
+                </div>
                 <div class="modal-row" v-if="conflictNoFlyBlockedRows !== null">
                   <span class="modal-row-label">封禁网格</span>
                   <span class="modal-row-value" :class="{ 'warn-text': conflictNoFlyBlockedRows === 0 }">
                     {{ conflictNoFlyBlockedRows }} 个
                   </span>
+                </div>
+                <div class="modal-row" v-if="conflictNoFlyActiveZones !== null">
+                  <span class="modal-row-label">活动禁飞区</span>
+                  <span class="modal-row-value">{{ conflictNoFlyActiveZones }} 个</span>
                 </div>
                 <div class="modal-row highlight">
                   <span class="modal-row-label">生成耗时</span>
@@ -3347,5 +3600,54 @@ async function submitAstarPath() {
   background: #fef3c7;
   border: 1px solid #fcd34d;
   border-radius: 6px;
+}
+
+.nofly-force-row {
+  margin-top: 6px;
+}
+
+.nofly-status-box {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: #f9fafb;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.nofly-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+.nofly-status-label {
+  font-size: 12px;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.nofly-status-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  word-break: break-all;
+  text-align: right;
+}
+
+.nofly-attach-msg {
+  margin-top: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #b45309;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 6px;
+}
+
+.nofly-status-actions {
+  margin: 8px 0 0;
 }
 </style>

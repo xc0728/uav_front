@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useAircraftStore } from '../../../stores/aircraft'
 import { ChevronLeft, Plane, AlertTriangle, FileCheck, Route, RefreshCw, Loader2, Shield, X, Trash2 } from 'lucide-vue-next'
+import { errorMessage } from '../../../utils/http'
 
 const FETCH_TIMEOUT_MS = 1000 * 20
 
@@ -116,7 +117,12 @@ const typeCodeNameMap = {
 }
 const noFlyZoneVisibleMap = ref({})
 const selectedFenceIds = ref(new Set())
-const isSyncing = ref(false)
+const isRedisActivating = ref(false)
+const isClickHouseActivating = ref(false)
+// ClickHouse 激活参数
+const deleteAttachAirspaceId = ref('Deqing_Airspace')
+const deleteAttachVersion = ref('')
+const forceRebuildAfterDelete = ref(false)
 
 // 分页
 const currentPage = ref(1)
@@ -682,7 +688,6 @@ function selectModule(module) {
   } else if (module.id === 'fence-info') {
     currentView.value = 'list'
     fetchFences()
-    syncNoFlyZoneToRedis()
   } else if (module.id === 'event-management') {
     currentView.value = 'event-dashboard'
   }
@@ -831,8 +836,7 @@ async function fetchRoutes() {
     })
 
     if (!resp.ok) {
-      const errText = await resp.text()
-      throw new Error(`请求失败: ${resp.status}`)
+      throw new Error(await errorMessage(resp, `请求失败: ${resp.status}`))
     }
 
     const data = await resp.json()
@@ -1033,74 +1037,53 @@ async function showAllNoFlyZones() {
   }
 }
 
-async function syncNoFlyZoneToRedis() {
-  isSyncing.value = true
+async function activateNoFlyZoneToRedis() {
+  const startedAt = performance.now()
+  isRedisActivating.value = true
+  try {
+    const resp = await fetch('/api/multiSource/redisSync/syncNoFlyZoneToRedis', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+    })
+    const data = await resp.json().catch(() => null)
+    if (resp.ok && data?.status === 'success') {
+      const details = data.data || {}
+      alert(`Redis 激活完成：同步 ${details.syncedCount ?? 0} 条${details.failedCount ? `，失败 ${details.failedCount} 条` : ''}\n耗时：${Math.round(performance.now() - startedAt)} ms`)
+    } else {
+      alert(`Redis 激活失败：${data?.message || '未知错误'}`)
+    }
+  } catch (err) {
+    console.error('[Redis 激活] 请求错误:', err)
+    alert('Redis 激活请求失败：' + (err?.message || ''))
+  } finally {
+    isRedisActivating.value = false
+  }
+}
+
+async function activateNoFlyZoneToClickHouse() {
+  const startedAt = performance.now()
+  isClickHouseActivating.value = true
   const CH_AIRSPACE = 'Deqing_Airspace'
   const CH_LEVEL = 16
 
   try {
-    // ① Redis 同步（A星航路规划使用）
-    const resp = await fetch('/api/multiSource/redisSync/syncNoFlyZoneToRedis', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
+    const payload = { airspaceId: deleteAttachAirspaceId.value.trim() || CH_AIRSPACE, level: CH_LEVEL }
+    const version = Number(deleteAttachVersion.value)
+    if (Number.isFinite(version) && version > 0) payload.version = version
+    if (forceRebuildAfterDelete.value) payload.force = true
+    const resp = await fetch('/api/multiSource/airSpaceDB/grid/noFlyZone/attach', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
     })
-    const data = await resp.json()
-
-    let redisOk = false
-    let redisMsg = ''
-
-    if (data?.status === 'success') {
-      const d = data.data || {}
-      const failed = d.failedCount ?? 0
-      const cleanup = d.redisCleanup || {}
-      const cleanupComplete = cleanup.complete === true
-      const cleanupDeleted = cleanup.deletedCount ?? 0
-      const cleanupPerformed = cleanup.performed === true
-
-      redisMsg = `Redis 同步 ${d.syncedCount ?? 0} 条`
-      if (failed > 0) redisMsg += `，失败 ${failed} 条`
-      if (cleanupPerformed) {
-        redisMsg += `；Redis 清理(${cleanupComplete ? '完整' : '不完整'})，删除旧键 ${cleanupDeleted} 条`
-      }
-      redisOk = (failed === 0)
+    const data = await resp.json().catch(() => null)
+    if (resp.ok && (data?.success === true || data?.status === 'success' || data?.skipped !== undefined)) {
+      alert(`ClickHouse 激活完成：封禁 ${data?.blocked_grid_rows ?? 0} 个网格\n耗时：${Math.round(performance.now() - startedAt)} ms`)
     } else {
-      redisMsg = 'Redis 同步失败：' + (data?.message || '未知错误')
-    }
-
-    // ② ClickHouse attach 同步（冲突检测使用，无论 Redis 成功与否都执行）
-    let chMsg = ''
-    let chOk = false
-    try {
-      const chResp = await fetch('/api/multiSource/airSpaceDB/grid/noFlyZone/attach', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ airspaceId: CH_AIRSPACE, level: CH_LEVEL }),
-      })
-      const chData = await chResp.json()
-      if (chResp.ok && (chData?.success === true || chData?.status === 'success')) {
-        chMsg = `ClickHouse 同步成功：封禁 ${chData?.blocked_grid_rows ?? 0} 个网格`
-        chOk = true
-      } else {
-        chMsg = `ClickHouse 同步失败：${chData?.message || '未知错误'}`
-      }
-    } catch (chErr) {
-      chMsg = `ClickHouse 同步请求异常：${chErr?.message || ''}`
-    }
-
-    // 汇总结果
-    const allOk = redisOk && chOk
-    let summary = `${redisMsg}\n${chMsg}`
-    if (allOk) {
-      alert(`激活避障完成\n${summary}`)
-    } else {
-      alert(`激活避障部分失败\n${summary}`)
+      alert(`ClickHouse 激活失败：${data?.message || '未知错误'}`)
     }
   } catch (err) {
-    console.error('[激活避障] 请求错误:', err)
-    alert('激活避障请求失败：' + (err?.message || ''))
+    console.error('[ClickHouse 激活] 请求错误:', err)
+    alert('ClickHouse 激活请求失败：' + (err?.message || ''))
   } finally {
-    isSyncing.value = false
+    isClickHouseActivating.value = false
   }
 }
 
@@ -1122,7 +1105,7 @@ async function deleteSelectedFences() {
         body: JSON.stringify({
           typeCode: zone.type_code || 'unit_organization',
           zoneId: zoneId,
-          cleanupRedis: true,
+          cleanupRedis: false,
         }),
       })
       const data = await resp.json()
@@ -1144,6 +1127,7 @@ async function deleteSelectedFences() {
   if (successCount > 0) {
     selectedFenceIds.value = new Set()
     fetchFences()
+    alert(`已删除 ${successCount} 个禁飞区；如需更新 Redis 或 ClickHouse，请手动激活。`)
   }
 }
 
@@ -1709,8 +1693,11 @@ defineExpose({
                 <button class="btn-show-all" @click="showAllNoFlyZones" :disabled="isFencesLoading || fenceList.length === 0">
                   一键显示
                 </button>
-                <button class="btn-activate-obstacle" @click="syncNoFlyZoneToRedis" :disabled="isSyncing">
-                  {{ isSyncing ? '激活中...' : '激活避障' }}
+                <button class="btn-activate-obstacle" @click="activateNoFlyZoneToRedis" :disabled="isRedisActivating || isClickHouseActivating">
+                  {{ isRedisActivating ? 'Redis 激活中...' : '激活到 Redis' }}
+                </button>
+                <button class="btn-activate-obstacle" @click="activateNoFlyZoneToClickHouse" :disabled="isRedisActivating || isClickHouseActivating">
+                  {{ isClickHouseActivating ? 'ClickHouse 激活中...' : '激活到 ClickHouse' }}
                 </button>
                 <button class="btn-refresh" @click="fetchFences" :disabled="isFencesLoading">
                   <Loader2 v-if="isFencesLoading" :size="14" class="spin" />
@@ -1722,6 +1709,31 @@ defineExpose({
                   删除
                 </button>
               </div>
+            </div>
+
+            <!-- ClickHouse 激活参数 -->
+            <div class="fence-attach-row">
+              <span class="fence-attach-label">目标空域</span>
+              <input
+                v-model="deleteAttachAirspaceId"
+                class="fence-attach-input"
+                placeholder="Deqing_Airspace"
+                aria-label="ClickHouse 目标空域ID"
+              >
+              <span class="fence-attach-label">网格版本</span>
+              <input
+                v-model="deleteAttachVersion"
+                class="fence-attach-input fence-attach-version"
+                type="number"
+                min="1"
+                step="1"
+                placeholder="激活"
+                aria-label="ClickHouse 目标网格版本"
+              >
+              <label class="fence-attach-force">
+                <input v-model="forceRebuildAfterDelete" type="checkbox">
+                <span>强制激活 force</span>
+              </label>
             </div>
 
             <!-- 加载状态 -->
@@ -2163,6 +2175,45 @@ defineExpose({
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.fence-attach-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.fence-attach-label {
+  font-size: 13px;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.fence-attach-input {
+  height: 30px;
+  min-width: 140px;
+  padding: 0 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+
+.fence-attach-version {
+  min-width: 90px;
+}
+
+.fence-attach-force {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #475569;
+  cursor: pointer;
+  user-select: none;
 }
 
 .type-select {

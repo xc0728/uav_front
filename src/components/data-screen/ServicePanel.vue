@@ -1,6 +1,6 @@
 <script setup>
-import { ref, computed, defineProps } from 'vue'
-import { ChevronRight, ChevronLeft, ChevronDown, X, Grid3X3, Navigation, Map, Calculator, Boxes, Settings2, Database, ShieldBan } from 'lucide-vue-next'
+import { ref, computed, defineProps, watch } from 'vue'
+import { ChevronRight, ChevronLeft, ChevronDown, X, Grid3X3, Navigation, Map, Calculator, Boxes, Settings2, Database, Mountain, ShieldBan } from 'lucide-vue-next'
 import InteropFusion from './functions/1_GridInterop.vue'
 import TiltPhotogrammetry from './functions/2_Osgb_Grid.vue'
 import GridSplit from './functions/3_1PointGrid.vue'
@@ -24,7 +24,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['showPoint', 'showGrid', 'show-line', 'show-polygon', 'get-view-bounds'])
+const emit = defineEmits(['showPoint', 'showGrid', 'show-line', 'show-polygon', 'get-view-bounds', 'panel-width-change'])
 
 const services = [
   {
@@ -104,7 +104,7 @@ const services = [
     id: 'dem-grid-query',
     name: 'DEM网格查询服务',
     shortName: 'DEM网格',
-    icon: Database,
+    icon: Mountain,
     component: DemGrid,
     functions: [
       'DEM网格查询',
@@ -124,7 +124,10 @@ const services = [
 
 // 控制面板状态
 const isControlPanelCollapsed = ref(true) // true = 默认收起
+const controlPanelWidth = computed(() => isControlPanelCollapsed.value ? 60 : 360)
 const openServiceId = ref(null)
+
+watch(controlPanelWidth, (width) => emit('panel-width-change', width), { immediate: true })
 
 // 当前面板模式: 'list' | 'calc'
 const panelMode = ref('list')

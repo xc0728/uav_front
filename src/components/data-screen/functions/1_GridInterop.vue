@@ -1,5 +1,6 @@
 <script setup>
 import { reactive, ref } from 'vue'
+import { errorMessage } from '../../../utils/http'
 
 const props = defineProps({
   serviceName: {
@@ -216,9 +217,7 @@ async function submitPointToGrid() {
     })
 
     if (!resp.ok) {
-      const errText = await resp.text()
-      console.error('[经纬度高转网格编码] 错误响应:', errText)
-      throw new Error(`请求失败，状态码 ${resp.status}: ${errText}`)
+      throw new Error(await errorMessage(resp, `请求失败，状态码 ${resp.status}`))
     }
 
     const data = await resp.json()

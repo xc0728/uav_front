@@ -1,6 +1,8 @@
 <script setup>
 import { reactive, ref, defineProps, defineExpose } from 'vue'
 import { Loader2, Trash2, Search, Square } from 'lucide-vue-next'
+import { errorMessage } from '../../../utils/http'
+import { DemGridByBoundsResponse } from '../../../proto/dem_grid'
 
 const props = defineProps({
   serviceName: {
@@ -38,7 +40,8 @@ const error = ref('')
 const result = ref(null)
 const queryStats = ref(null)
 const gridsData = ref([])
-let totalCount = 0
+let queryParams = null
+let nextCursor = null
 
 function resetForm() {
   loading.value = false
@@ -46,6 +49,8 @@ function resetForm() {
   result.value = null
   queryStats.value = null
   gridsData.value = []
+  queryParams = null
+  nextCursor = null
   rawBounds.value = {
     minLon: null,
     maxLon: null,
@@ -117,87 +122,41 @@ async function submitDemGridQuery() {
   }
 
   loading.value = true
+  const queryStartedAt = performance.now()
 
   try {
-    // 请求第一页数据（后端可能每页都返回全部数据，所以只取第一页）
-    const payload = {
-      minLon: minLon,
-      maxLon: maxLon,
-      minLat: minLat,
-      maxLat: maxLat,
+    queryParams = {
       level: Number(demGridForm.level),
+      minLon,
+      maxLon,
+      minLat,
+      maxLat,
+      pageSize: 5000,
     }
+    gridsData.value = []
+    nextCursor = null
+    do {
+      await loadDemGridPage()
+    } while (queryStats.value.hasMore)
 
-    console.log('[DEM网格查询] 发送 payload:', payload)
-
-    const t0 = performance.now()
-    const resp = await fetch('/api/multiSource/queryDemGridByBounds', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+    const cells = gridsData.value.map(cell => ({
+      bounds: {
+        north: cell.maxlat,
+        south: cell.minlat,
+        east: cell.maxlon,
+        west: cell.minlon,
+        top: cell.top !== undefined ? cell.top : (cell.center ? cell.center[2] : 0),
+        bottom: cell.bottom !== undefined ? cell.bottom : 0,
+      },
+      code: String(cell.code),
+      center: cell.center,
+    }))
+    emit('showGrid', {
+      cells,
+      level: queryParams.level,
+      runtime: performance.now() - queryStartedAt,
+      renderer: 'primitive',
     })
-
-    if (!resp.ok) {
-      const errText = await resp.text()
-      console.error('[DEM网格查询] 错误响应:', errText)
-      throw new Error(`请求失败，状态码 ${resp.status}: ${errText}`)
-    }
-
-    const data = await resp.json()
-    const runtime = performance.now() - t0
-    result.value = data
-    console.log('[DEM网格查询] 原始返回:', data)
-
-    // 获取数据（优先使用grids，其次使用cells）
-    let rawGrids = null
-    if (data?.data?.grids && data.data.grids.length > 0) {
-      rawGrids = data.data.grids
-    } else if (data?.data?.cells && data.data.cells.length > 0) {
-      rawGrids = data.data.cells
-    }
-
-    if (!rawGrids || rawGrids.length === 0) {
-      error.value = '未查询到DEM网格数据'
-      loading.value = false
-      return
-    }
-
-    const total = data?.data?.pagination?.total || rawGrids.length
-    const pageSize = data?.data?.pagination?.pageSize || rawGrids.length
-
-    console.log(`[DEM网格查询] 获取到 ${rawGrids.length} 条数据（总计 ${total} 条）`)
-
-    gridsData.value = rawGrids
-    totalCount = rawGrids.length
-
-    queryStats.value = {
-      total: total,
-      page: 1,
-      pageSize: pageSize,
-      status: data?.status || 'success',
-    }
-
-    if (gridsData.value.length > 0) {
-      const cells = gridsData.value.map(cell => {
-        return {
-          bounds: {
-            north: cell.maxlat,
-            south: cell.minlat,
-            east: cell.maxlon,
-            west: cell.minlon,
-            top: cell.top !== undefined ? cell.top : (cell.center ? cell.center[2] : 0),
-            bottom: cell.bottom !== undefined ? cell.bottom : 0,
-          },
-          code: String(cell.code),
-          center: cell.center,
-        }
-      })
-
-      console.log('[DEM网格查询] 转换后的 cells 前3条:', JSON.stringify(cells.slice(0, 3)))
-      console.log(`[DEM网格查询] 共 ${cells.length} 个网格，开始可视化...`)
-      
-      emit('showGrid', { cells, level: Number(demGridForm.level), runtime })
-    }
   } catch (err) {
     if (err.message.includes('边界参数不合法')) {
       error.value = '边界参数不合法'
@@ -212,11 +171,77 @@ async function submitDemGridQuery() {
   }
 }
 
+async function loadDemGridPage() {
+  const cursor = nextCursor
+  const payload = { ...queryParams, cursor }
+  console.log('[DEM网格查询] 发送 payload:', payload)
+
+  const resp = await fetch('/api/multiSource/queryDemGridByBounds', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/x-protobuf' },
+    body: JSON.stringify(payload),
+  })
+
+  if (!resp.ok) {
+    throw new Error(await errorMessage(resp, `请求失败，状态码 ${resp.status}`))
+  }
+  if (!resp.headers.get('content-type')?.includes('application/x-protobuf')) {
+    const errorData = await resp.json().catch(() => null)
+    throw new Error(errorData?.message || '请求失败')
+  }
+
+  const decoded = DemGridByBoundsResponse.decode(new Uint8Array(await resp.arrayBuffer()))
+  const data = {
+    status: 'success',
+    data: {
+      cells: decoded.cells.map(cell => ({
+        code: cell.code,
+        center: [cell.center?.longitude, cell.center?.latitude, cell.center?.height],
+        maxlon: cell.maxLon,
+        minlon: cell.minLon,
+        maxlat: cell.maxLat,
+        minlat: cell.minLat,
+        top: cell.top,
+        bottom: cell.bottom,
+      })),
+      count: decoded.count,
+      pagination: {
+        pageSize: decoded.pagination?.pageSize,
+        hasMore: decoded.pagination?.hasMore,
+        nextCursor: decoded.pagination?.nextCursor || null,
+      },
+    },
+  }
+
+  const rawGrids = data?.data?.cells || []
+  const pagination = data?.data?.pagination
+  if (!pagination || typeof pagination.hasMore !== 'boolean') {
+    throw new Error('响应缺少分页信息')
+  }
+  if (pagination.hasMore && typeof pagination.nextCursor !== 'string') {
+    throw new Error('响应中的下一页游标无效')
+  }
+
+  result.value = data
+  gridsData.value.push(...rawGrids)
+  nextCursor = pagination.nextCursor
+  queryStats.value = {
+    total: gridsData.value.length,
+    page: (queryStats.value?.page || 0) + 1,
+    pageSize: pagination.pageSize,
+    hasMore: pagination.hasMore,
+    status: data.status,
+  }
+
+}
+
 function clearGrids() {
   emit('showGrid', { cells: [] })
   result.value = null
   queryStats.value = null
   gridsData.value = []
+  queryParams = null
+  nextCursor = null
 }
 </script>
 
@@ -295,11 +320,11 @@ function clearGrids() {
       <div v-if="queryStats" class="result-box">
         <div class="result-row">
           <span class="result-label">网格数量</span>
-          <span class="result-num">{{ queryStats.total }}</span>
+          <span class="result-num">已加载 {{ queryStats.total }}</span>
         </div>
         <div class="result-row">
           <span class="result-label">分页</span>
-          <span class="result-num">{{ queryStats.page }}/{{ Math.ceil(queryStats.total / queryStats.pageSize) || 1 }}</span>
+          <span class="result-num">第 {{ queryStats.page }} 页{{ loading ? '，正在加载下一页' : '，已加载完毕' }}</span>
         </div>
         <div class="result-row">
           <span class="result-label">状态</span>

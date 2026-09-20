@@ -10,6 +10,7 @@ import {
   initBaseLayers,
   switchBaseLayer,
 } from '../../utils/tdtBaseLayers.js'
+import { createZhejiangTerrainProvider } from '../../utils/zhejiangTerrain.js'
 
 // 模块级别的存储（持久化，不随组件销毁而丢失）
 const routeGridEntities = {}
@@ -23,6 +24,7 @@ const cesiumEl = ref(null)
 let viewer = null
 let handler = null
 let tileset = null
+let gridPrimitives = []
 
 const lon = ref(null)
 const lat = ref(null)
@@ -43,9 +45,20 @@ const gridResultState = reactive({
 let scaleBarTimer = null
 
 // ==================== 底图图源切换 ====================
-const currentBaseLayer = ref('default')
+const currentBaseLayer = ref('img')
 const showBaseLayerPanel = ref(false)
 const baseLayerOptions = BASE_LAYER_OPTIONS
+const currentTerrainSource = ref('zhejiang')
+const showTerrainPanel = ref(false)
+const terrainSourceOptions = [
+  { id: 'zhejiang', label: '浙江 DEM' },
+  { id: 'world', label: '全球' },
+]
+
+function getTerrain(source) {
+  if (source === 'world') return Cesium.Terrain.fromWorldTerrain()
+  return new Cesium.Terrain(Promise.resolve(createZhejiangTerrainProvider()))
+}
 
 function selectBaseLayer(type) {
   if (type === currentBaseLayer.value) {
@@ -54,6 +67,18 @@ function selectBaseLayer(type) {
   }
   switchBaseLayer(viewer, type)
   currentBaseLayer.value = type
+  showBaseLayerPanel.value = false
+  showTerrainPanel.value = false
+}
+
+function selectTerrainSource(source) {
+  if (!viewer || source === currentTerrainSource.value) {
+    showTerrainPanel.value = false
+    return
+  }
+  viewer.scene.setTerrain(getTerrain(source))
+  currentTerrainSource.value = source
+  showTerrainPanel.value = false
   showBaseLayerPanel.value = false
 }
 
@@ -77,6 +102,10 @@ const props = defineProps({
   showScenarioDemo: {
     type: Boolean,
     default: true,
+  },
+  leftPanelWidth: {
+    type: Number,
+    default: 0,
   },
 })
 
@@ -161,6 +190,11 @@ function drawGridBoundary(gridInfo, options = {}) {
 
   const { skipFlyTo = false } = options
   console.log('[CesiumMap] drawGridBoundary gridInfo:', JSON.stringify(gridInfo).slice(0, 500))
+
+  if (gridInfo.renderer === 'primitive' && Array.isArray(gridInfo.cells)) {
+    drawGridPrimitives(gridInfo, { skipFlyTo })
+    return
+  }
 
   // 先清除之前的网格边界和中心点
   clearGridVisual()
@@ -892,6 +926,9 @@ function clearPolygonVisual() {
 function clearGridVisual() {
   if (!viewer) return
 
+  gridPrimitives.forEach(primitive => viewer.scene.primitives.remove(primitive))
+  gridPrimitives = []
+
   // 清除之前的单个网格边界
   const boundaryEntity = viewer.entities.getById('grid-boundary')
   if (boundaryEntity) {
@@ -917,6 +954,94 @@ function clearGridVisual() {
   gridResultState.levels = []
   gridResultState.total = 0
   gridResultState.runtime = ''
+}
+
+// DEM 查询结果是静态大批量矩形，使用批量 Primitive 避免逐格 Entity 的更新开销。
+function drawGridPrimitives(gridInfo, options = {}) {
+  clearGridVisual()
+  if (!gridInfo.cells.length) return
+
+  const fillColor = Cesium.Color.fromCssColorString('#3b82f6').withAlpha(0.5)
+  const outlineColor = Cesium.Color.fromCssColorString('#3b82f6')
+  const batchSize = 50000
+  let minLon = Infinity, maxLon = -Infinity
+  let minLat = Infinity, maxLat = -Infinity
+  let minHeight = Infinity, maxHeight = -Infinity
+  let validCount = 0
+
+  for (let offset = 0; offset < gridInfo.cells.length; offset += batchSize) {
+    const fills = []
+    const outlines = []
+    const end = Math.min(offset + batchSize, gridInfo.cells.length)
+
+    for (let index = offset; index < end; index++) {
+      const bounds = gridInfo.cells[index]?.bounds
+      if (!bounds) continue
+      const { north, south, east, west, top = 0, bottom = 0 } = bounds
+      if (![north, south, east, west, top, bottom].every(Number.isFinite)) continue
+
+      const rectangle = Cesium.Rectangle.fromDegrees(west, south, east, north)
+      fills.push(new Cesium.GeometryInstance({
+        geometry: new Cesium.RectangleGeometry({
+          rectangle,
+          height: bottom,
+          extrudedHeight: top,
+          vertexFormat: Cesium.PerInstanceColorAppearance.VERTEX_FORMAT,
+        }),
+        attributes: {
+          color: Cesium.ColorGeometryInstanceAttribute.fromColor(fillColor),
+        },
+      }))
+      outlines.push(new Cesium.GeometryInstance({
+        geometry: new Cesium.RectangleOutlineGeometry({
+          rectangle,
+          height: bottom,
+          extrudedHeight: top,
+        }),
+        attributes: {
+          color: Cesium.ColorGeometryInstanceAttribute.fromColor(outlineColor),
+        },
+      }))
+
+      minLon = Math.min(minLon, west)
+      maxLon = Math.max(maxLon, east)
+      minLat = Math.min(minLat, south)
+      maxLat = Math.max(maxLat, north)
+      minHeight = Math.min(minHeight, bottom)
+      maxHeight = Math.max(maxHeight, top)
+      validCount++
+    }
+
+    if (!fills.length) continue
+    gridPrimitives.push(viewer.scene.primitives.add(new Cesium.Primitive({
+      geometryInstances: fills,
+      appearance: new Cesium.PerInstanceColorAppearance({ translucent: true, closed: true }),
+      asynchronous: true,
+    })))
+    gridPrimitives.push(viewer.scene.primitives.add(new Cesium.Primitive({
+      geometryInstances: outlines,
+      appearance: new Cesium.PerInstanceColorAppearance({ flat: true, translucent: false }),
+      asynchronous: true,
+    })))
+  }
+
+  if (!validCount) return
+  if (!options.skipFlyTo) {
+    viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(
+        (minLon + maxLon) / 2,
+        (minLat + maxLat) / 2,
+        (minHeight + maxHeight) / 2 + 3000,
+      ),
+      duration: 1.5,
+    })
+  }
+
+  gridResultState.levels = collectGridLevels(gridInfo.cells, gridInfo.level)
+  gridResultState.total = validCount
+  gridResultState.runtime = formatRuntime(gridInfo.runtime)
+  gridResultState.visible = true
+  updateScaleBar()
 }
 
 // ==================== 比例尺 + 查询结果图例辅助函数 ====================
@@ -3790,6 +3915,8 @@ defineExpose({
   toggleBuildingsOnMap,
   // 底图图源切换
   setBaseLayer: selectBaseLayer,
+  // 高程图源切换
+  setTerrainSource: selectTerrainSource,
 })
 
 onMounted(async () => {
@@ -3812,6 +3939,8 @@ onMounted(async () => {
       shouldAnimate: true,
       requestRenderMode: false,      // 禁用请求渲染模式
       maximumRenderTimeChange: Infinity, // 允许无限时间变化
+      // 默认使用项目内浙江 DEM；影像底图仍由现有图层管理。
+      terrain: getTerrain(currentTerrainSource.value),
     })
 
     // 确保启用持续渲染
@@ -3828,8 +3957,9 @@ onMounted(async () => {
 
     viewer.scene.globe.depthTestAgainstTerrain = false
 
-    // 记录默认影像图层，供底图切换使用
+    // 记录默认影像图层后，默认切换为天地图影像底图。
     initBaseLayers(viewer)
+    switchBaseLayer(viewer, currentBaseLayer.value)
 
     tileset = await Cesium.Cesium3DTileset.fromUrl('/dq3dtiles/tileset.json')
     viewer.scene.primitives.add(tileset)
@@ -4017,7 +4147,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- 底图图源切换卡片 -->
-      <div class="single-toggle-card base-layer-card" @click.stop="showBaseLayerPanel = !showBaseLayerPanel">
+      <div class="single-toggle-card base-layer-card" @click.stop="showBaseLayerPanel = !showBaseLayerPanel; showTerrainPanel = false">
         <span class="layer-label">底图</span>
         <span class="base-layer-current">{{ baseLayerOptions.find(o => o.id === currentBaseLayer)?.label }}</span>
         <svg class="base-layer-chevron" :class="{ open: showBaseLayerPanel }" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
@@ -4037,8 +4167,29 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- 点击面板外区域关闭底图选择面板 -->
-      <div v-if="showBaseLayerPanel" class="base-layer-mask" @click="showBaseLayerPanel = false" />
+      <!-- 高程图源切换卡片 -->
+      <div class="single-toggle-card base-layer-card" @click.stop="showTerrainPanel = !showTerrainPanel; showBaseLayerPanel = false">
+        <span class="layer-label">高程</span>
+        <span class="base-layer-current">{{ terrainSourceOptions.find(o => o.id === currentTerrainSource)?.label }}</span>
+        <svg class="base-layer-chevron" :class="{ open: showTerrainPanel }" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+        <div v-if="showTerrainPanel" class="base-layer-panel" @click.stop>
+          <div
+            v-for="opt in terrainSourceOptions"
+            :key="opt.id"
+            class="base-layer-option"
+            :class="{ active: opt.id === currentTerrainSource }"
+            @click="selectTerrainSource(opt.id)"
+          >
+            <span>{{ opt.label }}</span>
+            <span v-if="opt.id === currentTerrainSource" class="base-layer-check">&#10003;</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 点击面板外区域关闭图源选择面板 -->
+      <div v-if="showBaseLayerPanel || showTerrainPanel" class="base-layer-mask" @click="showBaseLayerPanel = false; showTerrainPanel = false" />
     </div>
 
     <!-- 查询网格图例（右下角，支持多层级：层级+颜色+尺寸、运行时间） -->
@@ -4064,7 +4215,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- 比例尺（左下角，始终显示，独立于图例） -->
-    <div class="ref-scale-bar" v-if="isMapReady">
+    <div class="ref-scale-bar" :style="{ left: `calc(${leftPanelWidth}px + 16px)` }" v-if="isMapReady">
       <div class="scale-track">
         <div class="scale-fill" :style="{ width: gridResultState.scalePixels + 'px' }" />
       </div>
@@ -5257,7 +5408,6 @@ onBeforeUnmount(() => {
 
 .ref-scale-bar {
   position: absolute;
-  left: 16px;
   bottom: 20px;
   padding: 8px 12px;
   background: rgba(15, 23, 42, 0.85);

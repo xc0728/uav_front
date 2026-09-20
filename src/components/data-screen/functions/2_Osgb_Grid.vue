@@ -1,5 +1,6 @@
 <script setup>
 import { reactive, ref } from 'vue'
+import { errorMessage } from '../../../utils/http'
 
 const props = defineProps({
   serviceName: {
@@ -206,9 +207,7 @@ async function submitAggregation() {
     })
 
     if (!resp.ok) {
-      const errText = await resp.text()
-      console.error('[osgb网格化聚合入库] 错误响应:', errText)
-      throw new Error(`请求失败，状态码 ${resp.status}: ${errText}`)
+      throw new Error(await errorMessage(resp, `请求失败，状态码 ${resp.status}`))
     }
 
     const data = await resp.json()
@@ -250,9 +249,7 @@ async function submitTriangleGridQuery() {
     })
 
     if (!resp.ok) {
-      const errText = await resp.text()
-      console.error('[倾斜摄影网格查询] 错误响应:', errText)
-      throw new Error(`请求失败，状态码 ${resp.status}: ${errText}`)
+      throw new Error(await errorMessage(resp, `请求失败，状态码 ${resp.status}`))
     }
 
     const data = await resp.json()
