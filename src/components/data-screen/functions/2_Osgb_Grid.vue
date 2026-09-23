@@ -13,7 +13,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['close', 'showPoint', 'showGrid'])
+const emit = defineEmits(['close', 'showPoint', 'showGrid', 'get-view-bounds'])
 
 // ==================== OSGB 网格化 ====================
 const osgbForm = reactive({
@@ -123,6 +123,7 @@ const triangleGridError = ref('')
 const triangleGridResult = ref(null)
 const queryStats = ref(null)
 const gridsData = ref([])
+const queryBounds = ref(null)
 
 function resetForm() {
   if (props.functionName === 'osgb网格化（同步入库）') {
@@ -138,6 +139,7 @@ function resetForm() {
     triangleGridResult.value = null
     queryStats.value = null
     gridsData.value = []
+    queryBounds.value = null
   }
 }
 
@@ -145,7 +147,11 @@ function setPointFromMap(lon, lat, height) {
   // 倾斜摄影网格查询暂不支持地图点选
 }
 
-defineExpose({ resetForm, setPointFromMap })
+function setViewBounds(bounds) {
+  queryBounds.value = bounds
+}
+
+defineExpose({ resetForm, setPointFromMap, setViewBounds })
 
 // ==================== OSGB 网格化提交 ====================
 async function submitOsgbGrid() {
@@ -232,11 +238,23 @@ async function submitTriangleGridQuery() {
     return
   }
 
+  queryBounds.value = null
+  emit('get-view-bounds')
+  if (!queryBounds.value) {
+    triangleGridError.value = '无法获取当前地图视野范围'
+    return
+  }
+
   triangleGridLoading.value = true
 
   try {
     const payload = {
       level: Number(triangleGridForm.level),
+      minLon: queryBounds.value.west,
+      maxLon: queryBounds.value.east,
+      minLat: queryBounds.value.south,
+      maxLat: queryBounds.value.north,
+      pageSize: 5000,
     }
 
     console.log('[倾斜摄影网格查询] 发送 payload:', payload)
@@ -292,6 +310,7 @@ async function submitTriangleGridQuery() {
     queryStats.value = {
       total: parsedCount,
       status: data?.status || 'unknown',
+      hasMore: data?.data?.hasMore === true,
     }
 
     // 如果返回了格网数据，通知地图组件显示
@@ -523,6 +542,9 @@ function clearGrids() {
           <span class="result-status" :class="queryStats.status">
             {{ queryStats.status === 'success' ? '成功' : queryStats.status }}
           </span>
+        </div>
+        <div v-if="queryStats.hasMore" class="error-box">
+          当前视野网格超过 5000 个，仅显示前 5000 个，请放大地图后重新查询
         </div>
       </div>
 

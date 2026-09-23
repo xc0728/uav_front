@@ -11,6 +11,7 @@ import {
   switchBaseLayer,
 } from '../../utils/tdtBaseLayers.js'
 import { createZhejiangTerrainProvider } from '../../utils/zhejiangTerrain.js'
+import { chartFeatureLabel } from '../../utils/staticFeatures.js'
 
 // 模块级别的存储（持久化，不随组件销毁而丢失）
 const routeGridEntities = {}
@@ -25,6 +26,7 @@ let viewer = null
 let handler = null
 let tileset = null
 let gridPrimitives = []
+let chartGridEntities = []
 
 const lon = ref(null)
 const lat = ref(null)
@@ -32,6 +34,43 @@ const height = ref(null)
 const show3DTiles = ref(true)
 const showBuildings = ref(false) // 建筑白膜开关
 const isMapReady = ref(false) // 地图是否准备就绪
+const chartFeatureLayers = ref([])
+const selectedGrid = ref(null)
+
+function featureBusinessType(properties) {
+  return properties?.Type ?? properties?.type ?? properties?.['类型'] ?? ''
+}
+
+function gridFeatureTypes(features) {
+  const types = [...new Set(features.map(feature => featureBusinessType(feature.properties)).filter(Boolean))]
+  return types.join('、') || '未标注'
+}
+
+function syncChartFeatureLayers(cells, previous = new Map(chartFeatureLayers.value.map(layer => [layer.type, layer.enabled]))) {
+  const layers = new Map()
+  cells.forEach(cell => {
+    cell.chartFeatures?.forEach(feature => {
+      const layer = layers.get(feature.type) || { ...feature, count: 0, enabled: previous.get(feature.type) ?? true }
+      layer.count += 1
+      layers.set(feature.type, layer)
+    })
+  })
+  chartFeatureLayers.value = [...layers.values()].sort((a, b) => a.label.localeCompare(b.label))
+}
+
+function updateChartFeatureVisibility() {
+  const enabled = new Set(chartFeatureLayers.value.filter(layer => layer.enabled).map(layer => layer.type))
+  chartGridEntities.forEach(({ entity, features }) => {
+    const activeFeature = features.find(feature => enabled.has(feature.type))
+    entity.show = Boolean(activeFeature)
+    if (activeFeature) {
+      const color = Cesium.Color.fromCssColorString(activeFeature.color)
+      entity.rectangle.material = color.withAlpha(0.5)
+      entity.rectangle.outlineColor = color
+    }
+  })
+  viewer?.scene.requestRender()
+}
 
 // ==================== 查询结果图例 + 比例尺（仅在查询出网格后显示） ====================
 const gridResultState = reactive({
@@ -196,13 +235,15 @@ function drawGridBoundary(gridInfo, options = {}) {
     return
   }
 
-  // 先清除之前的网格边界和中心点
+  // 先清除之前的网格边界和中心点；视野刷新时保留用户的要素显隐选择
+  const previousChartLayers = new Map(chartFeatureLayers.value.map(layer => [layer.type, layer.enabled]))
   clearGridVisual()
 
   // 检查是否是多个网格（cells 数组）
   if (gridInfo.cells && Array.isArray(gridInfo.cells) && gridInfo.cells.length > 0) {
     console.log('[CesiumMap] 检测到多个网格:', gridInfo.cells.length)
     // 绘制多个网格边界
+    syncChartFeatureLayers(gridInfo.cells, previousChartLayers)
     let minLon = Infinity, maxLon = -Infinity
     let minLat = Infinity, maxLat = -Infinity
     let minHeight = Infinity, maxHeight = -Infinity
@@ -254,7 +295,7 @@ function drawGridBoundary(gridInfo, options = {}) {
       
       // 轻微扩展边界以消除Cesium渲染缝隙
       const gapFix = 0.000001
-      viewer.entities.add({
+      const entity = viewer.entities.add({
         id: cellId,
         rectangle: {
           coordinates: Cesium.Rectangle.fromDegrees(
@@ -270,8 +311,18 @@ function drawGridBoundary(gridInfo, options = {}) {
           height: bottom,
           extrudedHeight: top,
         },
-        description: cellLevel !== undefined ? `层级: ${cellLevel}` : undefined,
+        description: cell.description || (cellLevel !== undefined ? `层级: ${cellLevel}` : undefined),
       })
+      entity.__chartGridDetail = {
+        code: cell.code,
+        level: cellLevel,
+        gridType: cell.gridType,
+        bounds: { west, south, east, north, bottom, top },
+        features: cell.features || [],
+      }
+      if (cell.chartFeatures?.length) {
+        chartGridEntities.push({ entity, features: cell.chartFeatures })
+      }
     })
 
     // 计算整体中心位置
@@ -295,6 +346,7 @@ function drawGridBoundary(gridInfo, options = {}) {
     gridResultState.total = gridInfo.cells.length
     gridResultState.runtime = formatRuntime(gridInfo.runtime)
     gridResultState.visible = true
+    updateChartFeatureVisibility()
     updateScaleBar()
     return
   }
@@ -928,6 +980,9 @@ function clearGridVisual() {
 
   gridPrimitives.forEach(primitive => viewer.scene.primitives.remove(primitive))
   gridPrimitives = []
+  chartGridEntities = []
+  chartFeatureLayers.value = []
+  selectedGrid.value = null
 
   // 清除之前的单个网格边界
   const boundaryEntity = viewer.entities.getById('grid-boundary')
@@ -3995,6 +4050,13 @@ onMounted(async () => {
       return
     }
 
+    const pickedEntity = viewer.scene.pick(movement.position)?.id
+    if (pickedEntity?.__chartGridDetail) {
+      selectedGrid.value = pickedEntity.__chartGridDetail
+      return
+    }
+    selectedGrid.value = null
+
     // 获取点击位置的 cartesian 坐标
     const cartesian = viewer.scene.pickPosition(movement.position)
     if (!cartesian) return
@@ -4081,6 +4143,50 @@ onBeforeUnmount(() => {
 <template>
   <section class="cesium-map-container">
     <div ref="cesiumEl" class="cesium-viewer" />
+
+    <aside v-if="isMapReady" class="chart-feature-panel">
+      <div class="chart-feature-panel-title">
+        <span>航图要素</span>
+        <small>{{ chartFeatureLayers.length ? `${chartFeatureLayers.length} 类` : '未加载' }}</small>
+      </div>
+      <div v-if="!chartFeatureLayers.length" class="chart-feature-empty">
+        请在“航图要素网格查询”中执行查询后，在此筛选显示要素。
+      </div>
+      <label
+        v-for="layer in chartFeatureLayers"
+        :key="layer.type"
+        class="chart-feature-option"
+        :title="layer.label"
+      >
+        <input
+          v-model="layer.enabled"
+          type="checkbox"
+          :aria-label="`显示${layer.label}`"
+          @change="updateChartFeatureVisibility"
+        >
+        <i :style="{ background: layer.color }" />
+        <span>{{ layer.label }}</span>
+        <small>{{ layer.count }}</small>
+      </label>
+      <section v-if="selectedGrid" class="selected-grid-detail">
+        <div class="selected-grid-title">
+          <span>已选网格</span>
+          <button type="button" aria-label="关闭网格详情" @click="selectedGrid = null">×</button>
+        </div>
+        <div>编码：{{ selectedGrid.code }}</div>
+        <div>层级：{{ selectedGrid.level }}</div>
+        <div>要素类型：{{ gridFeatureTypes(selectedGrid.features) }}</div>
+        <div>经纬度：{{ selectedGrid.bounds.west.toFixed(6) }}, {{ selectedGrid.bounds.south.toFixed(6) }} ～ {{ selectedGrid.bounds.east.toFixed(6) }}, {{ selectedGrid.bounds.north.toFixed(6) }}</div>
+        <div>高度：{{ selectedGrid.bounds.bottom.toFixed(2) }} ～ {{ selectedGrid.bounds.top.toFixed(2) }} m</div>
+        <div class="selected-grid-features">关联要素（{{ selectedGrid.features.length }}）</div>
+        <article v-for="feature in selectedGrid.features" :key="`${feature.datasetId}-${feature.featureUid}`" class="selected-grid-feature">
+          <b>{{ chartFeatureLabel(feature) }}</b>
+          <span v-if="featureBusinessType(feature.properties)">类型：{{ featureBusinessType(feature.properties) }}</span>
+          <span>{{ feature.dimensionMode }} · {{ feature.verticalMode || '—' }}</span>
+          <span v-if="feature.minHeight !== null && feature.minHeight !== undefined">高度：{{ feature.minHeight }} ～ {{ feature.maxHeight }} m</span>
+        </article>
+      </section>
+    </aside>
 
     <!-- 鼠标位置信息 -->
     <div class="mouse-info">
@@ -4414,6 +4520,130 @@ onBeforeUnmount(() => {
 .cesium-viewer {
   width: 100%;
   height: 100%;
+}
+
+.chart-feature-panel {
+  position: absolute;
+  top: 80px;
+  right: 16px;
+  width: 230px;
+  max-height: calc(100vh - 260px);
+  overflow-y: auto;
+  padding: 12px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  color: #fff;
+  z-index: 20;
+  backdrop-filter: blur(8px);
+}
+
+.chart-feature-panel-title,
+.chart-feature-option {
+  display: flex;
+  align-items: center;
+}
+
+.chart-feature-panel-title {
+  justify-content: space-between;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.chart-feature-panel-title small,
+.chart-feature-option small {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 11px;
+}
+
+.chart-feature-option {
+  gap: 8px;
+  padding: 6px 4px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.chart-feature-option:hover {
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.chart-feature-option input {
+  margin: 0;
+  accent-color: #3b82f6;
+}
+
+.chart-feature-option i {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border-radius: 2px;
+}
+
+.chart-feature-option span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chart-feature-empty {
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.selected-grid-detail {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.selected-grid-title {
+  display: flex;
+  justify-content: space-between;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.selected-grid-title button {
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.selected-grid-features {
+  margin-top: 6px;
+  color: #93c5fd;
+}
+
+.selected-grid-feature {
+  display: flex;
+  flex-direction: column;
+  margin-top: 5px;
+  padding: 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.selected-grid-feature pre {
+  max-height: 120px;
+  margin: 4px 0 0;
+  overflow: auto;
+  color: #dbeafe;
+  font: 10px/1.45 monospace;
+  white-space: pre-wrap;
 }
 
 .mouse-info {

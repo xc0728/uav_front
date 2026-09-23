@@ -14,7 +14,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['close', 'showPoint', 'showGrid'])
+const emit = defineEmits(['close', 'showPoint', 'showGrid', 'get-view-bounds'])
 
 // ==================== 多粒度混合适网建模 ====================
 const polygonForm = reactive({
@@ -98,6 +98,7 @@ const osgbAggError = ref('')
 const osgbAggResult = ref(null)
 const osgbAggStats = ref(null)
 const osgbAggGridsData = ref([])
+const osgbAggQueryBounds = ref(null)
 
 // 统一的基础颜色配置（暖色 -> 冷色）
 // 索引 0-10 对应层级 4-14（数字越小格子越大 = 越暖）
@@ -300,6 +301,7 @@ function resetForm() {
     osgbAggResult.value = null
     osgbAggStats.value = null
     osgbAggGridsData.value = []
+    osgbAggQueryBounds.value = null
   }
 }
 
@@ -309,6 +311,10 @@ function setPointFromMap(lon, lat, height) {
   polygonPoints.value.push(normalizePoint({ lon, lat, height }))
 
   console.log('[多粒度混合适网建模] 添加点:', lon, lat, height)
+}
+
+function setViewBounds(bounds) {
+  osgbAggQueryBounds.value = bounds
 }
 
 function removePoint(index) {
@@ -336,12 +342,24 @@ async function submitOsgbAggGridQuery() {
     return
   }
 
+  osgbAggQueryBounds.value = null
+  emit('get-view-bounds')
+  if (!osgbAggQueryBounds.value) {
+    osgbAggError.value = '无法获取当前地图视野范围'
+    return
+  }
+
   osgbAggLoading.value = true
 
   try {
     const payload = {
       level,
       minLevel: minLevel || 0,
+      minLon: osgbAggQueryBounds.value.west,
+      maxLon: osgbAggQueryBounds.value.east,
+      minLat: osgbAggQueryBounds.value.south,
+      maxLat: osgbAggQueryBounds.value.north,
+      pageSize: 5000,
     }
 
     console.log('[倾斜摄影多源聚合网格查询] 发送 payload:', payload)
@@ -382,6 +400,7 @@ async function submitOsgbAggGridQuery() {
       level: data?.data?.level,
       minLevel: data?.data?.minLevel,
       tableName: data?.data?.table_name,
+      hasMore: data?.data?.hasMore === true,
     }
 
     // 如果返回了格网数据，通知地图组件显示
@@ -466,7 +485,7 @@ function clearOsgbAggGrids() {
   osgbAggGridsData.value = []
 }
 
-defineExpose({ resetForm, setPointFromMap })
+defineExpose({ resetForm, setPointFromMap, setViewBounds })
 
 async function submitPolygonGrid() {
   polygonError.value = ''
@@ -907,6 +926,9 @@ function clearGrids() {
         <div v-if="osgbAggStats.minLevel !== undefined" class="result-row">
           <span class="result-label">最小聚合层级</span>
           <span class="result-num">{{ osgbAggStats.minLevel }}</span>
+        </div>
+        <div v-if="osgbAggStats.hasMore" class="error-box">
+          当前视野网格超过 5000 个，仅显示前 5000 个，请放大地图后重新查询
         </div>
       </div>
 

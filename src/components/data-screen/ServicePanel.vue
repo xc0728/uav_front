@@ -87,6 +87,7 @@ const services = [
     component: AirspaceGridQuery,
     functions: [
       '空域网格查询',
+      '航图要素网格查询',
     ],
   },
   {
@@ -330,7 +331,10 @@ function setViewBoundsToActiveService(bounds) {
 
   console.log('[ServicePanel] 设置视图边界:', bounds)
 
-  if (activeServiceId.value === 'dem-grid-query' || activeServiceId.value === 'airspace-grid-query') {
+  if (activeServiceId.value === 'dem-grid-query'
+      || activeServiceId.value === 'airspace-grid-query'
+      || activeServiceId.value === 'tilt-photogrammetry'
+      || activeServiceId.value === 'grid-aggregation') {
     if (typeof activeComponentRef.value.setViewBounds === 'function') {
       activeComponentRef.value.setViewBounds(bounds)
     }

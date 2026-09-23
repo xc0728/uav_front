@@ -1,7 +1,19 @@
 <script setup>
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { ZoomIn, Loader2 } from 'lucide-vue-next'
 import { errorMessage } from '../../../utils/http'
+import {
+  CHART_GRID_LEVEL,
+  CHART_DATASETS,
+  CHART_DATASET_TREE,
+  chartFeatureColor,
+  chartFeatureLabel,
+  chartThemeLabel,
+  featuresByGrid,
+  horizontalGridCode,
+  queryChartFeatures,
+  queryChartRegion,
+} from '../../../utils/staticFeatures'
 
 const props = defineProps({
   serviceName: {
@@ -15,9 +27,17 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'showPoint', 'showGrid', 'get-view-bounds'])
+const chartMode = computed(() => props.functionName === '航图要素网格查询')
 
 /** 高度快选：100, 200, 300, 400, 500, 600 */
 const heightPresetOptions = [100, 200, 300, 400, 500, 600]
+const airspaceOptions = [
+  'Changsha_AIRSPACE',
+  'Xiangtan_AIRSPACE',
+  'Zhuzhou_AIRSPACE',
+  'ZheJiang_AIRSPACE',
+  'Deqing_Airspace',
+]
 
 function onBottomPresetChange(event) {
   const val = event.target.value
@@ -43,7 +63,7 @@ const airspaceGridForm = reactive({
   maxLat: null,
   top: 600,
   bottom: 0,
-  airspaceId: 'Deqing_Airspace',
+  airspaceId: '',
 })
 
 const loading = ref(false)
@@ -51,7 +71,137 @@ const error = ref('')
 const result = ref(null)
 const queryStats = ref(null)
 const gridsData = ref([])
+const chartSummary = ref(null)
+const selectedDatasetIds = ref(CHART_DATASETS.slice(0, 4).map(dataset => dataset.id))
 let totalCount = 0
+
+function selectAllDatasets() {
+  selectedDatasetIds.value = CHART_DATASETS.map(dataset => dataset.id)
+}
+
+function clearDatasetSelection() {
+  selectedDatasetIds.value = []
+}
+
+function datasetIdsOf(node) {
+  return node.datasets
+    ? node.datasets.map(dataset => dataset.id)
+    : node.children.flatMap(datasetIdsOf)
+}
+
+function isNodeSelected(node) {
+  const ids = datasetIdsOf(node)
+  return ids.length > 0 && ids.every(id => selectedDatasetIds.value.includes(id))
+}
+
+function setNodeSelected(node, checked) {
+  const selected = new Set(selectedDatasetIds.value)
+  datasetIdsOf(node).forEach(id => checked ? selected.add(id) : selected.delete(id))
+  selectedDatasetIds.value = CHART_DATASETS.filter(dataset => selected.has(dataset.id)).map(dataset => dataset.id)
+}
+
+watch(chartMode, (active) => {
+  if (!active) return
+  airspaceGridForm.level = CHART_GRID_LEVEL
+  if (airspaceGridForm.top > 300) airspaceGridForm.top = 300
+}, { immediate: true })
+
+function uniqueFeatureCount(features) {
+  return new Set(features.map(feature => feature.featureUid)).size
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
+}
+
+function toMapCells(rawGrids) {
+  return rawGrids
+    .filter(cell => cell?.found !== false)
+    .map(cell => {
+      const g = cell?.data?.grid || cell
+      const b = g.bounds
+      return {
+        code: String(g.code || cell.code || ''),
+        level: g.level,
+        z: g.level,
+        bounds: {
+          north: g.maxlat ?? b?.max_latitude ?? b?.north,
+          south: g.minlat ?? b?.min_latitude ?? b?.south,
+          east: g.maxlon ?? b?.max_longitude ?? b?.east,
+          west: g.minlon ?? b?.min_longitude ?? b?.west,
+          top: g.top ?? b?.top ?? 0,
+          bottom: g.bottom ?? b?.bottom ?? 0,
+        },
+        center: g.center_point || g.center,
+        gridType: g.gridType ?? g.grid_type ?? null,
+        features: Array.isArray(cell.features) ? cell.features : null,
+      }
+    })
+    .filter(cell => cell.code && Object.values(cell.bounds).every(Number.isFinite))
+}
+
+function featureDescription(cell, features) {
+  const themes = [...new Set(features.map(feature => feature.theme).filter(Boolean))]
+  const rows = features.slice(0, 8).map(feature =>
+    `<li>${escapeHtml(chartFeatureLabel(feature))}</li>`,
+  ).join('')
+  return `<b>航图要素网格</b><br>编码：${escapeHtml(cell.code)}<br>` +
+    `高度：${cell.bounds.bottom.toFixed(2)}–${cell.bounds.top.toFixed(2)} m<br>` +
+    `主题：${escapeHtml(themes.map(chartThemeLabel).join('、'))}<br>关联要素：${features.length}<ul>${rows}</ul>`
+}
+
+async function buildDisplayedCells(rawGrids, signal) {
+  const cells = toMapCells(rawGrids)
+  chartSummary.value = null
+  if (!chartMode.value || cells.length === 0) return cells
+
+  const embeddedFeatures = cells.flatMap(cell => cell.features || [])
+  const { features2D, features3D } = embeddedFeatures.length
+    ? {
+        features2D: embeddedFeatures.filter(feature => feature.dimensionMode !== '3D'),
+        features3D: embeddedFeatures.filter(feature => feature.dimensionMode === '3D'),
+      }
+    : await queryChartFeatures(cells, { signal })
+  const grouped = featuresByGrid(features2D, features3D)
+  const datasets = new Map()
+  const displayed = cells.flatMap(cell => {
+    const features = cell.features || grouped.get(horizontalGridCode(cell.code)) || []
+    if (features.length === 0) return []
+    features.forEach(feature => datasets.set(feature.datasetId, {
+      id: feature.datasetId,
+      label: chartFeatureLabel(feature),
+      color: chartFeatureColor(feature),
+    }))
+    const primaryFeature = features.find(feature => feature.dimensionMode === '3D') || features[0]
+    const chartFeatures = [...new Map(features.map(feature => {
+      const type = feature.datasetId || feature.featureType
+      return [type, {
+        type,
+        label: chartFeatureLabel(feature),
+        theme: feature.theme,
+        color: chartFeatureColor(feature),
+      }]
+    })).values()]
+    return [{
+      ...cell,
+      color: chartFeatureColor(primaryFeature),
+      description: featureDescription(cell, features),
+      chartFeatures,
+    }]
+  })
+  chartSummary.value = {
+    grids: displayed.length,
+    features2D: uniqueFeatureCount(features2D),
+    features3D: uniqueFeatureCount(features3D),
+    datasets: [...datasets.values()],
+  }
+  return displayed
+}
 
 // ====== 动态缩放模式 ======
 const dynamicZoomEnabled = ref(false)   // 动态缩放开关
@@ -70,6 +220,7 @@ let manualTimedOut = false               // 手动查询：是否因超时而中
 async function onViewBoundsChanged(bounds) {
   if (!dynamicZoomEnabled.value) return
   if (!bounds) return
+  if (chartMode.value && selectedDatasetIds.value.length === 0) return
 
   // 1. 取消上一次未完成的请求（避免旧响应覆盖新响应）
   if (abortController) {
@@ -80,7 +231,7 @@ async function onViewBoundsChanged(bounds) {
   abortController = controller
 
   // 2. 使用用户手动设置的层级（不做自动映射，尊重用户选择）
-  const queryLevel = Number(airspaceGridForm.level) || 12
+  const queryLevel = chartMode.value ? CHART_GRID_LEVEL : (Number(airspaceGridForm.level) || 12)
 
   dynamicLoading.value = true
   error.value = ''
@@ -103,25 +254,27 @@ async function onViewBoundsChanged(bounds) {
     const payload = {
       airspaceId: airspaceGridForm.airspaceId.trim(),
       polygon,
-      bottom: Number(airspaceGridForm.bottom) || 0,
-      top: Number(airspaceGridForm.top) || 600,
+      bottom: chartMode.value ? Math.max(Number(airspaceGridForm.bottom) || 0, 0) : (Number(airspaceGridForm.bottom) || 0),
+      top: chartMode.value ? Math.min(Number(airspaceGridForm.top) || 300, 300) : (Number(airspaceGridForm.top) || 600),
       level: queryLevel,
-      maxCells: 50000,
+      maxCells: 200000,
+      query_concurrency: 4,
+      ...(chartMode.value ? { datasetIds: selectedDatasetIds.value, maxMappings: 2000000 } : {}),
     }
 
     const t0 = performance.now()
-    const resp = await fetch('/api/multiSource/airSpaceDB/grid/region', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    })
-
-    if (!resp.ok) {
-      throw new Error(await errorMessage(resp, `状态码 ${resp.status}`))
-    }
-
-    const data = await resp.json()
+    const data = chartMode.value
+      ? await queryChartRegion(payload, { signal: controller.signal })
+      : await (async () => {
+          const resp = await fetch('/api/multiSource/airSpaceDB/grid/region', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+          })
+          if (!resp.ok) throw new Error(await errorMessage(resp, `状态码 ${resp.status}`))
+          return resp.json()
+        })()
     const runtime = Math.round(performance.now() - t0)
 
     // 如果 controller 已被取消，说明有更新的请求在路上了，直接丢弃本次结果
@@ -135,29 +288,12 @@ async function onViewBoundsChanged(bounds) {
     else if (data?.data?.grids && data.data.grids.length > 0) rawGrids = data.data.grids
 
     if (rawGrids && rawGrids.length > 0) {
-      const cells = rawGrids.map(cell => {
-        const g = cell?.data?.grid || cell
-        const b = g.bounds
-        const north = g.maxlat ?? b?.max_latitude ?? b?.north
-        const south = g.minlat ?? b?.min_latitude ?? b?.south
-        const east = g.maxlon ?? b?.max_longitude ?? b?.east
-        const west = g.minlon ?? b?.min_longitude ?? b?.west
-        const top = g.top ?? b?.top ?? 0
-        const bottom = g.bottom ?? b?.bottom ?? 0
-        const center = g.center_point || g.center
-        return {
-          code: String(g.code || cell.code || ''),
-          level: g.level,
-          z: g.level,
-          bounds: { north, south, east, west, top, bottom },
-          center,
-        }
-      })
+      const cells = await buildDisplayedCells(rawGrids, controller.signal)
 
       gridsData.value = rawGrids
       totalCount = rawGrids.length
       queryStats.value = {
-        total: totalCount,
+        total: chartMode.value ? cells.length : totalCount,
         status: data?.success === true ? 'success' : (data?.status || 'unknown'),
       }
       emit('showGrid', { cells, level: queryLevel, runtime, skipFlyTo: true })
@@ -178,6 +314,10 @@ async function onViewBoundsChanged(bounds) {
 }
 
 function toggleDynamicZoom() {
+  if (!dynamicZoomEnabled.value && chartMode.value && selectedDatasetIds.value.length === 0) {
+    error.value = '请至少勾选一种航图要素'
+    return
+  }
   dynamicZoomEnabled.value = !dynamicZoomEnabled.value
   if (dynamicZoomEnabled.value) {
     // 开启时立即触发一次查询
@@ -198,6 +338,7 @@ function resetForm() {
   result.value = null
   queryStats.value = null
   gridsData.value = []
+  chartSummary.value = null
   dynamicZoomEnabled.value = false
   dynamicRuntime.value = 0
   if (abortController) {
@@ -275,6 +416,10 @@ async function submitAirspaceGridQuery() {
     error.value = '请输入空域ID'
     return
   }
+  if (chartMode.value && selectedDatasetIds.value.length === 0) {
+    error.value = '请至少勾选一种航图要素'
+    return
+  }
 
   const minLon = Number(airspaceGridForm.minLon)
   const maxLon = Number(airspaceGridForm.maxLon)
@@ -287,10 +432,10 @@ async function submitAirspaceGridQuery() {
   }
 
   // 估算格网数量，超过阈值时预警
-  const queryLevel = Number(airspaceGridForm.level)
+  const queryLevel = chartMode.value ? CHART_GRID_LEVEL : Number(airspaceGridForm.level)
   const estimatedCells = estimateCellCount(minLon, maxLon, minLat, maxLat, queryLevel)
   const WARN_THRESHOLD = 50000
-  if (estimatedCells > WARN_THRESHOLD) {
+  if (!chartMode.value && estimatedCells > WARN_THRESHOLD) {
     const ok = window.confirm(
       `当前区域在 level ${queryLevel} 下预估约 ${estimatedCells.toLocaleString()} 个格网，` +
       `查询可能较慢。是否继续？\n\n（建议缩小区域或降低层级）`
@@ -317,10 +462,12 @@ async function submitAirspaceGridQuery() {
     const payload = {
       airspaceId: airspaceGridForm.airspaceId.trim(),
       polygon: polygon,
-      bottom: Number(airspaceGridForm.bottom) || 0,
-      top: Number(airspaceGridForm.top) || 600,
+      bottom: chartMode.value ? Math.max(Number(airspaceGridForm.bottom) || 0, 0) : (Number(airspaceGridForm.bottom) || 0),
+      top: chartMode.value ? Math.min(Number(airspaceGridForm.top) || 300, 300) : (Number(airspaceGridForm.top) || 600),
       level: queryLevel,
-      maxCells: 50000,
+      maxCells: 200000,
+      query_concurrency: 4,
+      ...(chartMode.value ? { datasetIds: selectedDatasetIds.value, maxMappings: 2000000 } : {}),
     }
 
     console.log('[空域网格查询] 发送 payload:', payload, `预估格网约 ${estimatedCells} 个`)
@@ -329,31 +476,43 @@ async function submitAirspaceGridQuery() {
     const controller = new AbortController()
     manualAbortController = controller
 
-    // 60s 超时保护：后端不支持取消，超时后前端放弃等待
+    // 航图大区域返回量较大，给聚合查询更充足的响应时间。
     manualTimedOut = false
-    const timeoutMs = 60000
+    const timeoutMs = chartMode.value ? 180000 : 60000
+    const timeoutSeconds = timeoutMs / 1000
     manualTimeoutId = setTimeout(() => {
       manualTimedOut = true
       controller.abort()
-      console.warn('[空域网格查询] 请求超时（60s），已取消前端等待')
+      console.warn(`[空域网格查询] 请求超时（${timeoutSeconds}s），已取消前端等待`)
     }, timeoutMs)
 
     const t0 = performance.now()
-    const resp = await fetch('/api/multiSource/airSpaceDB/grid/region', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    })
-
-    if (!resp.ok) {
-      throw new Error(await errorMessage(resp, `请求失败，状态码 ${resp.status}`))
-    }
-
-    const data = await resp.json()
+    const data = chartMode.value
+      ? await queryChartRegion(payload, { signal: controller.signal })
+      : await (async () => {
+          const resp = await fetch('/api/multiSource/airSpaceDB/grid/region', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+          })
+          if (!resp.ok) throw new Error(await errorMessage(resp, `请求失败，状态码 ${resp.status}`))
+          return resp.json()
+        })()
     const runtime = performance.now() - t0
     result.value = data
     console.log('[空域网格查询] 原始返回:', data)
+    if (chartMode.value) {
+      console.info('[航图专题网格诊断]', {
+        airspaceId: data?.data?.airspaceId,
+        version: data?.data?.version,
+        airspaceVersion: data?.data?.airspaceVersion,
+        matchedCount: data?.data?.matchedCount,
+        mappingCount: data?.data?.mappingCount,
+        truncated: data?.data?.truncated,
+        returnedCells: data?.data?.cells?.length,
+      })
+    }
 
     // 解析返回数据
     let rawGrids = null
@@ -388,27 +547,9 @@ async function submitAirspaceGridQuery() {
 
     // 如果返回了格网数据，通知地图组件显示
     if (gridsData.value.length > 0) {
-      const cells = gridsData.value.map(cell => {
-        // 新接口格式：cell.data.grid 包含网格元数据
-        const g = cell?.data?.grid || cell
-        // 优先从 bounds 取（兼容 snake_case max_latitude / camelCase maxlat）
-        const b = g.bounds
-        const north = g.maxlat ?? b?.max_latitude ?? b?.north
-        const south = g.minlat ?? b?.min_latitude ?? b?.south
-        const east = g.maxlon ?? b?.max_longitude ?? b?.east
-        const west = g.minlon ?? b?.min_longitude ?? b?.west
-        const top = g.top ?? b?.top ?? 0
-        const bottom = g.bottom ?? b?.bottom ?? 0
-        const center = g.center_point || g.center
+      const cells = await buildDisplayedCells(gridsData.value, controller.signal)
 
-        return {
-          code: String(g.code || cell.code || ''),
-          level: g.level,
-          z: g.level,
-          bounds: { north, south, east, west, top, bottom },
-          center,
-        }
-      })
+      queryStats.value.total = chartMode.value ? cells.length : totalCount
 
       console.log('[空域网格查询] 转换后的 cells 前3条:', JSON.stringify(cells.slice(0, 3)))
       emit('showGrid', { cells, level: queryLevel, runtime })
@@ -416,7 +557,7 @@ async function submitAirspaceGridQuery() {
   } catch (err) {
     if (err?.name === 'AbortError') {
       error.value = manualTimedOut
-        ? '请求超时（60s），后端可能正在处理大量格网，请缩小区域或降低层级后重试'
+        ? `请求超时（${timeoutSeconds}s），请缩小查询区域或收紧专题条件后重试`
         : '查询已取消'
       console.warn('[空域网格查询] 请求被中止:', manualTimedOut ? '超时' : '用户取消')
     } else {
@@ -439,17 +580,20 @@ function clearGrids() {
   result.value = null
   queryStats.value = null
   gridsData.value = []
+  chartSummary.value = null
 }
 </script>
 
 <template>
   <div class="airspace-grid-query">
-    <template v-if="functionName === '空域网格查询'">
+    <template v-if="functionName === '空域网格查询' || chartMode">
       <!-- 层级设置 -->
       <div class="form-group">
         <div class="group-title">层级设置</div>
         <div class="level-row">
+          <div v-if="chartMode" class="fixed-level">Level {{ CHART_GRID_LEVEL }}（航图固定层级）</div>
           <select
+            v-else
             id="agq-level"
             v-model.number="airspaceGridForm.level"
             class="level-select"
@@ -465,10 +609,54 @@ function clearGrids() {
         <div class="group-title">空域ID</div>
         <input
           v-model="airspaceGridForm.airspaceId"
+          list="airspace-options"
           type="text"
           class="airspace-id-input"
-          placeholder="请输入空域ID"
+          placeholder="选择或输入空域ID"
         >
+        <datalist id="airspace-options">
+          <option v-for="airspaceId in airspaceOptions" :key="airspaceId" :value="airspaceId" />
+        </datalist>
+      </div>
+
+      <div v-if="chartMode" class="form-group">
+        <div class="dataset-title-row">
+          <div class="group-title">查询要素（已选 {{ selectedDatasetIds.length }}）</div>
+          <div class="dataset-actions">
+            <button type="button" @click="selectAllDatasets">全选</button>
+            <button type="button" @click="clearDatasetSelection">清空</button>
+          </div>
+        </div>
+        <div class="dataset-tree">
+          <details v-for="group in CHART_DATASET_TREE" :key="group.id" class="tree-group" open>
+            <summary>
+              <input
+                type="checkbox"
+                :checked="isNodeSelected(group)"
+                @click.stop
+                @change="setNodeSelected(group, $event.target.checked)"
+              >
+              <span>{{ group.label }}</span>
+            </summary>
+            <details v-for="theme in group.children" :key="theme.id" class="tree-theme" open>
+              <summary>
+                <input
+                  type="checkbox"
+                  :checked="isNodeSelected(theme)"
+                  @click.stop
+                  @change="setNodeSelected(theme, $event.target.checked)"
+                >
+                <span>{{ theme.label }}</span>
+              </summary>
+              <label v-for="dataset in theme.datasets" :key="dataset.id" class="dataset-option">
+                <input v-model="selectedDatasetIds" type="checkbox" :value="dataset.id">
+                <i :style="{ background: dataset.color }" />
+                <span>{{ dataset.label }}</span>
+              </label>
+            </details>
+          </details>
+        </div>
+        <div class="dataset-hint">只会向后端查询已勾选的数据集。</div>
       </div>
 
       <!-- 查询边界 -->
@@ -520,7 +708,7 @@ function clearGrids() {
           type="button"
         >
           <ZoomIn :size="14" />
-          <span>{{ dynamicZoomEnabled ? '关闭动态缩放' : '开启动态缩放' }}</span>
+          <span>{{ dynamicZoomEnabled ? '关闭视野联动' : '开启视野联动' }}</span>
           <Loader2 v-if="dynamicLoading" :size="12" class="spin" />
         </button>
       </div>
@@ -537,7 +725,7 @@ function clearGrids() {
                 type="number"
                 step="10"
                 min="0"
-                max="120"
+                max="300"
                 class="height-input"
                 placeholder="输入值"
               >
@@ -558,7 +746,7 @@ function clearGrids() {
                 type="number"
                 step="10"
                 min="0"
-                max="120"
+                max="300"
                 class="height-input"
                 placeholder="输入值"
               >
@@ -576,8 +764,8 @@ function clearGrids() {
 
       <!-- 操作按钮 -->
       <div class="btn-row">
-        <button class="btn-query" @click="submitAirspaceGridQuery" :disabled="loading">
-          <span>{{ loading ? '查询中...' : '查询' }}</span>
+        <button class="btn-query" @click="submitAirspaceGridQuery" :disabled="loading || (chartMode && !selectedDatasetIds.length)">
+          <span>{{ loading ? '查询中...' : (chartMode ? '查询并展示航图要素' : '查询') }}</span>
         </button>
         <button v-if="loading" class="btn-cancel" @click="cancelManualQuery" type="button">
           <span>取消</span>
@@ -609,10 +797,24 @@ function clearGrids() {
         </div>
       </div>
 
+      <div v-if="chartMode && chartSummary" class="chart-summary">
+        <div class="chart-summary-title">航图要素</div>
+        <div class="chart-summary-counts">
+          <span>要素网格 <b>{{ chartSummary.grids }}</b></span>
+          <span>二维要素 <b>{{ chartSummary.features2D }}</b></span>
+          <span>三维要素 <b>{{ chartSummary.features3D }}</b></span>
+        </div>
+        <div v-if="chartSummary.datasets.length" class="theme-legend">
+          <span v-for="dataset in chartSummary.datasets" :key="dataset.id">
+            <i :style="{ background: dataset.color }" />{{ dataset.label }}
+          </span>
+        </div>
+      </div>
+
       <!-- 动态缩放提示 -->
       <div v-if="dynamicZoomEnabled" class="dynamic-zoom-hint">
         <Loader2 v-if="dynamicLoading" :size="12" class="spin" />
-        <span>{{ dynamicLoading ? '正在根据视图加载格网...' : '移动/缩放地图即可自动刷新格网' }}</span>
+        <span>{{ dynamicLoading ? '正在根据视图加载...' : (chartMode ? '移动/缩放地图即可刷新航图要素网格' : '移动/缩放地图即可自动刷新格网') }}</span>
       </div>
 
       <!-- 无数据 -->
@@ -643,10 +845,112 @@ function clearGrids() {
   margin-bottom: 8px;
 }
 
+.dataset-title-row,
+.dataset-actions,
+.dataset-option {
+  display: flex;
+  align-items: center;
+}
+
+.dataset-title-row {
+  justify-content: space-between;
+}
+
+.dataset-title-row .group-title {
+  margin-bottom: 0;
+}
+
+.dataset-actions {
+  gap: 4px;
+}
+
+.dataset-actions button {
+  padding: 2px 7px;
+  border: 1px solid #bae6fd;
+  border-radius: 4px;
+  background: #f0f9ff;
+  color: #0369a1;
+  cursor: pointer;
+}
+
+.dataset-tree {
+  height: clamp(240px, 36dvh, 380px);
+  margin-top: 8px;
+  overflow-y: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.tree-group > summary,
+.tree-theme > summary {
+  padding: 6px 8px;
+  color: #1e3a5f;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tree-theme > summary {
+  padding-left: 20px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.tree-group > summary input,
+.tree-theme > summary input {
+  margin: 0 6px 0 0;
+}
+
+.dataset-option {
+  gap: 7px;
+  padding: 6px 8px;
+  color: #334155;
+  font-size: 12px;
+  cursor: pointer;
+  padding-left: 42px;
+}
+
+.dataset-option:hover {
+  background: #f8fafc;
+}
+
+.dataset-option i {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  border-radius: 2px;
+}
+
+.dataset-option span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dataset-hint {
+  margin-top: 5px;
+  color: #64748b;
+  font-size: 11px;
+}
+
 /* 层级选择 */
 .level-row {
   display: flex;
   align-items: center;
+}
+
+.fixed-level {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid #bae6fd;
+  border-radius: 6px;
+  background: #f0f9ff;
+  color: #0369a1;
+  font-size: 14px;
+  box-sizing: border-box;
 }
 
 .level-select {
@@ -671,7 +975,6 @@ function clearGrids() {
   box-shadow: 0 0 0 3px rgba(91, 159, 212, 0.15);
 }
 
-/* 空域ID输入 */
 .airspace-id-input {
   width: 100%;
   height: 34px;
@@ -1017,6 +1320,46 @@ function clearGrids() {
 
 .result-status.success {
   color: #060;
+}
+
+.chart-summary {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #bae6fd;
+  border-radius: 8px;
+  background: #f0f9ff;
+}
+
+.chart-summary-title {
+  margin-bottom: 8px;
+  color: #0c4a6e;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.chart-summary-counts,
+.theme-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.theme-legend {
+  margin-top: 8px;
+}
+
+.theme-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.theme-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
 }
 
 /* 空状态 */
