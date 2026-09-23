@@ -359,7 +359,6 @@ async function submitOsgbAggGridQuery() {
       maxLon: osgbAggQueryBounds.value.east,
       minLat: osgbAggQueryBounds.value.south,
       maxLat: osgbAggQueryBounds.value.north,
-      pageSize: 5000,
     }
 
     console.log('[倾斜摄影多源聚合网格查询] 发送 payload:', payload)
@@ -400,7 +399,6 @@ async function submitOsgbAggGridQuery() {
       level: data?.data?.level,
       minLevel: data?.data?.minLevel,
       tableName: data?.data?.table_name,
-      hasMore: data?.data?.hasMore === true,
     }
 
     // 如果返回了格网数据，通知地图组件显示
@@ -926,9 +924,6 @@ function clearGrids() {
         <div v-if="osgbAggStats.minLevel !== undefined" class="result-row">
           <span class="result-label">最小聚合层级</span>
           <span class="result-num">{{ osgbAggStats.minLevel }}</span>
-        </div>
-        <div v-if="osgbAggStats.hasMore" class="error-box">
-          当前视野网格超过 5000 个，仅显示前 5000 个，请放大地图后重新查询
         </div>
       </div>
 

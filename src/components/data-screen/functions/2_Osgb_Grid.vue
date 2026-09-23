@@ -254,7 +254,6 @@ async function submitTriangleGridQuery() {
       maxLon: queryBounds.value.east,
       minLat: queryBounds.value.south,
       maxLat: queryBounds.value.north,
-      pageSize: 5000,
     }
 
     console.log('[倾斜摄影网格查询] 发送 payload:', payload)
@@ -310,7 +309,6 @@ async function submitTriangleGridQuery() {
     queryStats.value = {
       total: parsedCount,
       status: data?.status || 'unknown',
-      hasMore: data?.data?.hasMore === true,
     }
 
     // 如果返回了格网数据，通知地图组件显示
@@ -542,9 +540,6 @@ function clearGrids() {
           <span class="result-status" :class="queryStats.status">
             {{ queryStats.status === 'success' ? '成功' : queryStats.status }}
           </span>
-        </div>
-        <div v-if="queryStats.hasMore" class="error-box">
-          当前视野网格超过 5000 个，仅显示前 5000 个，请放大地图后重新查询
         </div>
       </div>
 
