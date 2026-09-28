@@ -1,13 +1,17 @@
 <script setup>
 import { ref, reactive, computed, onBeforeUnmount } from 'vue'
-import { Loader2, RefreshCw, ChevronDown, ChevronUp, Box, Building2, Mountain, Cloud, Search } from 'lucide-vue-next'
+import { Loader2, RefreshCw, ChevronDown, ChevronUp, Box, Building2, Mountain, Cloud, Search, Layers, Waypoints, Radar, Wrench } from 'lucide-vue-next'
 
 // ==================== Tab 状态 ====================
 const TABS = [
   { id: 'osgb', label: 'OSGB 网格化', icon: Box },
   { id: 'building', label: '建筑白模入库', icon: Building2 },
   { id: 'dem', label: 'DEM 地面网格', icon: Mountain },
+  { id: 'demClassify', label: 'DEM 地形分类', icon: Layers },
   { id: 'trueAltitude', label: '真高空域剖分', icon: Cloud },
+  { id: 'featureImport', label: '静态 Feature 导入', icon: Waypoints },
+  { id: 'saveGrid', label: '空域网格入库', icon: Radar },
+  { id: 'maintain', label: '维护与查询', icon: Wrench },
   { id: 'job', label: '任务查询', icon: Search },
 ]
 
@@ -27,7 +31,10 @@ const submittingMap = reactive({
   osgb: false,
   building: false,
   dem: false,
+  demClassify: false,
   trueAltitude: false,
+  featureImport: false,
+  saveGrid: false,
 })
 const feedback = ref(null) // { type: 'success' | 'error', title, detail?, lines? }
 
@@ -72,6 +79,7 @@ function setErrors(e) {
 // ==================== OSGB 网格化 ====================
 const osgbForm = ref({
   mode: 'sync', // sync | aggregation
+  source: 'auto', // auto | osgb | lod13
   osgbFolder: '',
   level: 8,
   minLevel: 0,
@@ -223,6 +231,314 @@ function validateTrueAltitude(key) {
   return key ? { [key]: e[key] || '' } : e
 }
 
+// ==================== DEM 地形分类 ====================
+const demClassifyForm = ref({
+  sourceTable: 'demgrid_16',
+  level: 16,
+  showAdvanced: false,
+  maxSourceRows: 50000000,
+  maxMappings: '',
+})
+
+function validateDemClassify(key) {
+  const f = demClassifyForm.value
+  const e = {}
+  if (!isBlank(f.sourceTable) && !DEM_TABLE_RE.test(String(f.sourceTable).trim())) e.sourceTable = '表名格式：demgrid 或 demgrid_<层级>'
+  const lv = intCheck(f.level, 'DQG 层级', 1, 21)
+  if (lv) e.level = lv
+  if (f.showAdvanced) {
+    const msr = intCheck(f.maxSourceRows, '最大源行数', 1, 4000000000)
+    if (msr) e.maxSourceRows = msr
+    if (!isBlank(f.maxMappings)) {
+      const mm = intCheck(f.maxMappings, '最大分类映射数', 1)
+      if (mm) e.maxMappings = mm
+    }
+  }
+  return key ? { [key]: e[key] || '' } : e
+}
+
+// ==================== 静态 Feature 导入 ====================
+const FEATURE_THEMES = [
+  'road', 'landuse', 'landcover', 'water', 'admin', 'transport', 'sensitive',
+  'communication', 'navigation', 'surveillance', 'airspace', 'obstacle',
+  'vertiport', 'terrain', 'air_route', 'utility', 'structure',
+]
+const HEIGHT_SOURCES = ['NONE', 'ATTRIBUTE', 'GEOMETRY_Z']
+
+const featureForm = ref({
+  datasetId: '',
+  datasetName: '',
+  theme: 'road',
+  dimensionMode: '2D',
+  level: 14,
+  input: '',
+  featureType: 'road',
+  featureTypeField: '',
+  heightSource: 'NONE',
+  showAdvanced: false,
+  featureTypeMapping: '',
+  minHeightField: '',
+  maxHeightField: '',
+  maxMappings: 5000000,
+})
+
+function validateFeature(key) {
+  const f = featureForm.value
+  const e = {}
+  if (isBlank(f.datasetId)) e.datasetId = 'Dataset 标识不能为空'
+  else {
+    const v = String(f.datasetId).trim()
+    if (!DATASET_ID_RE.test(v)) e.datasetId = '仅允许字母/数字/下划线/点/短横线'
+    else if (v.length > 128) e.datasetId = '长度不能超过 128 个字符'
+  }
+  if (!FEATURE_THEMES.includes(f.theme)) e.theme = '请选择业务主题'
+  if (f.dimensionMode !== '2D' && f.dimensionMode !== '3D') e.dimensionMode = '维度模式只能为 2D 或 3D'
+  const lv = intCheck(f.level, '水平 DQG 层级', 1, 21)
+  if (lv) e.level = lv
+  if (isBlank(f.input)) e.input = 'OGR 数据路径不能为空'
+  else if (!/\.(shp|json|geojson)$/i.test(String(f.input).trim())) e.input = '仅支持 .shp / .json / .geojson 文件'
+  if (isBlank(f.featureType) && isBlank(f.featureTypeField)) e.featureType = '固定 Feature 类型与类型字段必须二选一'
+  if (!isBlank(f.featureType) && !isBlank(f.featureTypeField)) e.featureTypeField = '与固定 Feature 类型互斥，请清空其中一项'
+  if (!HEIGHT_SOURCES.includes(f.heightSource)) e.heightSource = '高度来源不合法'
+  if (f.showAdvanced) {
+    if (!isBlank(f.featureTypeMapping)) {
+      try {
+        const m = JSON.parse(String(f.featureTypeMapping))
+        if (!m || typeof m !== 'object' || Array.isArray(m)) e.featureTypeMapping = '必须为 JSON 对象，如 {"禁止性管制空域":"prohibited_airspace"}'
+      } catch {
+        e.featureTypeMapping = '必须为合法 JSON 对象'
+      }
+    }
+    const hasMin = !isBlank(f.minHeightField)
+    const hasMax = !isBlank(f.maxHeightField)
+    if (hasMin !== hasMax) e.minHeightField = 'RANGE 最小/最大高度字段必须成对填写'
+    else if ((hasMin || hasMax) && f.dimensionMode !== '3D') e.minHeightField = 'RANGE 高度字段仅 3D 模式可用'
+    const mm = intCheck(f.maxMappings, '稀疏映射上限', 1, 50000000)
+    if (mm) e.maxMappings = mm
+  }
+  return key ? { [key]: e[key] || '' } : e
+}
+
+// ==================== 空域网格入库 saveGrid ====================
+const saveGridForm = ref({
+  airspaceId: '',
+  polygon: '',
+  top: 500,
+  bottom: 0,
+  levels: '16,17',
+  description: '',
+  showAdvanced: false,
+  batchSize: '',
+  maxConcurrentIo: '',
+  computeThreads: '',
+})
+
+function validateSaveGrid(key) {
+  const f = saveGridForm.value
+  const e = {}
+  if (isBlank(f.airspaceId)) e.airspaceId = '空域标识不能为空'
+  if (isBlank(f.polygon)) e.polygon = '空域多边形边界不能为空'
+  else {
+    const pg = polygonCheck(f.polygon)
+    if (pg) e.polygon = pg
+  }
+  const tp = numCheck(f.top, '顶部高度', -1000, 100000)
+  if (tp) e.top = tp
+  const bt = numCheck(f.bottom, '底部高度', -1000, 100000)
+  if (bt) e.bottom = bt
+  else if (!tp && Number(f.bottom) >= Number(f.top)) e.bottom = '底部高度必须小于顶部高度'
+  if (isBlank(f.levels)) e.levels = 'DQG 层级列表不能为空'
+  else {
+    const parts = String(f.levels).split(',').map(s => s.trim()).filter(s => s !== '')
+    if (parts.length === 0) e.levels = 'DQG 层级列表不能为空'
+    else if (parts.some(p => !/^\d+$/.test(p) || Number(p) > 21)) e.levels = '每项须为 0-21 的整数，用逗号分隔，如 16,17'
+    else if (new Set(parts).size !== parts.length) e.levels = '层级不能重复'
+  }
+  if (!isBlank(f.description) && String(f.description).length > 2000) e.description = '描述长度不能超过 2000 个字符'
+  if (f.showAdvanced) {
+    if (!isBlank(f.batchSize)) {
+      const v = intCheck(f.batchSize, 'ClickHouse 批量行数', 1)
+      if (v) e.batchSize = v
+    }
+    if (!isBlank(f.maxConcurrentIo)) {
+      const v = intCheck(f.maxConcurrentIo, '并发 IO 线程数', 1)
+      if (v) e.maxConcurrentIo = v
+    }
+    if (!isBlank(f.computeThreads)) {
+      const v = intCheck(f.computeThreads, '计算线程数', 0)
+      if (v) e.computeThreads = v
+    }
+  }
+  return key ? { [key]: e[key] || '' } : e
+}
+
+// ==================== 维护与查询 ====================
+const maintainState = reactive({
+  mapImport: { level: 16, airspaceId: '', version: '', source: 'osgb', busy: false },
+  summaryBuild: { version: '', busy: false },
+  taskStatus: { taskCode: '', busy: false },
+  ta: { datasetId: '', datasetVersion: '', busy: false },
+  activeVersionBusy: false,
+  resultTitle: '',
+  result: null,
+  error: '',
+})
+
+function showMaintainResult(title, data) {
+  maintainState.resultTitle = title
+  maintainState.result = data
+  maintainState.error = ''
+}
+
+function showMaintainError(title, err) {
+  maintainState.resultTitle = title
+  maintainState.result = null
+  maintainState.error = err?.message || '请求失败，请稍后重试'
+}
+
+// 维护页轻量校验：失败时直接写入结果区错误信息
+function maintainGuard(title, check) {
+  const msg = check()
+  if (msg) {
+    showMaintainError(title, new Error(msg))
+    return false
+  }
+  return true
+}
+
+async function runMapImport() {
+  const m = maintainState.mapImport
+  if (!maintainGuard('导入 OSGB 稀疏映射', () => {
+    if (intCheck(m.level, '网格层级', 0, 21)) return intCheck(m.level, '网格层级', 0, 21)
+    if (isBlank(m.airspaceId)) return '空域标识不能为空'
+    if (intCheck(m.version, '全局版本', 0)) return intCheck(m.version, '全局版本', 0)
+    return ''
+  })) return
+  m.busy = true
+  try {
+    const data = await postJson('/api/multiSource/airSpaceDB/grid/osgb/map/import', {
+      level: Number(m.level),
+      airspaceId: String(m.airspaceId).trim(),
+      version: Number(m.version),
+      source: m.source,
+    })
+    showMaintainResult('OSGB 稀疏映射导入完成', data?.data ?? data)
+  } catch (e) {
+    showMaintainError('OSGB 稀疏映射导入失败', e)
+  } finally {
+    m.busy = false
+  }
+}
+
+async function runSummaryBuild() {
+  const s = maintainState.summaryBuild
+  if (!maintainGuard('构建 Block 汇总表', () => intCheck(s.version, '全局版本号', 0))) return
+  s.busy = true
+  try {
+    const data = await postJson('/api/multiSource/airSpaceDB/summary/build', { version: Number(s.version) })
+    showMaintainResult('Block 汇总表构建完成', data?.data ?? data)
+  } catch (e) {
+    showMaintainError('Block 汇总表构建失败', e)
+  } finally {
+    s.busy = false
+  }
+}
+
+async function runTaskStatus() {
+  const t = maintainState.taskStatus
+  if (!maintainGuard('空域任务状态查询', () => (isBlank(t.taskCode) ? '任务编码 task_code 不能为空' : ''))) return
+  t.busy = true
+  try {
+    const resp = await fetch(`/api/multiSource/airSpaceDB/task/status?task_code=${encodeURIComponent(String(t.taskCode).trim())}`, {
+      headers: { 'Content-Type': 'application/json' },
+    })
+    let data = null
+    try { data = await resp.json() } catch { /* 非 JSON 响应 */ }
+    if (!resp.ok) throw new Error(data?.message || `查询失败: ${resp.status}`)
+    showMaintainResult('空域任务状态', data?.data ?? data)
+  } catch (e) {
+    showMaintainError('空域任务状态查询失败', e)
+  } finally {
+    t.busy = false
+  }
+}
+
+async function runActiveVersion() {
+  maintainState.activeVersionBusy = true
+  try {
+    const resp = await fetch('/api/multiSource/airSpaceDB/version/active', {
+      headers: { 'Content-Type': 'application/json' },
+    })
+    let data = null
+    try { data = await resp.json() } catch { /* 非 JSON 响应 */ }
+    if (!resp.ok) throw new Error(data?.message || `查询失败: ${resp.status}`)
+    showMaintainResult('当前激活版本', data?.data ?? data)
+  } catch (e) {
+    showMaintainError('当前激活版本查询失败', e)
+  } finally {
+    maintainState.activeVersionBusy = false
+  }
+}
+
+async function runTaDatasets() {
+  const t = maintainState.ta
+  t.busy = true
+  try {
+    const resp = await fetch('/api/true-altitude-airspace/datasets', { headers: { 'Content-Type': 'application/json' } })
+    let data = null
+    try { data = await resp.json() } catch { /* 非 JSON 响应 */ }
+    if (!resp.ok) throw new Error(data?.message || `查询失败: ${resp.status}`)
+    showMaintainResult('真高数据集列表', data?.data ?? data)
+  } catch (e) {
+    showMaintainError('真高数据集列表查询失败', e)
+  } finally {
+    t.busy = false
+  }
+}
+
+async function runTaVersions() {
+  const t = maintainState.ta
+  if (!maintainGuard('真高数据集版本列表', () => (isBlank(t.datasetId) ? 'datasetId 不能为空' : ''))) return
+  t.busy = true
+  try {
+    const resp = await fetch(`/api/true-altitude-airspace/datasets/${encodeURIComponent(String(t.datasetId).trim())}/versions`, {
+      headers: { 'Content-Type': 'application/json' },
+    })
+    let data = null
+    try { data = await resp.json() } catch { /* 非 JSON 响应 */ }
+    if (!resp.ok) throw new Error(data?.message || `查询失败: ${resp.status}`)
+    showMaintainResult(`真高数据集版本列表：${String(t.datasetId).trim()}`, data?.data ?? data)
+  } catch (e) {
+    showMaintainError('真高数据集版本列表查询失败', e)
+  } finally {
+    t.busy = false
+  }
+}
+
+async function runTaVersionDetail() {
+  const t = maintainState.ta
+  if (!maintainGuard('真高数据集版本详情', () => {
+    if (isBlank(t.datasetId)) return 'datasetId 不能为空'
+    if (intCheck(t.datasetVersion, '版本号', 1)) return intCheck(t.datasetVersion, '版本号', 1)
+    return ''
+  })) return
+  t.busy = true
+  try {
+    const resp = await fetch(
+      `/api/true-altitude-airspace/datasets/${encodeURIComponent(String(t.datasetId).trim())}/versions/${Number(t.datasetVersion)}`,
+      { headers: { 'Content-Type': 'application/json' } },
+    )
+    let data = null
+    try { data = await resp.json() } catch { /* 非 JSON 响应 */ }
+    if (!resp.ok) throw new Error(data?.message || `查询失败: ${resp.status}`)
+    showMaintainResult(`真高版本详情：${String(t.datasetId).trim()} v${Number(t.datasetVersion)}`, data?.data ?? data)
+  } catch (e) {
+    showMaintainError('真高数据集版本详情查询失败', e)
+  } finally {
+    t.busy = false
+  }
+}
+
 // ==================== 任务查询 ====================
 const jobForm = ref({ jobId: '' })
 const jobStatus = ref(null)
@@ -329,7 +645,10 @@ function validateField(key) {
     osgb: validateOsgb,
     building: validateBuilding,
     dem: validateDem,
+    demClassify: validateDemClassify,
     trueAltitude: validateTrueAltitude,
+    featureImport: validateFeature,
+    saveGrid: validateSaveGrid,
   }
   const fn = validators[activeTab.value]
   if (fn && key) setErrors(fn(key))
@@ -345,6 +664,8 @@ async function submitOsgb() {
   const useAggregation = f.mode === 'aggregation'
   try {
     const body = { osgbFolder: String(f.osgbFolder).trim(), level: Number(f.level) }
+    // source=auto 时不传，由后端按分块目录名（MXxxxxx -> lod13）自动识别
+    if (f.source !== 'auto') body.source = f.source
     // 兼容入口 osgbToGridJson 会将 minLevel 强制覆盖为 level，仅聚合模式传递
     if (useAggregation) body.minLevel = Number(f.minLevel)
     const url = useAggregation
@@ -446,6 +767,104 @@ async function submitTrueAltitude() {
   }
 }
 
+async function submitDemClassify() {
+  const e = validateDemClassify()
+  setErrors(e)
+  if (hasErrors(e)) return
+  submittingMap.demClassify = true
+  feedback.value = null
+  const f = demClassifyForm.value
+  try {
+    const body = { level: Number(f.level) }
+    if (!isBlank(f.sourceTable)) body.sourceTable = String(f.sourceTable).trim()
+    if (f.showAdvanced) {
+      body.maxSourceRows = Number(f.maxSourceRows)
+      if (!isBlank(f.maxMappings)) body.maxMappings = Number(f.maxMappings)
+    }
+    const data = await postJson('/api/dem/terrain-classification-jobs', body)
+    handleJobAccepted(data, 'DEM 地表/地下分类')
+  } catch (err) {
+    feedback.value = { type: 'error', title: 'DEM 地形分类任务提交失败', detail: err?.message || '网络错误，请稍后重试' }
+  } finally {
+    submittingMap.demClassify = false
+  }
+}
+
+async function submitFeatureImport() {
+  const e = validateFeature()
+  setErrors(e)
+  if (hasErrors(e)) return
+  submittingMap.featureImport = true
+  feedback.value = null
+  const f = featureForm.value
+  try {
+    const body = {
+      datasetId: String(f.datasetId).trim(),
+      theme: f.theme,
+      dimensionMode: f.dimensionMode,
+      level: Number(f.level),
+      input: String(f.input).trim(),
+      heightSource: f.heightSource,
+    }
+    if (!isBlank(f.datasetName)) body.datasetName = String(f.datasetName).trim()
+    if (!isBlank(f.featureType)) body.featureType = String(f.featureType).trim()
+    if (!isBlank(f.featureTypeField)) body.featureTypeField = String(f.featureTypeField).trim()
+    if (f.showAdvanced) {
+      if (!isBlank(f.featureTypeMapping)) body.featureTypeMapping = JSON.parse(String(f.featureTypeMapping))
+      if (!isBlank(f.minHeightField)) body.minHeightField = String(f.minHeightField).trim()
+      if (!isBlank(f.maxHeightField)) body.maxHeightField = String(f.maxHeightField).trim()
+      body.maxMappings = Number(f.maxMappings)
+    }
+    const data = await postJson('/api/static-features/import-jobs', body)
+    handleJobAccepted(data, '静态 Feature 导入')
+  } catch (err) {
+    feedback.value = { type: 'error', title: '静态 Feature 导入任务提交失败', detail: err?.message || '网络错误，请稍后重试' }
+  } finally {
+    submittingMap.featureImport = false
+  }
+}
+
+async function submitSaveGrid() {
+  const e = validateSaveGrid()
+  setErrors(e)
+  if (hasErrors(e)) return
+  submittingMap.saveGrid = true
+  feedback.value = null
+  const f = saveGridForm.value
+  try {
+    const body = {
+      airspaceId: String(f.airspaceId).trim(),
+      polygon: JSON.parse(String(f.polygon)),
+      top: Number(f.top),
+      bottom: Number(f.bottom),
+      levels: String(f.levels).split(',').map(s => Number(s.trim())).filter(n => Number.isFinite(n)),
+    }
+    if (!isBlank(f.description)) body.description = String(f.description).trim()
+    if (f.showAdvanced) {
+      if (!isBlank(f.batchSize)) body.batch_size = Number(f.batchSize)
+      if (!isBlank(f.maxConcurrentIo)) body.max_concurrent_io = Number(f.maxConcurrentIo)
+      if (!isBlank(f.computeThreads)) body.compute_threads = Number(f.computeThreads)
+    }
+    const data = await postJson('/api/multiSource/airSpaceDB/saveGrid', body)
+    // 双任务体系：jobId 走通用任务轮询；task_code 用于维护页查询空域持久任务详细状态
+    const d = data?.data || {}
+    const jobId = d.jobId ?? d.job_id
+    const taskCode = d.task_code ?? d.taskCode
+    if (jobId) {
+      const lines = [`任务 ID：${jobId}，正在跟踪执行进度`]
+      if (taskCode) lines.push(`空域任务编码 task_code：${taskCode}（可在“维护与查询”页跟踪详细状态）`)
+      feedback.value = { type: 'success', title: '空域网格入库任务已提交', detail: lines.join('\n') }
+      startJobPolling(jobId)
+    } else {
+      handleJobAccepted(data, '空域网格入库')
+    }
+  } catch (err) {
+    feedback.value = { type: 'error', title: '空域网格入库任务提交失败', detail: err?.message || '网络错误，请稍后重试' }
+  } finally {
+    submittingMap.saveGrid = false
+  }
+}
+
 // 202 异步任务统一处理：提示成功并自动轮询进度
 // 兼容两种字段风格：triangleGrid 系列为 job_id/status_url，其余为 jobId/statusUrl
 function handleJobAccepted(data, label) {
@@ -523,6 +942,22 @@ onBeforeUnmount(() => {
           <label class="radio-item">
             <input v-model="osgbForm.mode" type="radio" value="aggregation" />
             <span>聚合入库（minLevel ~ level 跨层聚合）</span>
+          </label>
+        </div>
+
+        <div class="mode-row">
+          <span class="mode-label">数据来源</span>
+          <label class="radio-item">
+            <input v-model="osgbForm.source" type="radio" value="auto" />
+            <span>自动识别（MXxxxxx 分块 → LOD1.3）</span>
+          </label>
+          <label class="radio-item">
+            <input v-model="osgbForm.source" type="radio" value="osgb" />
+            <span>倾斜摄影（osgbgrid 表）</span>
+          </label>
+          <label class="radio-item">
+            <input v-model="osgbForm.source" type="radio" value="lod13" />
+            <span>LOD1.3 建筑（lod13grid 表）</span>
           </label>
         </div>
 
@@ -677,6 +1112,52 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
+      <!-- DEM 地形分类 -->
+      <section v-show="activeTab === 'demClassify'" class="storage-card">
+        <div class="card-title">DEM 地表/地下网格分类</div>
+        <p class="card-desc">保持 PostgreSQL DEM 数据不变，将 ClickHouse 当前活动空域中与 DEM 同层的网格标记为 terrain_surface，更低网格标记为 underground，并设置 flyable=0。</p>
+
+        <div class="form-grid">
+          <div class="form-field" :class="{ 'has-error': errors.sourceTable }">
+            <label>DEM 源表</label>
+            <input v-model="demClassifyForm.sourceTable" type="text" placeholder="demgrid_16" @blur="validateField('sourceTable')" />
+            <span v-if="errors.sourceTable" class="field-error">{{ errors.sourceTable }}</span>
+            <span v-else class="field-hint">demgrid 或 demgrid_&lt;层级&gt;</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.level }">
+            <label>DQG 层级（1-21）</label>
+            <input v-model.number="demClassifyForm.level" type="number" min="1" max="21" @blur="validateField('level')" />
+            <span v-if="errors.level" class="field-error">{{ errors.level }}</span>
+          </div>
+        </div>
+
+        <button class="advanced-toggle" type="button" @click="demClassifyForm.showAdvanced = !demClassifyForm.showAdvanced">
+          <component :is="demClassifyForm.showAdvanced ? ChevronUp : ChevronDown" :size="14" />
+          <span>{{ demClassifyForm.showAdvanced ? '收起高级参数' : '展开高级参数' }}</span>
+        </button>
+
+        <div v-show="demClassifyForm.showAdvanced" class="form-grid advanced">
+          <div class="form-field" :class="{ 'has-error': errors.maxSourceRows }">
+            <label>DEM 源行数上限</label>
+            <input v-model.number="demClassifyForm.maxSourceRows" type="number" min="1" max="4000000000" @blur="validateField('maxSourceRows')" />
+            <span v-if="errors.maxSourceRows" class="field-error">{{ errors.maxSourceRows }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.maxMappings }">
+            <label>分类映射上限</label>
+            <input v-model.number="demClassifyForm.maxMappings" type="number" min="1" placeholder="留空使用服务端默认" @blur="validateField('maxMappings')" />
+            <span v-if="errors.maxMappings" class="field-error">{{ errors.maxMappings }}</span>
+          </div>
+        </div>
+
+        <div class="submit-row">
+          <button class="btn-primary" type="button" :disabled="submittingMap.demClassify" @click="submitDemClassify">
+            <Loader2 v-if="submittingMap.demClassify" :size="14" class="spin" />
+            <span>{{ submittingMap.demClassify ? '提交中...' : '提交分类任务' }}</span>
+          </button>
+          <span class="submit-hint">提交后任务进入异步队列，将自动跟踪进度</span>
+        </div>
+      </section>
+
       <!-- 真高空域 -->
       <section v-show="activeTab === 'trueAltitude'" class="storage-card">
         <div class="card-title">真高空域网格剖分入库</div>
@@ -778,6 +1259,305 @@ onBeforeUnmount(() => {
             <span>{{ submittingMap.trueAltitude ? '提交中...' : '提交剖分任务' }}</span>
           </button>
           <span class="submit-hint">提交后任务进入异步队列，将自动跟踪进度</span>
+        </div>
+      </section>
+
+      <!-- 静态 Feature 导入 -->
+      <section v-show="activeTab === 'featureImport'" class="storage-card">
+        <div class="card-title">静态业务 Feature-DQG 导入</div>
+        <p class="card-desc">把 Shapefile/GeoJSON 通用业务要素转换为水平 DQG 稀疏关系：PostgreSQL 保存原始 Feature 与 Geometry，ClickHouse 保存查询投影。同一 datasetId 再次导入将全量覆盖该 Dataset。</p>
+
+        <div class="form-grid">
+          <div class="form-field" :class="{ 'has-error': errors.datasetId }">
+            <label>Dataset 标识 <span class="req">*</span></label>
+            <input v-model="featureForm.datasetId" type="text" placeholder="road_deqing" @blur="validateField('datasetId')" />
+            <span v-if="errors.datasetId" class="field-error">{{ errors.datasetId }}</span>
+            <span v-else class="field-hint">字母/数字/下划线/点/短横线，最长 128 字符</span>
+          </div>
+          <div class="form-field">
+            <label>Dataset 名称</label>
+            <input v-model="featureForm.datasetName" type="text" placeholder="留空时使用 datasetId" />
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.theme }">
+            <label>业务主题 <span class="req">*</span></label>
+            <select v-model="featureForm.theme" @change="validateField('theme')">
+              <option v-for="t in FEATURE_THEMES" :key="t" :value="t">{{ t }}</option>
+            </select>
+            <span v-if="errors.theme" class="field-error">{{ errors.theme }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.dimensionMode }">
+            <label>维度模式 <span class="req">*</span></label>
+            <select v-model="featureForm.dimensionMode" @change="validateField('dimensionMode')">
+              <option value="2D">2D（无 z 映射）</option>
+              <option value="3D">3D（ALL 或 RANGE）</option>
+            </select>
+            <span v-if="errors.dimensionMode" class="field-error">{{ errors.dimensionMode }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.level }">
+            <label>水平 DQG 层级（1-21） <span class="req">*</span></label>
+            <input v-model.number="featureForm.level" type="number" min="1" max="21" @blur="validateField('level')" />
+            <span v-if="errors.level" class="field-error">{{ errors.level }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.input }">
+            <label>OGR 数据服务器路径 <span class="req">*</span></label>
+            <input v-model="featureForm.input" type="text" placeholder="data/static/road.shp" @blur="validateField('input')" />
+            <span v-if="errors.input" class="field-error">{{ errors.input }}</span>
+            <span v-else class="field-hint">服务端 projectRoot 下相对路径，支持 .shp/.json/.geojson</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.featureType }">
+            <label>固定 Feature 类型</label>
+            <input v-model="featureForm.featureType" type="text" placeholder="road" @blur="validateField('featureType')" />
+            <span v-if="errors.featureType" class="field-error">{{ errors.featureType }}</span>
+            <span v-else class="field-hint">与"类型字段"二选一</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.featureTypeField }">
+            <label>Feature 类型字段</label>
+            <input v-model="featureForm.featureTypeField" type="text" placeholder="从 OGR 属性字段逐要素读取" @blur="validateField('featureTypeField')" />
+            <span v-if="errors.featureTypeField" class="field-error">{{ errors.featureTypeField }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.heightSource }">
+            <label>高度来源 <span class="req">*</span></label>
+            <select v-model="featureForm.heightSource" @change="validateField('heightSource')">
+              <option value="NONE">NONE（无高度）</option>
+              <option value="ATTRIBUTE">ATTRIBUTE（属性字段）</option>
+              <option value="GEOMETRY_Z">GEOMETRY_Z（几何 Z 值）</option>
+            </select>
+            <span v-if="errors.heightSource" class="field-error">{{ errors.heightSource }}</span>
+          </div>
+        </div>
+
+        <button class="advanced-toggle" type="button" @click="featureForm.showAdvanced = !featureForm.showAdvanced">
+          <component :is="featureForm.showAdvanced ? ChevronUp : ChevronDown" :size="14" />
+          <span>{{ featureForm.showAdvanced ? '收起高级参数' : '展开高级参数' }}</span>
+        </button>
+
+        <div v-show="featureForm.showAdvanced" class="form-grid advanced">
+          <div class="form-field span-2" :class="{ 'has-error': errors.featureTypeMapping }">
+            <label>类型值映射（JSON 对象）</label>
+            <textarea
+              v-model="featureForm.featureTypeMapping"
+              rows="2"
+              placeholder='{"禁止性管制空域":"prohibited_airspace"}'
+              @blur="validateField('featureTypeMapping')"
+            ></textarea>
+            <span v-if="errors.featureTypeMapping" class="field-error">{{ errors.featureTypeMapping }}</span>
+            <span v-else class="field-hint">可选：把字段中的中文业务值映射为 ASCII feature_type code</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.minHeightField }">
+            <label>RANGE 最小高度字段</label>
+            <input v-model="featureForm.minHeightField" type="text" placeholder="仅 3D RANGE 使用" @blur="validateField('minHeightField')" />
+            <span v-if="errors.minHeightField" class="field-error">{{ errors.minHeightField }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.maxHeightField }">
+            <label>RANGE 最大高度字段</label>
+            <input v-model="featureForm.maxHeightField" type="text" placeholder="与最小高度字段成对填写" @blur="validateField('maxHeightField')" />
+            <span v-if="errors.maxHeightField" class="field-error">{{ errors.maxHeightField }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.maxMappings }">
+            <label>稀疏映射安全上限</label>
+            <input v-model.number="featureForm.maxMappings" type="number" min="1" max="50000000" @blur="validateField('maxMappings')" />
+            <span v-if="errors.maxMappings" class="field-error">{{ errors.maxMappings }}</span>
+          </div>
+        </div>
+
+        <div class="submit-row">
+          <button class="btn-primary" type="button" :disabled="submittingMap.featureImport" @click="submitFeatureImport">
+            <Loader2 v-if="submittingMap.featureImport" :size="14" class="spin" />
+            <span>{{ submittingMap.featureImport ? '提交中...' : '提交导入任务' }}</span>
+          </button>
+          <span class="submit-hint">提交后任务进入异步队列，将自动跟踪进度</span>
+        </div>
+      </section>
+
+      <!-- 空域网格入库 -->
+      <section v-show="activeTab === 'saveGrid'" class="storage-card">
+        <div class="card-title">空域网格入库（saveGrid）</div>
+        <p class="card-desc">按多边形、高度范围和层级列表生成 DQG 空域网格并写入 ClickHouse。响应同时包含 jobId（通用任务）与 task_code（空域持久任务），task_code 可在"维护与查询"页跟踪详细状态。</p>
+
+        <div class="form-grid">
+          <div class="form-field" :class="{ 'has-error': errors.airspaceId }">
+            <label>空域标识 <span class="req">*</span></label>
+            <input v-model="saveGridForm.airspaceId" type="text" placeholder="zone-001" @blur="validateField('airspaceId')" />
+            <span v-if="errors.airspaceId" class="field-error">{{ errors.airspaceId }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.levels }">
+            <label>DQG 层级列表 <span class="req">*</span></label>
+            <input v-model="saveGridForm.levels" type="text" placeholder="16,17" @blur="validateField('levels')" />
+            <span v-if="errors.levels" class="field-error">{{ errors.levels }}</span>
+            <span v-else class="field-hint">逗号分隔，每项 0-21，不得重复</span>
+          </div>
+          <div class="form-field span-2" :class="{ 'has-error': errors.polygon }">
+            <label>空域多边形边界 <span class="req">*</span></label>
+            <textarea
+              v-model="saveGridForm.polygon"
+              rows="3"
+              placeholder='[[119.9,30.5],[120.2,30.5],[120.2,30.65],[119.9,30.65]]'
+              @blur="validateField('polygon')"
+            ></textarea>
+            <span v-if="errors.polygon" class="field-error">{{ errors.polygon }}</span>
+            <span v-else class="field-hint">JSON 数组，[[经度,纬度],...] 单外环至少 3 点</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.top }">
+            <label>顶部高度（米） <span class="req">*</span></label>
+            <input v-model.number="saveGridForm.top" type="number" min="-1000" max="100000" step="any" @blur="validateField('top')" />
+            <span v-if="errors.top" class="field-error">{{ errors.top }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.bottom }">
+            <label>底部高度（米） <span class="req">*</span></label>
+            <input v-model.number="saveGridForm.bottom" type="number" min="-1000" max="100000" step="any" @blur="validateField('bottom')" />
+            <span v-if="errors.bottom" class="field-error">{{ errors.bottom }}</span>
+          </div>
+          <div class="form-field span-2">
+            <label>空域描述</label>
+            <input v-model="saveGridForm.description" type="text" maxlength="2000" placeholder="选填，最长 2000 字" @blur="validateField('description')" />
+            <span v-if="errors.description" class="field-error">{{ errors.description }}</span>
+          </div>
+        </div>
+
+        <button class="advanced-toggle" type="button" @click="saveGridForm.showAdvanced = !saveGridForm.showAdvanced">
+          <component :is="saveGridForm.showAdvanced ? ChevronUp : ChevronDown" :size="14" />
+          <span>{{ saveGridForm.showAdvanced ? '收起高级参数' : '展开高级参数' }}</span>
+        </button>
+
+        <div v-show="saveGridForm.showAdvanced" class="form-grid advanced">
+          <div class="form-field" :class="{ 'has-error': errors.batchSize }">
+            <label>ClickHouse 批量行数</label>
+            <input v-model.number="saveGridForm.batchSize" type="number" min="1" placeholder="留空使用服务端默认" @blur="validateField('batchSize')" />
+            <span v-if="errors.batchSize" class="field-error">{{ errors.batchSize }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.maxConcurrentIo }">
+            <label>并发 IO 写线程数</label>
+            <input v-model.number="saveGridForm.maxConcurrentIo" type="number" min="1" placeholder="留空使用服务端默认" @blur="validateField('maxConcurrentIo')" />
+            <span v-if="errors.maxConcurrentIo" class="field-error">{{ errors.maxConcurrentIo }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.computeThreads }">
+            <label>网格计算线程数（0 为自动）</label>
+            <input v-model.number="saveGridForm.computeThreads" type="number" min="0" placeholder="留空使用服务端默认" @blur="validateField('computeThreads')" />
+            <span v-if="errors.computeThreads" class="field-error">{{ errors.computeThreads }}</span>
+          </div>
+        </div>
+
+        <div class="submit-row">
+          <button class="btn-primary" type="button" :disabled="submittingMap.saveGrid" @click="submitSaveGrid">
+            <Loader2 v-if="submittingMap.saveGrid" :size="14" class="spin" />
+            <span>{{ submittingMap.saveGrid ? '提交中...' : '提交入库任务' }}</span>
+          </button>
+          <span class="submit-hint">提交后任务进入异步队列，将自动跟踪进度</span>
+        </div>
+      </section>
+
+      <!-- 维护与查询 -->
+      <section v-show="activeTab === 'maintain'" class="storage-card">
+        <div class="card-title">维护与查询</div>
+        <p class="card-desc">ClickHouse 空域网格相关的同步维护操作与状态查询。危险操作（初始化存储 / 激活版本 / 旧版分块名回填）不在本页面提供，请使用 DataTaskConsole。</p>
+
+        <div class="maintain-block">
+          <div class="maintain-title">导入 OSGB 稀疏映射（推荐）</div>
+          <p class="maintain-desc">从 PG osgbgrid_/lod13grid_ 表全量导入 ClickHouse osgb_grid_chunk_map 的 (level, source) 分区，不修改 grid_current。</p>
+          <div class="maintain-row">
+            <div class="form-field">
+              <label>网格层级</label>
+              <input v-model.number="maintainState.mapImport.level" type="number" min="0" max="21" />
+            </div>
+            <div class="form-field">
+              <label>空域标识</label>
+              <input v-model="maintainState.mapImport.airspaceId" type="text" placeholder="Xiangtan_AIRSPACE" />
+            </div>
+            <div class="form-field">
+              <label>全局版本</label>
+              <input v-model.number="maintainState.mapImport.version" type="number" min="0" placeholder="5" />
+            </div>
+            <div class="form-field">
+              <label>数据来源</label>
+              <select v-model="maintainState.mapImport.source">
+                <option value="osgb">osgb（倾斜摄影）</option>
+                <option value="lod13">lod13（LOD1.3 建筑）</option>
+              </select>
+            </div>
+            <button class="btn-primary" type="button" :disabled="maintainState.mapImport.busy" @click="runMapImport">
+              <Loader2 v-if="maintainState.mapImport.busy" :size="14" class="spin" />
+              <span>{{ maintainState.mapImport.busy ? '导入中...' : '执行导入' }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="maintain-block">
+          <div class="maintain-title">构建 Block 汇总表</div>
+          <p class="maintain-desc">ClickHouse 端先删除旧汇总，再按 (airspace_id, version, level, block_id, z) 聚合写入 grid_block_summary。</p>
+          <div class="maintain-row">
+            <div class="form-field">
+              <label>全局版本号</label>
+              <input v-model.number="maintainState.summaryBuild.version" type="number" min="0" placeholder="5" />
+            </div>
+            <button class="btn-primary" type="button" :disabled="maintainState.summaryBuild.busy" @click="runSummaryBuild">
+              <Loader2 v-if="maintainState.summaryBuild.busy" :size="14" class="spin" />
+              <span>{{ maintainState.summaryBuild.busy ? '构建中...' : '执行构建' }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="maintain-block">
+          <div class="maintain-title">空域任务状态查询</div>
+          <p class="maintain-desc">按 task_code 查询空域持久任务（saveGrid 双任务体系）的详细状态。</p>
+          <div class="maintain-row">
+            <div class="form-field grow">
+              <label>任务编码 task_code</label>
+              <input v-model="maintainState.taskStatus.taskCode" type="text" placeholder="粘贴 saveGrid 返回的 task_code" @keyup.enter="runTaskStatus" />
+            </div>
+            <button class="btn-primary" type="button" :disabled="maintainState.taskStatus.busy" @click="runTaskStatus">
+              <Loader2 v-if="maintainState.taskStatus.busy" :size="14" class="spin" />
+              <RefreshCw v-else :size="14" />
+              <span>{{ maintainState.taskStatus.busy ? '查询中...' : '查询' }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="maintain-block">
+          <div class="maintain-title">当前激活版本</div>
+          <div class="maintain-row">
+            <button class="btn-primary" type="button" :disabled="maintainState.activeVersionBusy" @click="runActiveVersion">
+              <Loader2 v-if="maintainState.activeVersionBusy" :size="14" class="spin" />
+              <RefreshCw v-else :size="14" />
+              <span>{{ maintainState.activeVersionBusy ? '查询中...' : '查询激活版本' }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="maintain-block">
+          <div class="maintain-title">真高数据集查询</div>
+          <p class="maintain-desc">数据集列表 → 版本列表 → 版本详情 三级查询。</p>
+          <div class="maintain-row">
+            <div class="form-field">
+              <label>datasetId</label>
+              <input v-model="maintainState.ta.datasetId" type="text" placeholder="deqing_low_zone" />
+            </div>
+            <div class="form-field">
+              <label>版本号</label>
+              <input v-model.number="maintainState.ta.datasetVersion" type="number" min="1" placeholder="1" />
+            </div>
+            <button class="btn-secondary" type="button" :disabled="maintainState.ta.busy" @click="runTaDatasets">
+              <span>数据集列表</span>
+            </button>
+            <button class="btn-secondary" type="button" :disabled="maintainState.ta.busy" @click="runTaVersions">
+              <span>版本列表</span>
+            </button>
+            <button class="btn-secondary" type="button" :disabled="maintainState.ta.busy" @click="runTaVersionDetail">
+              <Loader2 v-if="maintainState.ta.busy" :size="14" class="spin" />
+              <span>版本详情</span>
+            </button>
+          </div>
+        </div>
+
+        <div v-if="maintainState.error" class="feedback error standalone">
+          <span class="feedback-title">{{ maintainState.resultTitle || '操作失败' }}</span>
+          <span class="feedback-detail">{{ maintainState.error }}</span>
+        </div>
+
+        <div v-if="maintainState.result" class="job-result">
+          <div class="job-header">
+            <span class="polling-hint">{{ maintainState.resultTitle }}</span>
+          </div>
+          <pre class="result-json">{{ JSON.stringify(maintainState.result, null, 2) }}</pre>
         </div>
       </section>
 
@@ -1092,7 +1872,8 @@ onBeforeUnmount(() => {
 }
 
 .form-field input[type='text'],
-.form-field input[type='number'] {
+.form-field input[type='number'],
+.form-field select {
   height: 34px;
   padding: 0 10px;
   font-size: 13px;
@@ -1126,13 +1907,15 @@ onBeforeUnmount(() => {
 }
 
 .form-field input:focus,
-.form-field textarea:focus {
+.form-field textarea:focus,
+.form-field select:focus {
   border-color: var(--theme-nav-active-border, #4a90c2);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-nav-active-border, #4a90c2) 18%, transparent);
 }
 
 .form-field.has-error input,
-.form-field.has-error textarea {
+.form-field.has-error textarea,
+.form-field.has-error select {
   border-color: #dc2626;
 }
 
@@ -1238,6 +2021,77 @@ onBeforeUnmount(() => {
 .btn-primary:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 96px;
+  height: 34px;
+  padding: 0 16px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--theme-title-text, #1e4a6e);
+  background: var(--theme-dropdown-item-bg, rgba(242, 248, 253, 0.92));
+  border: 1px solid var(--theme-nav-border, rgba(90, 150, 200, 0.45));
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  border-color: var(--theme-nav-active-border, #4a90c2);
+}
+
+.btn-secondary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* 维护与查询 */
+.maintain-block {
+  padding: 14px 0;
+  border-bottom: 1px dashed var(--theme-nav-border, rgba(90, 150, 200, 0.35));
+}
+
+.maintain-block:last-of-type {
+  border-bottom: none;
+}
+
+.maintain-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--theme-title-text, #1e4a6e);
+  margin-bottom: 4px;
+}
+
+.maintain-desc {
+  margin: 0 0 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--theme-side-label-secondary, #94a3b8);
+}
+
+.maintain-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.maintain-row .form-field {
+  min-width: 150px;
+}
+
+.maintain-row .form-field.grow {
+  flex: 1;
+}
+
+.maintain-row .btn-primary,
+.maintain-row .btn-secondary {
+  flex-shrink: 0;
 }
 
 .submit-hint {

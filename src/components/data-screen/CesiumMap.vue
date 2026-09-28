@@ -25,6 +25,7 @@ const cesiumEl = ref(null)
 let viewer = null
 let handler = null
 let tileset = null
+let lod13Tileset = null
 let gridPrimitives = []
 let chartGridEntities = []
 
@@ -33,6 +34,8 @@ const lat = ref(null)
 const height = ref(null)
 const show3DTiles = ref(true)
 const showBuildings = ref(false) // 建筑白膜开关
+const showLod13 = ref(false) // LOD1.3 建筑模型开关
+const lod13Loading = ref(false) // LOD1.3 tileset 首次加载中
 const isMapReady = ref(false) // 地图是否准备就绪
 const chartFeatureLayers = ref([])
 const selectedGrid = ref(null)
@@ -92,10 +95,14 @@ const showTerrainPanel = ref(false)
 const terrainSourceOptions = [
   { id: 'zhejiang', label: '浙江 DEM' },
   { id: 'world', label: '全球' },
+  { id: 'none', label: '不使用高程' },
 ]
 
 function getTerrain(source) {
   if (source === 'world') return Cesium.Terrain.fromWorldTerrain()
+  // 不使用高程：平坦椭球地形，海拔恒为 0，不发起地形请求
+  // scene.setTerrain 只接受 Terrain 包装对象（内部监听 readyEvent），必须与浙江 DEM 分支同样包一层
+  if (source === 'none') return new Cesium.Terrain(Promise.resolve(new Cesium.EllipsoidTerrainProvider()))
   return new Cesium.Terrain(Promise.resolve(createZhejiangTerrainProvider()))
 }
 
@@ -1236,6 +1243,126 @@ function toggle3DTiles() {
   if (!tileset) return
   show3DTiles.value = !show3DTiles.value
   tileset.show = show3DTiles.value
+}
+
+// 加载 LOD1.3 tileset（幂等）：成功返回实例，失败返回 null
+async function ensureLod13Loaded() {
+  if (lod13Tileset) return lod13Tileset
+  if (lod13Loading.value || !viewer) return null
+  lod13Loading.value = true
+  try {
+    lod13Tileset = await Cesium.Cesium3DTileset.fromUrl('/lod13_3dtiles/tileset.json')
+    viewer.scene.primitives.add(lod13Tileset)
+    return lod13Tileset
+  } catch (error) {
+    console.error('[CesiumMap] LOD1.3 建筑模型加载失败:', error)
+    lod13Tileset = null
+    return null
+  } finally {
+    lod13Loading.value = false
+  }
+}
+
+// LOD1.3 建筑模型开关：首次开启时懒加载 /lod13_3dtiles/tileset.json，之后仅切换显隐
+async function toggleLod13() {
+  if (lod13Loading.value || !viewer) return
+  if (!lod13Tileset) {
+    const ts = await ensureLod13Loaded()
+    showLod13.value = !!ts
+    if (ts) ts.show = true
+    return
+  }
+  showLod13.value = !showLod13.value
+  lod13Tileset.show = showLod13.value
+}
+
+// 聚焦到 3D 底图（倾斜摄影实景）模型范围
+function focus3DTiles() {
+  if (!viewer || !tileset) {
+    console.warn('[CesiumMap] 3D底图 tileset 未就绪，无法聚焦')
+    return
+  }
+  viewer.flyTo(tileset, { duration: 2 })
+}
+
+// LOD1.3 源数据中少数分块丢失地理配准（漂移到远处），整包 flyTo 会框到错误区域。
+// 这里解析根 tileset.json，用邻域计数找最密集簇（德清主簇），返回其包围球。
+let lod13FocusSphere = null
+async function computeLod13FocusSphere() {
+  if (lod13FocusSphere) return lod13FocusSphere
+  const resp = await fetch('/lod13_3dtiles/tileset.json')
+  if (!resp.ok) throw new Error(`tileset.json 请求失败: ${resp.status}`)
+  const json = await resp.json()
+  const items = (json?.root?.children || [])
+    .map((c) => c?.boundingVolume?.box)
+    .filter((b) => Array.isArray(b) && b.length >= 12)
+    .map((b) => ({
+      x: b[0], y: b[1], z: b[2],
+      r: Math.max(Math.abs(b[3]), Math.abs(b[7]), Math.abs(b[11])),
+    }))
+  if (!items.length) return null
+
+  const CLUSTER_RADIUS = 100000 // 主簇判定半径（米），德清建成区远小于该值
+  const r2 = CLUSTER_RADIUS * CLUSTER_RADIUS
+  // 采样种子做邻域计数，避免 5000+ 分块的全量 O(n²)
+  const stride = Math.max(1, Math.floor(items.length / 500))
+  let bestSeed = null
+  let bestCount = -1
+  for (let i = 0; i < items.length; i += stride) {
+    const s = items[i]
+    let count = 0
+    for (const o of items) {
+      const dx = o.x - s.x, dy = o.y - s.y, dz = o.z - s.z
+      if (dx * dx + dy * dy + dz * dz <= r2) count++
+    }
+    if (count > bestCount) {
+      bestCount = count
+      bestSeed = s
+    }
+  }
+  if (!bestSeed || bestCount < 2) return null
+
+  // 主簇成员的并集包围球
+  let cx = 0, cy = 0, cz = 0, n = 0
+  const members = []
+  for (const o of items) {
+    const dx = o.x - bestSeed.x, dy = o.y - bestSeed.y, dz = o.z - bestSeed.z
+    if (dx * dx + dy * dy + dz * dz <= r2) {
+      members.push(o)
+      cx += o.x; cy += o.y; cz += o.z; n++
+    }
+  }
+  cx /= n; cy /= n; cz /= n
+  let radius = 0
+  for (const o of members) {
+    const d = Math.hypot(o.x - cx, o.y - cy, o.z - cz) + o.r
+    if (d > radius) radius = d
+  }
+  lod13FocusSphere = new Cesium.BoundingSphere(new Cesium.Cartesian3(cx, cy, cz), radius)
+  console.info(`[CesiumMap] LOD1.3 主簇聚焦：${n}/${items.length} 个分块，半径 ${(radius / 1000).toFixed(1)} km`)
+  return lod13FocusSphere
+}
+
+// 聚焦到 LOD1.3 建筑模型主簇范围；未加载则先懒加载，隐藏时自动显示
+async function focusLod13() {
+  if (!viewer || lod13Loading.value) return
+  const ts = await ensureLod13Loaded()
+  if (!ts) return
+  ts.show = true
+  showLod13.value = true
+  try {
+    const sphere = await computeLod13FocusSphere()
+    if (sphere) {
+      viewer.camera.flyToBoundingSphere(sphere, {
+        duration: 2,
+        offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-45), sphere.radius * 2.2),
+      })
+      return
+    }
+  } catch (error) {
+    console.warn('[CesiumMap] LOD1.3 主簇解析失败，回退整包聚焦:', error)
+  }
+  viewer.flyTo(ts, { duration: 2 })
 }
 
 function toggleBuildingsOnMap() {
@@ -3938,6 +4065,9 @@ defineExpose({
   removeNoFlyZonePrism,
   clearGridVisual,
   toggle3DTiles,
+  toggleLod13,
+  focus3DTiles,
+  focusLod13,
   startDrawSphereFence,
   startDrawLineFence,
   completeSphereFence,
@@ -4229,6 +4359,27 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
+      <!-- LOD1.3 建筑模型单行开关 -->
+      <div
+        class="single-toggle-card"
+        :class="{ 'toggle-loading': lod13Loading }"
+        @click="toggleLod13"
+      >
+        <span class="layer-label">{{ lod13Loading ? 'LOD1.3 加载中...' : 'LOD1.3 建筑' }}</span>
+        <div class="toggle-switch" :class="{ active: showLod13 }">
+          <div class="toggle-slider" />
+        </div>
+        <button class="locate-btn" type="button" title="聚焦到 LOD1.3 建筑模型" :disabled="lod13Loading" @click.stop="focusLod13">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="7" />
+            <line x1="12" y1="1" x2="12" y2="5" />
+            <line x1="12" y1="19" x2="12" y2="23" />
+            <line x1="1" y1="12" x2="5" y2="12" />
+            <line x1="19" y1="12" x2="23" y2="12" />
+          </svg>
+        </button>
+      </div>
+
       <!-- 一键场景演示按钮（飞行中显示取消按钮） -->
       <div v-if="showScenarioDemo && !scenarioState.flightActive" class="single-toggle-card scenario-demo-btn" @click="openScenarioDemo">
         <span class="layer-label">一键场景演示</span>
@@ -4250,6 +4401,15 @@ onBeforeUnmount(() => {
         <div class="toggle-switch" :class="{ active: show3DTiles }">
           <div class="toggle-slider" />
         </div>
+        <button class="locate-btn" type="button" title="聚焦到 3D 底图模型" @click.stop="focus3DTiles">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="7" />
+            <line x1="12" y1="1" x2="12" y2="5" />
+            <line x1="12" y1="19" x2="12" y2="23" />
+            <line x1="1" y1="12" x2="5" y2="12" />
+            <line x1="19" y1="12" x2="23" y2="12" />
+          </svg>
+        </button>
       </div>
 
       <!-- 底图图源切换卡片 -->
@@ -4680,6 +4840,36 @@ onBeforeUnmount(() => {
 .single-toggle-card:hover {
   background: rgba(15, 23, 42, 0.95);
   border-color: rgba(59, 130, 246, 0.4);
+}
+
+.single-toggle-card.toggle-loading {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.locate-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: rgba(255, 255, 255, 0.65);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.2s ease, background 0.2s ease;
+}
+
+.locate-btn:hover:not(:disabled) {
+  color: #60a5fa;
+  background: rgba(59, 130, 246, 0.15);
+}
+
+.locate-btn:disabled {
+  opacity: 0.4;
+  cursor: wait;
 }
 
 .mouse-info-item {
