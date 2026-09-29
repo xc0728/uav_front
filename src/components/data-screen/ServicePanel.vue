@@ -44,11 +44,11 @@ const services = [
   },
   {
     id: 'tilt-photogrammetry',
-    name: '倾斜摄影网格化入库服务',
-    shortName: '倾斜摄影网格',
+    name: '模型网格化入库/查询服务',
+    shortName: '模型网格',
     icon: Map,
     component: TiltPhotogrammetry,
-    functions: ['倾斜摄影网格查询'],
+    functions: ['模型网格查询'],
   },
   {
     id: 'grid-split',

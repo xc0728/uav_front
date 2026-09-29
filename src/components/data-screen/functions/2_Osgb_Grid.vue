@@ -15,9 +15,11 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'showPoint', 'showGrid', 'get-view-bounds'])
 
-// ==================== OSGB 网格化 ====================
+// ==================== 模型网格化 ====================
 const osgbForm = reactive({
-  osgbFolder: '/app/data/osgbData',
+  inputFolder: '/app/data/osgbData',
+  format: 'osgb',
+  source: 'osgb',
   level: 14,
 })
 const osgbLoading = ref(false)
@@ -34,9 +36,10 @@ const aggregationLoading = ref(false)
 const aggregationError = ref('')
 const aggregationResult = ref(null)
 
-// ==================== 倾斜摄影网格查询 ====================
+// ==================== 模型网格查询 ====================
 const triangleGridForm = reactive({
   level: 18,
+  source: 'osgb',
 })
 
 // 网格层级快选选项
@@ -86,7 +89,7 @@ const minLevelOptions = [
   { value: 5, label: '层级 5' },
 ]
 
-// 倾斜摄影网格查询层级选择
+// 模型网格查询层级选择
 function onLevelQuickSelect(event) {
   const value = Number(event.target.value)
   if (!isNaN(value)) {
@@ -126,7 +129,7 @@ const gridsData = ref([])
 const queryBounds = ref(null)
 
 function resetForm() {
-  if (props.functionName === 'osgb网格化（同步入库）') {
+  if (props.functionName === '模型网格化（直接入库）') {
     osgbError.value = ''
     osgbResult.value = null
   }
@@ -134,7 +137,7 @@ function resetForm() {
     aggregationError.value = ''
     aggregationResult.value = null
   }
-  if (props.functionName === '倾斜摄影网格查询') {
+  if (props.functionName === '模型网格查询') {
     triangleGridError.value = ''
     triangleGridResult.value = null
     queryStats.value = null
@@ -144,7 +147,7 @@ function resetForm() {
 }
 
 function setPointFromMap(lon, lat, height) {
-  // 倾斜摄影网格查询暂不支持地图点选
+  // 模型网格查询暂不支持地图点选
 }
 
 function setViewBounds(bounds) {
@@ -153,7 +156,7 @@ function setViewBounds(bounds) {
 
 defineExpose({ resetForm, setPointFromMap, setViewBounds })
 
-// ==================== OSGB 网格化提交 ====================
+// ==================== 模型网格化提交 ====================
 async function submitOsgbGrid() {
   osgbError.value = ''
   osgbResult.value = null
@@ -161,19 +164,21 @@ async function submitOsgbGrid() {
 
   try {
     const payload = {
-      osgbFolder: String(osgbForm.osgbFolder || '').trim(),
+      inputFolder: String(osgbForm.inputFolder || '').trim(),
+      format: osgbForm.format,
+      source: osgbForm.source,
       level: Number(osgbForm.level),
     }
-    if (!payload.osgbFolder) throw new Error('请先填写 OSGB 文件目录')
+    if (!payload.inputFolder) throw new Error('请先填写模型文件目录')
     if (Number.isNaN(payload.level)) throw new Error('请先填写网格层级 level（0-21）')
 
-    const resp = await fetch('/api/multiSource/triangleGrid/osgbToGridJson', {
+    const resp = await fetch('/api/multiSource/triangleGrid/modelToGridJson', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
 
-    if (!resp.ok) throw new Error(`请求失败，状态码 ${resp.status}`)
+    if (!resp.ok) throw new Error(await errorMessage(resp, `请求失败，状态码 ${resp.status}`))
 
     const data = await resp.json()
     osgbResult.value = data
@@ -227,7 +232,7 @@ async function submitAggregation() {
   }
 }
 
-// ==================== 倾斜摄影网格查询提交 ====================
+// ==================== 模型网格查询提交 ====================
 async function submitTriangleGridQuery() {
   triangleGridError.value = ''
   triangleGridResult.value = null
@@ -250,13 +255,14 @@ async function submitTriangleGridQuery() {
   try {
     const payload = {
       level: Number(triangleGridForm.level),
+      source: triangleGridForm.source,
       minLon: queryBounds.value.west,
       maxLon: queryBounds.value.east,
       minLat: queryBounds.value.south,
       maxLat: queryBounds.value.north,
     }
 
-    console.log('[倾斜摄影网格查询] 发送 payload:', payload)
+    console.log('[模型网格查询] 发送 payload:', payload)
 
     const t0 = performance.now()
     const resp = await fetch('/api/multiSource/triangleGrid/queryOsgbGrid', {
@@ -271,24 +277,24 @@ async function submitTriangleGridQuery() {
 
     const data = await resp.json()
     const runtime = performance.now() - t0
-    console.log('[倾斜摄影网格查询] 原始返回:', data)
+        console.log('[模型网格查询] 原始返回:', data)
     triangleGridResult.value = data
 
     // 解析返回数据
     let parsedCount = 0
     if (data?.data) {
       if (Array.isArray(data.data)) {
-        console.log('[倾斜摄影网格查询] data.data 是数组，长度:', data.data.length)
-        console.log('[倾斜摄影网格查询] 第一个元素:', JSON.stringify(data.data[0]))
+        console.log('[模型网格查询] data.data 是数组，长度:', data.data.length)
+        console.log('[模型网格查询] 第一个元素:', JSON.stringify(data.data[0]))
         gridsData.value = data.data
         parsedCount = data.data.length
       } else if (typeof data.data === 'object') {
-        console.log('[倾斜摄影网格查询] data.data 是对象，keys:', Object.keys(data.data))
+        console.log('[模型网格查询] data.data 是对象，keys:', Object.keys(data.data))
         gridsData.value = data.data.grids || data.data.cells || data.data.features || data.data.items || []
         parsedCount = gridsData.value.length
       }
     } else {
-      console.log('[倾斜摄影网格查询] data.data 为空或不存在，尝试从其他字段解析')
+      console.log('[模型网格查询] data.data 为空或不存在，尝试从其他字段解析')
       if (Array.isArray(data.grids)) {
         gridsData.value = data.grids
         parsedCount = gridsData.value.length
@@ -304,7 +310,7 @@ async function submitTriangleGridQuery() {
       }
     }
 
-    console.log('[倾斜摄影网格查询] 最终解析的 gridsData 长度:', parsedCount)
+    console.log('[模型网格查询] 最终解析的 gridsData 长度:', parsedCount)
 
     queryStats.value = {
       total: parsedCount,
@@ -314,28 +320,36 @@ async function submitTriangleGridQuery() {
     // 如果返回了格网数据，通知地图组件显示
     if (gridsData.value.length > 0) {
       const cells = gridsData.value.map(cell => {
-        console.log('[倾斜摄影网格查询] 处理单个 cell:', JSON.stringify(cell).slice(0, 200))
-        if (cell.bounds) return cell
-
+        console.log('[模型网格查询] 处理单个 cell:', JSON.stringify(cell).slice(0, 200))
         return {
-          bounds: {
+          ...cell,
+          bounds: cell.bounds || {
             north: cell.maxlat,
             south: cell.minlat,
             east: cell.maxlon,
             west: cell.minlon,
             top: cell.top !== undefined ? cell.top : (cell.center ? cell.center[2] : 0),
             bottom: cell.bottom !== undefined ? cell.bottom : 0,
-          }
+          },
+          code: cell.code ?? cell.gridCode ?? cell.grid_code,
+          level: Number(triangleGridForm.level),
+          x: cell.x,
+          y: cell.y,
+          z: cell.z,
+          row: cell.row,
+          column: cell.column,
+          layer: cell.layer,
+          center: cell.center,
         }
       })
 
-      console.log('[倾斜摄影网格查询] 转换后的 cells 前3条:', JSON.stringify(cells.slice(0, 3)))
+      console.log('[模型网格查询] 转换后的 cells 前3条:', JSON.stringify(cells.slice(0, 3)))
       emit('showGrid', { cells, level: Number(triangleGridForm.level), runtime })
     } else {
-      console.log('[倾斜摄影网格查询] gridsData 为空，不发送 showGrid 事件')
+      console.log('[模型网格查询] gridsData 为空，不发送 showGrid 事件')
     }
   } catch (err) {
-    console.error('[倾斜摄影网格查询] 请求错误:', err)
+    console.error('[模型网格查询] 请求错误:', err)
     triangleGridError.value = err?.message || '请求失败，请稍后重试'
   } finally {
     triangleGridLoading.value = false
@@ -351,17 +365,34 @@ function clearGrids() {
 
 <template>
   <div class="tilt-photogrammetry">
-    <!-- ==================== OSGB 网格化（同步入库） ==================== -->
-    <template v-if="functionName === 'osgb网格化（同步入库）'">
-      <!-- OSGB目录 -->
+    <!-- ==================== 模型网格化（直接入库） ==================== -->
+    <template v-if="functionName === '模型网格化（直接入库）'">
+      <!-- 模型目录 -->
       <div class="form-group">
-        <div class="group-title">OSGB目录</div>
+        <div class="group-title">模型目录</div>
         <input
-          v-model="osgbForm.osgbFolder"
+          v-model="osgbForm.inputFolder"
           type="text"
           class="full-input"
-          placeholder="/app/data/osgbData"
+          placeholder="/app/data/osgbData 或 /app/data/lod13_3dtiles"
         >
+      </div>
+
+      <div class="form-group">
+        <div class="group-title">输入格式</div>
+        <select v-model="osgbForm.format" class="level-select full-input">
+          <option value="osgb">OSGB</option>
+          <option value="3dtiles">3D Tiles</option>
+          <option value="auto">自动识别</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <div class="group-title">业务来源</div>
+        <select v-model="osgbForm.source" class="level-select full-input">
+          <option value="osgb">倾斜摄影</option>
+          <option value="lod13">LOD1.3 建筑</option>
+        </select>
       </div>
 
       <!-- 层级 -->
@@ -498,8 +529,17 @@ function clearGrids() {
       </div>
     </template>
 
-    <!-- ==================== 倾斜摄影网格查询 ==================== -->
-    <template v-if="functionName === '倾斜摄影网格查询'">
+    <!-- ==================== 模型网格查询 ==================== -->
+    <template v-if="functionName === '模型网格查询'">
+      <!-- 数据来源 -->
+      <div class="form-group">
+        <div class="group-title">数据来源</div>
+        <select v-model="triangleGridForm.source" class="level-select full-input">
+          <option value="osgb">倾斜摄影（osgb）</option>
+          <option value="lod13">LOD1.3 建筑（lod13）</option>
+        </select>
+      </div>
+
       <!-- 层级 -->
       <div class="form-group">
         <div class="group-title">网格层级</div>

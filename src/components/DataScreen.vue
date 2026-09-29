@@ -105,7 +105,11 @@ function handleShowPoint(payload) {
 }
 
 function handleShowGrid(payload) {
-  console.log('[DataScreen] 收到 showGrid 事件:', payload)
+  console.log('[DataScreen] 收到 showGrid 事件:', {
+    cellCount: payload?.cells?.length ?? (payload?.bounds ? 1 : 0),
+    level: payload?.level,
+    renderer: payload?.renderer,
+  })
   if (!payload || !cesiumMapRef.value) {
     console.log('[DataScreen] cesiumMapRef 不存在')
     return

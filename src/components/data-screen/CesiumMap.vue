@@ -4,6 +4,7 @@ import * as Cesium from 'cesium'
 import {
   loadDeqingBuildings,
   drawBuildingModelsOnMap,
+  parseShapefile,
 } from '../../utils/buildingModel.js'
 import {
   BASE_LAYER_OPTIONS,
@@ -12,6 +13,8 @@ import {
 } from '../../utils/tdtBaseLayers.js'
 import { createZhejiangTerrainProvider } from '../../utils/zhejiangTerrain.js'
 import { chartFeatureLabel } from '../../utils/staticFeatures.js'
+import InstancedGridRenderer from '../../utils/cesium/InstancedGridRenderer.js'
+import GridRendererManager, { GRID_RENDERER } from '../../utils/cesium/GridRendererManager.js'
 
 // 模块级别的存储（持久化，不随组件销毁而丢失）
 const routeGridEntities = {}
@@ -20,6 +23,7 @@ let buildingEntityIds = []    // Cesium 实体 ID 列表
 let buildingsLoaded = false   // 是否已加载数据
 let buildingsVisible = true  // 当前可见性
 let buildingsLoading = false // 加载中标识
+let deqingBoundaryEntity = null
 
 const cesiumEl = ref(null)
 let viewer = null
@@ -27,7 +31,10 @@ let handler = null
 let tileset = null
 let lod13Tileset = null
 let gridPrimitives = []
+let gridPrimitiveCells = new Map()
+let instancedGridRenderers = []
 let chartGridEntities = []
+const gridRendererManager = new GridRendererManager()
 
 const lon = ref(null)
 const lat = ref(null)
@@ -47,6 +54,19 @@ function featureBusinessType(properties) {
 function gridFeatureTypes(features) {
   const types = [...new Set(features.map(feature => featureBusinessType(feature.properties)).filter(Boolean))]
   return types.join('、') || '未标注'
+}
+
+function toGridDetail(cell, bounds, fallbackLevel) {
+  return {
+    code: cell?.code || cell?.gridCode || cell?.grid_code || '—',
+    level: cell?.level ?? cell?.z ?? fallbackLevel ?? '—',
+    row: cell?.row ?? cell?.y,
+    column: cell?.column ?? cell?.x,
+    layer: cell?.layer ?? cell?.z,
+    gridType: cell?.gridType,
+    bounds,
+    features: cell?.features || cell?.chartFeatures || [],
+  }
 }
 
 function syncChartFeatureLayers(cells, previous = new Map(chartFeatureLayers.value.map(layer => [layer.type, layer.enabled]))) {
@@ -104,6 +124,29 @@ function getTerrain(source) {
   // scene.setTerrain 只接受 Terrain 包装对象（内部监听 readyEvent），必须与浙江 DEM 分支同样包一层
   if (source === 'none') return new Cesium.Terrain(Promise.resolve(new Cesium.EllipsoidTerrainProvider()))
   return new Cesium.Terrain(Promise.resolve(createZhejiangTerrainProvider()))
+}
+
+async function loadDeqingBoundary() {
+  if (!viewer || deqingBoundaryEntity) return
+  try {
+    const response = await fetch(encodeURI('/deqing/2024年初县级.shp'))
+    if (!response.ok) throw new Error(`加载失败: ${response.status}`)
+    const [boundary] = await parseShapefile(new Uint8Array(await response.arrayBuffer()))
+    if (!boundary?.coordinates?.length) throw new Error('边界数据为空')
+
+    const coordinates = [...boundary.coordinates, boundary.coordinates[0]].flat()
+    deqingBoundaryEntity = viewer.entities.add({
+      id: 'deqing-county-boundary',
+      polyline: {
+        positions: Cesium.Cartesian3.fromDegreesArray(coordinates),
+        width: 3,
+        material: Cesium.Color.fromCssColorString('#22d3ee'),
+        clampToGround: true,
+      },
+    })
+  } catch (error) {
+    console.error('[CesiumMap] 德清县域边界加载失败:', error)
+  }
 }
 
 function selectBaseLayer(type) {
@@ -235,11 +278,25 @@ function drawGridBoundary(gridInfo, options = {}) {
   }
 
   const { skipFlyTo = false } = options
-  console.log('[CesiumMap] drawGridBoundary gridInfo:', JSON.stringify(gridInfo).slice(0, 500))
+  console.log('[CesiumMap] drawGridBoundary:', {
+    cellCount: gridInfo.cells?.length ?? (gridInfo.bounds ? 1 : 0),
+    level: gridInfo.level,
+    renderer: gridInfo.renderer,
+  })
 
-  if (gridInfo.renderer === 'primitive' && Array.isArray(gridInfo.cells)) {
-    drawGridPrimitives(gridInfo, { skipFlyTo })
-    return
+  if (Array.isArray(gridInfo.cells) && gridInfo.cells.length > 0) {
+    const renderer = gridRendererManager.select(gridInfo.cells.length, {
+      requested: gridInfo.renderer,
+      supportsInstancing: viewer.scene.context?.instancedArrays !== false,
+    })
+    if (renderer === GRID_RENDERER.INSTANCED) {
+      drawGridInstanced(gridInfo, { skipFlyTo, append: gridInfo.append === true })
+      return
+    }
+    if (renderer === GRID_RENDERER.PRIMITIVE) {
+      drawGridPrimitives(gridInfo, { skipFlyTo })
+      return
+    }
   }
 
   // 先清除之前的网格边界和中心点；视野刷新时保留用户的要素显隐选择
@@ -321,11 +378,7 @@ function drawGridBoundary(gridInfo, options = {}) {
         description: cell.description || (cellLevel !== undefined ? `层级: ${cellLevel}` : undefined),
       })
       entity.__chartGridDetail = {
-        code: cell.code,
-        level: cellLevel,
-        gridType: cell.gridType,
-        bounds: { west, south, east, north, bottom, top },
-        features: cell.features || [],
+        ...toGridDetail(cell, { west, south, east, north, bottom, top }, gridInfo.level),
       }
       if (cell.chartFeatures?.length) {
         chartGridEntities.push({ entity, features: cell.chartFeatures })
@@ -393,6 +446,8 @@ function drawGridBoundary(gridInfo, options = {}) {
       extrudedHeight: top,
     },
   })
+  const boundaryEntity = viewer.entities.getById(gridBoundaryId)
+  boundaryEntity.__chartGridDetail = toGridDetail(gridInfo, { west, south, east, north, bottom, top }, gridInfo.level)
 
   // 绘制中心点标记
   if (center) {
@@ -985,8 +1040,11 @@ function clearPolygonVisual() {
 function clearGridVisual() {
   if (!viewer) return
 
+  instancedGridRenderers.forEach(renderer => viewer.scene.primitives.remove(renderer))
+  instancedGridRenderers = []
   gridPrimitives.forEach(primitive => viewer.scene.primitives.remove(primitive))
   gridPrimitives = []
+  gridPrimitiveCells = new Map()
   chartGridEntities = []
   chartFeatureLayers.value = []
   selectedGrid.value = null
@@ -1018,6 +1076,62 @@ function clearGridVisual() {
   gridResultState.runtime = ''
 }
 
+// 百万级静态网格使用共享立方体模板 + GPU 实例属性，避免逐格 GeometryInstance。
+function drawGridInstanced(gridInfo, options = {}) {
+  if (!options.append) clearGridVisual()
+  if (!gridInfo.cells.length) return
+
+  const renderer = new InstancedGridRenderer({
+    cells: gridInfo.cells,
+    fillAlpha: 0.5,
+    outlineAlpha: 1.0,
+    enablePicking: gridInfo.enablePicking === true,
+    level: gridInfo.level,
+  })
+  viewer.scene.primitives.add(renderer)
+  instancedGridRenderers.push(renderer)
+
+  const extent = renderer.extent
+  if (!extent || !renderer.length) {
+    viewer.scene.primitives.remove(renderer)
+    instancedGridRenderers.pop()
+    return
+  }
+  if (!options.skipFlyTo) {
+    viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(
+        (extent.west + extent.east) / 2,
+        (extent.south + extent.north) / 2,
+        (extent.bottom + extent.top) / 2 + 3000,
+      ),
+      duration: 1.5,
+    })
+  }
+
+  const pageLevels = collectGridLevels(gridInfo.cells, gridInfo.level)
+  if (options.append) {
+    const levels = new Map(gridResultState.levels.map(item => [item.level, { ...item }]))
+    pageLevels.forEach(item => {
+      const current = levels.get(item.level)
+      if (current) current.count += item.count
+      else levels.set(item.level, item)
+    })
+    gridResultState.levels = [...levels.values()].sort((a, b) => a.level - b.level)
+    gridResultState.total += renderer.length
+  } else {
+    gridResultState.levels = pageLevels
+    gridResultState.total = renderer.length
+  }
+  gridResultState.runtime = formatRuntime(gridInfo.runtime)
+  gridResultState.visible = true
+  updateScaleBar()
+}
+
+// GPU picking 接入后可直接用 instanceId 查询原始 cell；默认不复制百万级映射。
+function getInstancedGridCell(instanceId) {
+  return instancedGridRenderers.at(-1)?.getCell(instanceId)
+}
+
 // DEM 查询结果是静态大批量矩形，使用批量 Primitive 避免逐格 Entity 的更新开销。
 function drawGridPrimitives(gridInfo, options = {}) {
   clearGridVisual()
@@ -1034,6 +1148,7 @@ function drawGridPrimitives(gridInfo, options = {}) {
   for (let offset = 0; offset < gridInfo.cells.length; offset += batchSize) {
     const fills = []
     const outlines = []
+    const batchCells = []
     const end = Math.min(offset + batchSize, gridInfo.cells.length)
 
     for (let index = offset; index < end; index++) {
@@ -1044,6 +1159,7 @@ function drawGridPrimitives(gridInfo, options = {}) {
 
       const rectangle = Cesium.Rectangle.fromDegrees(west, south, east, north)
       fills.push(new Cesium.GeometryInstance({
+        id: batchCells.length,
         geometry: new Cesium.RectangleGeometry({
           rectangle,
           height: bottom,
@@ -1055,6 +1171,7 @@ function drawGridPrimitives(gridInfo, options = {}) {
         },
       }))
       outlines.push(new Cesium.GeometryInstance({
+        id: batchCells.length,
         geometry: new Cesium.RectangleOutlineGeometry({
           rectangle,
           height: bottom,
@@ -1064,6 +1181,7 @@ function drawGridPrimitives(gridInfo, options = {}) {
           color: Cesium.ColorGeometryInstanceAttribute.fromColor(outlineColor),
         },
       }))
+      batchCells.push(gridInfo.cells[index])
 
       minLon = Math.min(minLon, west)
       maxLon = Math.max(maxLon, east)
@@ -1075,16 +1193,21 @@ function drawGridPrimitives(gridInfo, options = {}) {
     }
 
     if (!fills.length) continue
-    gridPrimitives.push(viewer.scene.primitives.add(new Cesium.Primitive({
+    const fillPrimitive = viewer.scene.primitives.add(new Cesium.Primitive({
       geometryInstances: fills,
       appearance: new Cesium.PerInstanceColorAppearance({ translucent: true, closed: true }),
+      releaseGeometryInstances: false,
       asynchronous: true,
-    })))
-    gridPrimitives.push(viewer.scene.primitives.add(new Cesium.Primitive({
+    }))
+    const outlinePrimitive = viewer.scene.primitives.add(new Cesium.Primitive({
       geometryInstances: outlines,
       appearance: new Cesium.PerInstanceColorAppearance({ flat: true, translucent: false }),
+      releaseGeometryInstances: false,
       asynchronous: true,
-    })))
+    }))
+    gridPrimitives.push(fillPrimitive, outlinePrimitive)
+    gridPrimitiveCells.set(fillPrimitive, batchCells)
+    gridPrimitiveCells.set(outlinePrimitive, batchCells)
   }
 
   if (!validCount) return
@@ -2086,7 +2209,7 @@ function drawGridRoute(gridData, entityIds, color = '#3b82f6') {
     const bottom = cell.bottom || 0
     const top = cell.top || 10
 
-    viewer.entities.add({
+    const entity = viewer.entities.add({
       id: cellId,
       rectangle: {
         coordinates: Cesium.Rectangle.fromDegrees(minLon, minLat, maxLon, maxLat),
@@ -2098,6 +2221,9 @@ function drawGridRoute(gridData, entityIds, color = '#3b82f6') {
         outlineWidth: 1,
       }
     })
+    entity.__chartGridDetail = toGridDetail(cell, {
+      west: minLon, south: minLat, east: maxLon, north: maxLat, bottom, top,
+    }, cell.level ?? cell.z)
   }
 }
 
@@ -2116,7 +2242,7 @@ function drawConflictCell(conflictCell, entityIds) {
   const top = conflictCell.top || 10
 
   // 添加冲突格网实体
-  viewer.entities.add({
+  const entity = viewer.entities.add({
     id: cellId,
     rectangle: {
       coordinates: Cesium.Rectangle.fromDegrees(minLon, minLat, maxLon, maxLat),
@@ -2128,6 +2254,9 @@ function drawConflictCell(conflictCell, entityIds) {
       outlineWidth: 2,
     }
   })
+  entity.__chartGridDetail = toGridDetail(conflictCell, {
+    west: minLon, south: minLat, east: maxLon, north: maxLat, bottom, top,
+  }, conflictCell.level ?? conflictCell.z)
 
   // 添加冲突点标记
   if (conflictCell.center && conflictCell.center.length >= 3) {
@@ -4058,6 +4187,7 @@ defineExpose({
   flyToPoint,
   clearCenterPoint,
   drawGridBoundary,
+  getInstancedGridCell,
   drawLinePath,
   drawPolygon,
   clearLineVisual,
@@ -4145,6 +4275,7 @@ onMounted(async () => {
     // 记录默认影像图层后，默认切换为天地图影像底图。
     initBaseLayers(viewer)
     switchBaseLayer(viewer, currentBaseLayer.value)
+    void loadDeqingBoundary()
 
     tileset = await Cesium.Cesium3DTileset.fromUrl('/dq3dtiles/tileset.json')
     viewer.scene.primitives.add(tileset)
@@ -4180,10 +4311,37 @@ onMounted(async () => {
       return
     }
 
-    const pickedEntity = viewer.scene.pick(movement.position)?.id
+    const picked = viewer.scene.pick(movement.position)
+    const pickedEntity = picked?.id
     if (pickedEntity?.__chartGridDetail) {
       selectedGrid.value = pickedEntity.__chartGridDetail
       return
+    }
+    if (instancedGridRenderers.length) {
+      const cartesian = viewer.scene.pickPosition(movement.position)
+        || viewer.camera.pickEllipsoid(movement.position)
+      const cartographic = cartesian && Cesium.Cartographic.fromCartesian(cartesian)
+      const longitude = cartographic && Cesium.Math.toDegrees(cartographic.longitude)
+      const latitude = cartographic && Cesium.Math.toDegrees(cartographic.latitude)
+      let cell
+      for (const renderer of instancedGridRenderers) {
+        const extent = renderer.extent
+        if (longitude < extent.west || longitude > extent.east || latitude < extent.south || latitude > extent.north) continue
+        cell = renderer.getCellAt(longitude, latitude, null)
+        if (cell) break
+      }
+      if (cell) {
+        selectedGrid.value = toGridDetail(cell, cell.bounds, cell.level ?? cell.z)
+        return
+      }
+    }
+    const primitiveCells = gridPrimitiveCells.get(picked?.primitive)
+    if (primitiveCells && Number.isInteger(picked.instanceId)) {
+      const cell = primitiveCells[picked.instanceId]
+      if (cell) {
+        selectedGrid.value = toGridDetail(cell, cell.bounds, cell.level ?? cell.z)
+        return
+      }
     }
     selectedGrid.value = null
 
@@ -4266,6 +4424,7 @@ onBeforeUnmount(() => {
   if (viewer) {
     viewer.destroy()
     viewer = null
+    deqingBoundaryEntity = null
   }
 })
 </script>
@@ -4305,6 +4464,9 @@ onBeforeUnmount(() => {
         </div>
         <div>编码：{{ selectedGrid.code }}</div>
         <div>层级：{{ selectedGrid.level }}</div>
+        <div v-if="selectedGrid.row !== undefined || selectedGrid.column !== undefined || selectedGrid.layer !== undefined">
+          行列高号：{{ selectedGrid.row ?? '—' }} / {{ selectedGrid.column ?? '—' }} / {{ selectedGrid.layer ?? '—' }}
+        </div>
         <div>要素类型：{{ gridFeatureTypes(selectedGrid.features) }}</div>
         <div>经纬度：{{ selectedGrid.bounds.west.toFixed(6) }}, {{ selectedGrid.bounds.south.toFixed(6) }} ～ {{ selectedGrid.bounds.east.toFixed(6) }}, {{ selectedGrid.bounds.north.toFixed(6) }}</div>
         <div>高度：{{ selectedGrid.bounds.bottom.toFixed(2) }} ～ {{ selectedGrid.bounds.top.toFixed(2) }} m</div>

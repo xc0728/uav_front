@@ -4,7 +4,7 @@ import { Loader2, RefreshCw, ChevronDown, ChevronUp, Box, Building2, Mountain, C
 
 // ==================== Tab 状态 ====================
 const TABS = [
-  { id: 'osgb', label: 'OSGB 网格化', icon: Box },
+  { id: 'osgb', label: '模型网格化', icon: Box },
   { id: 'building', label: '建筑白模入库', icon: Building2 },
   { id: 'dem', label: 'DEM 地面网格', icon: Mountain },
   { id: 'demClassify', label: 'DEM 地形分类', icon: Layers },
@@ -76,11 +76,12 @@ function setErrors(e) {
   errors.value = { ...errors.value, ...e }
 }
 
-// ==================== OSGB 网格化 ====================
+// ==================== 模型网格化 ====================
 const osgbForm = ref({
   mode: 'sync', // sync | aggregation
-  source: 'auto', // auto | osgb | lod13
-  osgbFolder: '',
+  format: 'osgb', // osgb | 3dtiles | auto
+  source: 'osgb', // osgb | lod13
+  inputFolder: '',
   level: 8,
   minLevel: 0,
 })
@@ -88,7 +89,7 @@ const osgbForm = ref({
 function validateOsgb(key) {
   const f = osgbForm.value
   const e = {}
-  if (isBlank(f.osgbFolder)) e.osgbFolder = 'OSGB 数据目录不能为空'
+  if (isBlank(f.inputFolder)) e.inputFolder = '模型数据目录不能为空'
   const lv = intCheck(f.level, '目标网格层级', 0, 21)
   if (lv) e.level = lv
   if (f.mode === 'aggregation') {
@@ -625,6 +626,11 @@ function formatNumber(n) {
   return Number(n).toLocaleString('zh-CN')
 }
 
+function formatProgressPercent(value) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '-'
+  return `${Math.round(Number(value))}%`
+}
+
 // ==================== 请求与提交 ====================
 async function postJson(url, body) {
   const resp = await fetch(url, {
@@ -663,18 +669,24 @@ async function submitOsgb() {
   const f = osgbForm.value
   const useAggregation = f.mode === 'aggregation'
   try {
-    const body = { osgbFolder: String(f.osgbFolder).trim(), level: Number(f.level) }
-    // source=auto 时不传，由后端按分块目录名（MXxxxxx -> lod13）自动识别
-    if (f.source !== 'auto') body.source = f.source
-    // 兼容入口 osgbToGridJson 会将 minLevel 强制覆盖为 level，仅聚合模式传递
-    if (useAggregation) body.minLevel = Number(f.minLevel)
+    const body = {
+      level: Number(f.level),
+      format: f.format,
+      source: f.source,
+    }
+    if (useAggregation) {
+      body.osgbFolder = String(f.inputFolder).trim()
+      body.minLevel = Number(f.minLevel)
+    } else {
+      body.inputFolder = String(f.inputFolder).trim()
+    }
     const url = useAggregation
       ? '/api/multiSource/triangleGrid/osgbToGridAggregation'
-      : '/api/multiSource/triangleGrid/osgbToGridJson'
+      : '/api/multiSource/triangleGrid/modelToGridJson'
     const data = await postJson(url, body)
-    handleJobAccepted(data, useAggregation ? 'OSGB 聚合入库' : 'OSGB 网格化入库')
+    handleJobAccepted(data, useAggregation ? '模型聚合入库' : '模型网格化入库')
   } catch (err) {
-    feedback.value = { type: 'error', title: 'OSGB 网格化入库任务提交失败', detail: err?.message || '网络错误，请稍后重试' }
+    feedback.value = { type: 'error', title: '模型网格化入库任务提交失败', detail: err?.message || '网络错误，请稍后重试' }
   } finally {
     submittingMap.osgb = false
   }
@@ -928,10 +940,10 @@ onBeforeUnmount(() => {
         <span v-if="feedback.detail" class="feedback-detail">{{ feedback.detail }}</span>
       </div>
 
-      <!-- OSGB 网格化 -->
+      <!-- 模型网格化 -->
       <section v-show="activeTab === 'osgb'" class="storage-card">
-        <div class="card-title">OSGB 倾斜摄影网格化入库</div>
-        <p class="card-desc">读取指定目录中的 OSGB 模型，将三角面映射为指定层级的网格并写入数据库。任务提交后异步执行，将自动跟踪执行进度。</p>
+        <div class="card-title">OSGB / 3D Tiles 模型网格化入库</div>
+        <p class="card-desc">读取指定目录中的 OSGB 或 3D Tiles 模型，将三角面映射为指定层级的网格并写入数据库。任务提交后异步执行，将自动跟踪执行进度。</p>
 
         <div class="mode-row">
           <span class="mode-label">入库模式</span>
@@ -946,11 +958,23 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="mode-row">
-          <span class="mode-label">数据来源</span>
+          <span class="mode-label">输入格式</span>
           <label class="radio-item">
-            <input v-model="osgbForm.source" type="radio" value="auto" />
-            <span>自动识别（MXxxxxx 分块 → LOD1.3）</span>
+            <input v-model="osgbForm.format" type="radio" value="osgb" />
+            <span>OSGB</span>
           </label>
+          <label class="radio-item">
+            <input v-model="osgbForm.format" type="radio" value="3dtiles" />
+            <span>3D Tiles</span>
+          </label>
+          <label class="radio-item">
+            <input v-model="osgbForm.format" type="radio" value="auto" />
+            <span>自动识别</span>
+          </label>
+        </div>
+
+        <div class="mode-row">
+          <span class="mode-label">数据来源</span>
           <label class="radio-item">
             <input v-model="osgbForm.source" type="radio" value="osgb" />
             <span>倾斜摄影（osgbgrid 表）</span>
@@ -962,15 +986,15 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="form-grid">
-          <div class="form-field span-2" :class="{ 'has-error': errors.osgbFolder }">
-            <label>OSGB 数据目录 <span class="req">*</span></label>
+          <div class="form-field span-2" :class="{ 'has-error': errors.inputFolder }">
+            <label>模型数据目录 <span class="req">*</span></label>
             <input
-              v-model="osgbForm.osgbFolder"
+              v-model="osgbForm.inputFolder"
               type="text"
-              placeholder="例如：data/osgb/tile_dir"
-              @blur="validateField('osgbFolder')"
+              placeholder="例如：data/osgb/tile_dir 或 data/lod13_3dtiles"
+              @blur="validateField('inputFolder')"
             />
-            <span v-if="errors.osgbFolder" class="field-error">{{ errors.osgbFolder }}</span>
+            <span v-if="errors.inputFolder" class="field-error">{{ errors.inputFolder }}</span>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.level }">
             <label>目标网格层级（0-21） <span class="req">*</span></label>
@@ -1602,7 +1626,7 @@ onBeforeUnmount(() => {
               <div class="progress-fill" :class="jobStatus.status" :style="{ width: `${jobStatus.progress?.percent ?? 0}%` }"></div>
             </div>
             <span class="progress-text">
-              {{ jobStatus.progress?.percent !== null && jobStatus.progress?.percent !== undefined ? `${jobStatus.progress.percent}%` : (jobStatus.progress?.stage || '-') }}
+              {{ jobStatus.progress?.percent !== null && jobStatus.progress?.percent !== undefined ? formatProgressPercent(jobStatus.progress.percent) : (jobStatus.progress?.stage || '-') }}
             </span>
           </div>
 

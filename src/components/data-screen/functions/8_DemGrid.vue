@@ -25,7 +25,7 @@ const demGridForm = reactive({
   level: 14,
 })
 
-const levelOptions = [14, 16]
+const levelOptions = Array.from({ length: 21 }, (_, index) => index + 1)
 
 // 存储原始精度边界数据（用于API调用）
 const rawBounds = ref({
@@ -39,7 +39,6 @@ const loading = ref(false)
 const error = ref('')
 const result = ref(null)
 const queryStats = ref(null)
-const gridsData = ref([])
 let queryParams = null
 let nextCursor = null
 
@@ -48,7 +47,6 @@ function resetForm() {
   error.value = ''
   result.value = null
   queryStats.value = null
-  gridsData.value = []
   queryParams = null
   nextCursor = null
   rawBounds.value = {
@@ -131,33 +129,39 @@ async function submitDemGridQuery() {
       maxLon,
       minLat,
       maxLat,
-      pageSize: 5000,
+      pageSize: 10000,
     }
-    gridsData.value = []
     nextCursor = null
+    emit('showGrid', { cells: [] })
+    let total = 0
+    let page = 0
+    let hasMore = false
     do {
-      await loadDemGridPage()
-    } while (queryStats.value.hasMore)
+      const responsePage = await loadDemGridPage()
+      hasMore = responsePage.pagination.hasMore
+      nextCursor = responsePage.pagination.nextCursor
+      page++
+      total += responsePage.cells.length
+      emit('showGrid', {
+        cells: responsePage.cells,
+        level: queryParams.level,
+        runtime: performance.now() - queryStartedAt,
+        renderer: 'instanced',
+        append: true,
+        skipFlyTo: true,
+      })
+      queryStats.value = {
+        total,
+        page,
+        pageSize: responsePage.pagination.pageSize,
+        hasMore,
+        status: 'success',
+      }
+    } while (hasMore)
 
-    const cells = gridsData.value.map(cell => ({
-      bounds: {
-        north: cell.maxlat,
-        south: cell.minlat,
-        east: cell.maxlon,
-        west: cell.minlon,
-        top: cell.top !== undefined ? cell.top : (cell.center ? cell.center[2] : 0),
-        bottom: cell.bottom !== undefined ? cell.bottom : 0,
-      },
-      code: String(cell.code),
-      center: cell.center,
-    }))
-    emit('showGrid', {
-      cells,
-      level: queryParams.level,
-      runtime: performance.now() - queryStartedAt,
-      renderer: 'primitive',
-    })
+    result.value = { status: 'success', hasData: total > 0 }
   } catch (err) {
+    queryStats.value = null
     if (err.message.includes('边界参数不合法')) {
       error.value = '边界参数不合法'
     } else if (err.message.includes('坐标超出')) {
@@ -191,30 +195,11 @@ async function loadDemGridPage() {
   }
 
   const decoded = DemGridByBoundsResponse.decode(new Uint8Array(await resp.arrayBuffer()))
-  const data = {
-    status: 'success',
-    data: {
-      cells: decoded.cells.map(cell => ({
-        code: cell.code,
-        center: [cell.center?.longitude, cell.center?.latitude, cell.center?.height],
-        maxlon: cell.maxLon,
-        minlon: cell.minLon,
-        maxlat: cell.maxLat,
-        minlat: cell.minLat,
-        top: cell.top,
-        bottom: cell.bottom,
-      })),
-      count: decoded.count,
-      pagination: {
-        pageSize: decoded.pagination?.pageSize,
-        hasMore: decoded.pagination?.hasMore,
-        nextCursor: decoded.pagination?.nextCursor || null,
-      },
-    },
+  const pagination = {
+    pageSize: decoded.pagination?.pageSize,
+    hasMore: decoded.pagination?.hasMore,
+    nextCursor: decoded.pagination?.nextCursor || null,
   }
-
-  const rawGrids = data?.data?.cells || []
-  const pagination = data?.data?.pagination
   if (!pagination || typeof pagination.hasMore !== 'boolean') {
     throw new Error('响应缺少分页信息')
   }
@@ -222,24 +207,27 @@ async function loadDemGridPage() {
     throw new Error('响应中的下一页游标无效')
   }
 
-  result.value = data
-  gridsData.value.push(...rawGrids)
-  nextCursor = pagination.nextCursor
-  queryStats.value = {
-    total: gridsData.value.length,
-    page: (queryStats.value?.page || 0) + 1,
-    pageSize: pagination.pageSize,
-    hasMore: pagination.hasMore,
-    status: data.status,
+  return {
+    cells: decoded.cells.map(cell => ({
+      bounds: {
+        north: cell.maxLat,
+        south: cell.minLat,
+        east: cell.maxLon,
+        west: cell.minLon,
+        top: cell.top,
+        bottom: cell.bottom,
+      },
+      code: String(cell.code),
+      center: [cell.center?.longitude, cell.center?.latitude, cell.center?.height],
+    })),
+    pagination,
   }
-
 }
 
 function clearGrids() {
   emit('showGrid', { cells: [] })
   result.value = null
   queryStats.value = null
-  gridsData.value = []
   queryParams = null
   nextCursor = null
 }
@@ -335,7 +323,7 @@ function clearGrids() {
       </div>
 
       <!-- 无数据 -->
-      <div v-if="result?.data && gridsData.length === 0" class="empty-box">
+      <div v-if="result && !result.hasData" class="empty-box">
         该区域未查询到网格数据
       </div>
     </template>

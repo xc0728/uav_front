@@ -32,8 +32,9 @@ Tab 栏:OSGB 网格化 | 建筑白模入库 | DEM 地面网格 | 真高空域剖
 
 #### 四类表单字段(严格按 RuKu.json schema 校验)
 
-**Tab1 OSGB 网格化** — 入库模式单选:同步(`/api/multiSource/triangleGrid/osgbToGridJson`)/ 聚合(`/api/multiSource/triangleGrid/osgbToGridAggregation`):
-- `osgbFolder` 必填(字符串)
+**Tab1 模型网格化** — 入库模式单选:直接(`/api/multiSource/triangleGrid/modelToGridJson`)/ 聚合(`/api/multiSource/triangleGrid/osgbToGridAggregation`):
+- 直接入库必填 `inputFolder`、`format`、`source`、`level`
+- 聚合入库使用 `osgbFolder`、`format`、`source`、`level`、`minLevel`
 - `level` 必填,整数 0-21
 - `minLevel` 仅聚合模式显示,整数 0-21,校验 ≤ level;响应 200 显示处理摘要(三角面数/目标表/聚合层级)
 
