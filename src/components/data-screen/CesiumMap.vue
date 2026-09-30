@@ -29,7 +29,19 @@ const cesiumEl = ref(null)
 let viewer = null
 let handler = null
 let tileset = null
-let lod13Tileset = null
+const LOD13_DATASETS = [
+  {
+    id: 'wuhan-tadiao',
+    label: '武汉塔吊',
+    url: '/wuhan/wuhan_tadiao_lod13_3dtiles/tileset.json',
+    attributesUrl: '/wuhan/wuhan_tadiao_lod13_3dtiles/attributes.json',
+    assetNames: ['tower.glb', 'tower_L0_0.glb'],
+  },
+  { id: 'wuhan-building', label: '武汉建筑', url: '/wuhan/wuhan_building_lod13_3dtiles/tileset.json' },
+  { id: 'deqing-building', label: '德清建筑', url: '/lod13_3dtiles/tileset.json' },
+]
+const lod13Tilesets = new Map()
+const lod13FocusSpheres = new Map()
 let gridPrimitives = []
 let gridPrimitiveCells = new Map()
 let instancedGridRenderers = []
@@ -43,9 +55,12 @@ const show3DTiles = ref(true)
 const showBuildings = ref(false) // 建筑白膜开关
 const showLod13 = ref(false) // LOD1.3 建筑模型开关
 const lod13Loading = ref(false) // LOD1.3 tileset 首次加载中
+const selectedLod13Id = ref(LOD13_DATASETS[0].id)
+const showLod13Panel = ref(false)
 const isMapReady = ref(false) // 地图是否准备就绪
 const chartFeatureLayers = ref([])
 const selectedGrid = ref(null)
+const selectedLod13Feature = ref(null)
 
 function featureBusinessType(properties) {
   return properties?.Type ?? properties?.type ?? properties?.['类型'] ?? ''
@@ -64,6 +79,12 @@ function toGridDetail(cell, bounds, fallbackLevel) {
     column: cell?.column ?? cell?.x,
     layer: cell?.layer ?? cell?.z,
     gridType: cell?.gridType,
+    groundElevation: cell?.groundElevation,
+    aglBottom: cell?.aglBottom,
+    aglTop: cell?.aglTop,
+    aglCenter: cell?.aglCenter,
+    datasetId: cell?.datasetId,
+    datasetVersion: cell?.datasetVersion,
     bounds,
     features: cell?.features || cell?.chartFeatures || [],
   }
@@ -294,7 +315,7 @@ function drawGridBoundary(gridInfo, options = {}) {
       return
     }
     if (renderer === GRID_RENDERER.PRIMITIVE) {
-      drawGridPrimitives(gridInfo, { skipFlyTo })
+      drawGridPrimitives(gridInfo, { skipFlyTo, append: gridInfo.append === true })
       return
     }
   }
@@ -1134,7 +1155,7 @@ function getInstancedGridCell(instanceId) {
 
 // DEM 查询结果是静态大批量矩形，使用批量 Primitive 避免逐格 Entity 的更新开销。
 function drawGridPrimitives(gridInfo, options = {}) {
-  clearGridVisual()
+  if (!options.append) clearGridVisual()
   if (!gridInfo.cells.length) return
 
   const fillColor = Cesium.Color.fromCssColorString('#3b82f6').withAlpha(0.5)
@@ -1222,8 +1243,20 @@ function drawGridPrimitives(gridInfo, options = {}) {
     })
   }
 
-  gridResultState.levels = collectGridLevels(gridInfo.cells, gridInfo.level)
-  gridResultState.total = validCount
+  const pageLevels = collectGridLevels(gridInfo.cells, gridInfo.level)
+  if (options.append) {
+    const levels = new Map(gridResultState.levels.map(item => [item.level, { ...item }]))
+    pageLevels.forEach(item => {
+      const current = levels.get(item.level)
+      if (current) current.count += item.count
+      else levels.set(item.level, item)
+    })
+    gridResultState.levels = [...levels.values()].sort((a, b) => a.level - b.level)
+    gridResultState.total += validCount
+  } else {
+    gridResultState.levels = pageLevels
+    gridResultState.total = validCount
+  }
   gridResultState.runtime = formatRuntime(gridInfo.runtime)
   gridResultState.visible = true
   updateScaleBar()
@@ -1368,35 +1401,114 @@ function toggle3DTiles() {
   tileset.show = show3DTiles.value
 }
 
-// 加载 LOD1.3 tileset（幂等）：成功返回实例，失败返回 null
-async function ensureLod13Loaded() {
-  if (lod13Tileset) return lod13Tileset
+function selectedLod13Dataset() {
+  return LOD13_DATASETS.find(dataset => dataset.id === selectedLod13Id.value) || LOD13_DATASETS[0]
+}
+
+async function loadLod13Attributes(dataset) {
+  if (!dataset.attributesUrl || dataset.attributes) return dataset.attributes || []
+  const response = await fetch(dataset.attributesUrl)
+  if (!response.ok) throw new Error(`属性文件请求失败: ${response.status}`)
+  dataset.attributes = await response.json()
+  return dataset.attributes
+}
+
+function pickedLod13Attributes(picked, dataset, tilesetInstance) {
+  const primitive = picked?.primitive
+  const featureTileset = picked?.tileset
+    || picked?.content?.tileset
+    || primitive?._tileset
+    || primitive?._cesium3DTile?.tileset
+  const primitiveUrl = primitive?.url || primitive?._url || ''
+  const belongsToTileset = featureTileset === tilesetInstance
+    || primitive === tilesetInstance
+    || dataset.assetNames?.some(name => primitiveUrl.includes(name))
+  if (!belongsToTileset) return null
+
+  let pickedProperties = {}
+  if (typeof picked?.getPropertyIds === 'function') {
+    picked.getPropertyIds().forEach((id) => {
+      pickedProperties[id] = picked.getProperty(id)
+    })
+  }
+
+  const featureId = pickedProperties.Id
+    || pickedProperties.id
+    || pickedProperties.OID
+    || pickedProperties.oid
+    || pickedProperties.Name
+    || pickedProperties.name
+  const externalAttributes = dataset.attributes?.find((attributes) => {
+    if (!featureId) return dataset.attributes.length === 1
+    const attributeId = attributes.Id
+      || attributes.id
+      || attributes.OID
+      || attributes.oid
+      || attributes.Name
+      || attributes.name
+    return String(attributeId) === String(featureId)
+  }) || dataset.attributes?.[0]
+
+  const properties = { ...(externalAttributes || {}), ...pickedProperties }
+  return Object.keys(properties).length ? { title: dataset.label, properties } : null
+}
+
+// 加载指定 LOD1.3 tileset（幂等）：成功返回实例，失败返回 null
+async function ensureLod13Loaded(dataset = selectedLod13Dataset()) {
+  const cachedTileset = lod13Tilesets.get(dataset.id)
+  if (cachedTileset) return cachedTileset
   if (lod13Loading.value || !viewer) return null
   lod13Loading.value = true
   try {
-    lod13Tileset = await Cesium.Cesium3DTileset.fromUrl('/lod13_3dtiles/tileset.json')
-    viewer.scene.primitives.add(lod13Tileset)
-    return lod13Tileset
+    const loadedTileset = await Cesium.Cesium3DTileset.fromUrl(dataset.url)
+    viewer.scene.primitives.add(loadedTileset)
+    loadedTileset.show = false
+    lod13Tilesets.set(dataset.id, loadedTileset)
+    if (dataset.attributesUrl) {
+      try {
+        await loadLod13Attributes(dataset)
+      } catch (error) {
+        console.warn(`[CesiumMap] LOD1.3 数据“${dataset.label}”属性加载失败:`, error)
+      }
+    }
+    return loadedTileset
   } catch (error) {
-    console.error('[CesiumMap] LOD1.3 建筑模型加载失败:', error)
-    lod13Tileset = null
+    console.error(`[CesiumMap] LOD1.3 数据“${dataset.label}”加载失败:`, error)
     return null
   } finally {
     lod13Loading.value = false
   }
 }
 
-// LOD1.3 建筑模型开关：首次开启时懒加载 /lod13_3dtiles/tileset.json，之后仅切换显隐
+async function switchLod13Dataset(datasetId) {
+  if (lod13Loading.value || !viewer || datasetId === selectedLod13Id.value && showLod13Panel.value === false) return
+  const dataset = LOD13_DATASETS.find(item => item.id === datasetId)
+  if (!dataset) return
+  selectedLod13Id.value = dataset.id
+  showLod13Panel.value = false
+  const selectedTileset = await ensureLod13Loaded(dataset)
+  if (!selectedTileset) {
+    showLod13.value = false
+    return
+  }
+  lod13Tilesets.forEach(item => { item.show = item === selectedTileset })
+  showLod13.value = true
+}
+
+// LOD1.3 建筑模型开关：首次开启时懒加载，之后仅切换显隐
 async function toggleLod13() {
   if (lod13Loading.value || !viewer) return
-  if (!lod13Tileset) {
+  const selectedTileset = lod13Tilesets.get(selectedLod13Id.value)
+  if (!selectedTileset) {
     const ts = await ensureLod13Loaded()
     showLod13.value = !!ts
-    if (ts) ts.show = true
+    if (ts) {
+      lod13Tilesets.forEach(item => { item.show = item === ts })
+    }
     return
   }
   showLod13.value = !showLod13.value
-  lod13Tileset.show = showLod13.value
+  selectedTileset.show = showLod13.value
 }
 
 // 聚焦到 3D 底图（倾斜摄影实景）模型范围
@@ -1408,73 +1520,26 @@ function focus3DTiles() {
   viewer.flyTo(tileset, { duration: 2 })
 }
 
-// LOD1.3 源数据中少数分块丢失地理配准（漂移到远处），整包 flyTo 会框到错误区域。
-// 这里解析根 tileset.json，用邻域计数找最密集簇（德清主簇），返回其包围球。
-let lod13FocusSphere = null
-async function computeLod13FocusSphere() {
-  if (lod13FocusSphere) return lod13FocusSphere
-  const resp = await fetch('/lod13_3dtiles/tileset.json')
-  if (!resp.ok) throw new Error(`tileset.json 请求失败: ${resp.status}`)
-  const json = await resp.json()
-  const items = (json?.root?.children || [])
-    .map((c) => c?.boundingVolume?.box)
-    .filter((b) => Array.isArray(b) && b.length >= 12)
-    .map((b) => ({
-      x: b[0], y: b[1], z: b[2],
-      r: Math.max(Math.abs(b[3]), Math.abs(b[7]), Math.abs(b[11])),
-    }))
-  if (!items.length) return null
-
-  const CLUSTER_RADIUS = 100000 // 主簇判定半径（米），德清建成区远小于该值
-  const r2 = CLUSTER_RADIUS * CLUSTER_RADIUS
-  // 采样种子做邻域计数，避免 5000+ 分块的全量 O(n²)
-  const stride = Math.max(1, Math.floor(items.length / 500))
-  let bestSeed = null
-  let bestCount = -1
-  for (let i = 0; i < items.length; i += stride) {
-    const s = items[i]
-    let count = 0
-    for (const o of items) {
-      const dx = o.x - s.x, dy = o.y - s.y, dz = o.z - s.z
-      if (dx * dx + dy * dy + dz * dz <= r2) count++
-    }
-    if (count > bestCount) {
-      bestCount = count
-      bestSeed = s
-    }
-  }
-  if (!bestSeed || bestCount < 2) return null
-
-  // 主簇成员的并集包围球
-  let cx = 0, cy = 0, cz = 0, n = 0
-  const members = []
-  for (const o of items) {
-    const dx = o.x - bestSeed.x, dy = o.y - bestSeed.y, dz = o.z - bestSeed.z
-    if (dx * dx + dy * dy + dz * dz <= r2) {
-      members.push(o)
-      cx += o.x; cy += o.y; cz += o.z; n++
-    }
-  }
-  cx /= n; cy /= n; cz /= n
-  let radius = 0
-  for (const o of members) {
-    const d = Math.hypot(o.x - cx, o.y - cy, o.z - cz) + o.r
-    if (d > radius) radius = d
-  }
-  lod13FocusSphere = new Cesium.BoundingSphere(new Cesium.Cartesian3(cx, cy, cz), radius)
-  console.info(`[CesiumMap] LOD1.3 主簇聚焦：${n}/${items.length} 个分块，半径 ${(radius / 1000).toFixed(1)} km`)
-  return lod13FocusSphere
+// 使用 Cesium 根据 tileset 根节点 transform 计算出的世界坐标包围球。
+async function computeLod13FocusSphere(tilesetInstance) {
+  const datasetId = [...lod13Tilesets.entries()].find(([, item]) => item === tilesetInstance)?.[0]
+  if (datasetId && lod13FocusSpheres.has(datasetId)) return lod13FocusSpheres.get(datasetId)
+  if (!tilesetInstance?.boundingSphere) return null
+  const sphere = tilesetInstance.boundingSphere
+  if (datasetId) lod13FocusSpheres.set(datasetId, sphere)
+  return sphere
 }
 
-// 聚焦到 LOD1.3 建筑模型主簇范围；未加载则先懒加载，隐藏时自动显示
+// 聚焦到 LOD1.3 建筑模型范围；未加载则先懒加载，隐藏时自动显示
 async function focusLod13() {
   if (!viewer || lod13Loading.value) return
   const ts = await ensureLod13Loaded()
   if (!ts) return
+  lod13Tilesets.forEach(item => { item.show = item === ts })
   ts.show = true
   showLod13.value = true
   try {
-    const sphere = await computeLod13FocusSphere()
+    const sphere = await computeLod13FocusSphere(ts)
     if (sphere) {
       viewer.camera.flyToBoundingSphere(sphere, {
         duration: 2,
@@ -1483,7 +1548,7 @@ async function focusLod13() {
       return
     }
   } catch (error) {
-    console.warn('[CesiumMap] LOD1.3 主簇解析失败，回退整包聚焦:', error)
+    console.warn('[CesiumMap] LOD1.3 包围范围解析失败，回退整包聚焦:', error)
   }
   viewer.flyTo(ts, { duration: 2 })
 }
@@ -4313,6 +4378,17 @@ onMounted(async () => {
 
     const picked = viewer.scene.pick(movement.position)
     const pickedEntity = picked?.id
+    const selectedTileset = lod13Tilesets.get(selectedLod13Id.value)
+    const lod13Attributes = pickedLod13Attributes(
+      picked,
+      selectedLod13Dataset(),
+      selectedTileset,
+    )
+    if (lod13Attributes) {
+      selectedLod13Feature.value = lod13Attributes
+      selectedGrid.value = null
+      return
+    }
     if (pickedEntity?.__chartGridDetail) {
       selectedGrid.value = pickedEntity.__chartGridDetail
       return
@@ -4344,6 +4420,7 @@ onMounted(async () => {
       }
     }
     selectedGrid.value = null
+    selectedLod13Feature.value = null
 
     // 获取点击位置的 cartesian 坐标
     const cartesian = viewer.scene.pickPosition(movement.position)
@@ -4464,8 +4541,13 @@ onBeforeUnmount(() => {
         </div>
         <div>编码：{{ selectedGrid.code }}</div>
         <div>层级：{{ selectedGrid.level }}</div>
+        <div v-if="selectedGrid.datasetId">数据集：{{ selectedGrid.datasetId }} · v{{ selectedGrid.datasetVersion }}</div>
         <div v-if="selectedGrid.row !== undefined || selectedGrid.column !== undefined || selectedGrid.layer !== undefined">
           行列高号：{{ selectedGrid.row ?? '—' }} / {{ selectedGrid.column ?? '—' }} / {{ selectedGrid.layer ?? '—' }}
+        </div>
+        <div v-if="selectedGrid.groundElevation !== undefined">地面海拔：{{ Number(selectedGrid.groundElevation).toFixed(2) }} m</div>
+        <div v-if="selectedGrid.aglBottom !== undefined || selectedGrid.aglTop !== undefined">
+          真高：{{ Number(selectedGrid.aglBottom).toFixed(2) }} ～ {{ Number(selectedGrid.aglTop).toFixed(2) }} m
         </div>
         <div>要素类型：{{ gridFeatureTypes(selectedGrid.features) }}</div>
         <div>经纬度：{{ selectedGrid.bounds.west.toFixed(6) }}, {{ selectedGrid.bounds.south.toFixed(6) }} ～ {{ selectedGrid.bounds.east.toFixed(6) }}, {{ selectedGrid.bounds.north.toFixed(6) }}</div>
@@ -4477,6 +4559,15 @@ onBeforeUnmount(() => {
           <span>{{ feature.dimensionMode }} · {{ feature.verticalMode || '—' }}</span>
           <span v-if="feature.minHeight !== null && feature.minHeight !== undefined">高度：{{ feature.minHeight }} ～ {{ feature.maxHeight }} m</span>
         </article>
+      </section>
+      <section v-if="selectedLod13Feature" class="selected-grid-detail">
+        <div class="selected-grid-title">
+          <span>{{ selectedLod13Feature.title }}属性</span>
+          <button type="button" aria-label="关闭模型属性" @click="selectedLod13Feature = null">×</button>
+        </div>
+        <div v-for="(value, key) in selectedLod13Feature.properties" :key="key">
+          {{ key }}：{{ value ?? '—' }}
+        </div>
       </section>
     </aside>
 
@@ -4525,12 +4616,16 @@ onBeforeUnmount(() => {
       <div
         class="single-toggle-card"
         :class="{ 'toggle-loading': lod13Loading }"
-        @click="toggleLod13"
+        @click.stop="toggleLod13"
       >
         <span class="layer-label">{{ lod13Loading ? 'LOD1.3 加载中...' : 'LOD1.3 建筑' }}</span>
         <div class="toggle-switch" :class="{ active: showLod13 }">
           <div class="toggle-slider" />
         </div>
+        <span class="base-layer-current">{{ selectedLod13Dataset().label }}</span>
+        <svg class="base-layer-chevron" :class="{ open: showLod13Panel }" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" @click.stop="showLod13Panel = !showLod13Panel">
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
         <button class="locate-btn" type="button" title="聚焦到 LOD1.3 建筑模型" :disabled="lod13Loading" @click.stop="focusLod13">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="7" />
@@ -4540,6 +4635,18 @@ onBeforeUnmount(() => {
             <line x1="19" y1="12" x2="23" y2="12" />
           </svg>
         </button>
+        <div v-if="showLod13Panel" class="base-layer-panel lod13-panel" @click.stop>
+          <div
+            v-for="dataset in LOD13_DATASETS"
+            :key="dataset.id"
+            class="base-layer-option"
+            :class="{ active: dataset.id === selectedLod13Id }"
+            @click="switchLod13Dataset(dataset.id)"
+          >
+            <span>{{ dataset.label }}</span>
+            <span v-if="dataset.id === selectedLod13Id" class="base-layer-check">&#10003;</span>
+          </div>
+        </div>
       </div>
 
       <!-- 一键场景演示按钮（飞行中显示取消按钮） -->
@@ -5123,6 +5230,10 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   z-index: 30;
+}
+
+.lod13-panel {
+  min-width: 128px;
 }
 
 .base-layer-option {

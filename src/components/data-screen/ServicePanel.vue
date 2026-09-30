@@ -86,6 +86,7 @@ const services = [
     icon: Database,
     component: AirspaceGridQuery,
     functions: [
+      '真高空域网格查询',
       '空域网格查询',
       '航图要素网格查询',
     ],
