@@ -1104,8 +1104,8 @@ function drawGridInstanced(gridInfo, options = {}) {
 
   const renderer = new InstancedGridRenderer({
     cells: gridInfo.cells,
-    fillAlpha: 0.5,
-    outlineAlpha: 1.0,
+    fillAlpha: gridInfo.fillAlpha ?? 0.5,
+    outlineAlpha: gridInfo.outlineAlpha ?? 1.0,
     enablePicking: gridInfo.enablePicking === true,
     level: gridInfo.level,
   })

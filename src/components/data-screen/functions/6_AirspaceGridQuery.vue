@@ -5,6 +5,7 @@ import { errorMessage } from '../../../utils/http'
 import {
   activeTrueAltitudeDatasets,
   buildTrueAltitudeRegionPayload,
+  compactMixedDisplayCells,
   toAirspaceMapCells,
 } from '../../../utils/trueAltitudeGrid'
 import {
@@ -94,6 +95,8 @@ const trueAltitudeDatasets = ref([])
 const error = ref('')
 const result = ref(null)
 const queryStats = ref(null)
+// 试验开关默认关闭；整个分页查询固定一次选择，避免中途改变算法。
+const experimentalMixedResolution = ref(false)
 const gridsData = ref([])
 const chartSummary = ref(null)
 const selectedDatasetIds = ref(CHART_DATASETS.slice(0, 4).map(dataset => dataset.id))
@@ -258,13 +261,19 @@ let manualAbortController = null         // 手动查询：取消当前请求
 let manualTimeoutId = null               // 手动查询：超时定时器
 let manualTimedOut = false               // 手动查询：是否因超时而中止
 const TRUE_ALTITUDE_PAGE_SIZE = 50000
+const TRUE_ALTITUDE_RENDER_TARGET = 100000
 
 async function queryAndRenderTrueAltitudePages(basePayload, controller, options = {}) {
   let cursor
   let pageIndex = 0
   let total = 0
+  let displayed = 0
+  let mixedDisplayCells = []
+  let displayCoarsened = false
   let lastData = null
   let datasetVersion = basePayload.datasetVersion
+  const mixed = experimentalMixedResolution.value
+  const levels = new Set()
   const startedAt = performance.now()
 
   do {
@@ -272,6 +281,8 @@ async function queryAndRenderTrueAltitudePages(basePayload, controller, options 
       ...basePayload,
       datasetVersion,
       pageSize: TRUE_ALTITUDE_PAGE_SIZE,
+      renderTargetCells: TRUE_ALTITUDE_RENDER_TARGET,
+      experimentalMixedResolution: mixed,
       cursor,
     })
     const response = await fetch('/api/true-altitude-airspace/grid/region', {
@@ -283,26 +294,57 @@ async function queryAndRenderTrueAltitudePages(basePayload, controller, options 
     if (!response.ok) throw new Error(await errorMessage(response, `请求失败，状态码 ${response.status}`))
     const data = await response.json()
     if (controller.signal.aborted) return null
+    if (mixed && (data?.data?.mixedResolution !== true || data?.data?.countExact !== true)) {
+      throw new Error('当前后端不支持混合多粒度试验，请更新后端或关闭试验开关')
+    }
     datasetVersion ??= data?.data?.datasetVersion
 
     const rawCells = Array.isArray(data?.data?.cells) ? data.data.cells : []
-    const cells = toMapCells(rawCells)
+    const pageCells = toMapCells(rawCells)
+    let cells = pageCells
+    if (mixed) {
+      const compacted = compactMixedDisplayCells(
+        mixedDisplayCells,
+        pageCells,
+        TRUE_ALTITUDE_RENDER_TARGET,
+      )
+      mixedDisplayCells = compacted.cells
+      displayCoarsened ||= compacted.coarsened
+      cells = mixedDisplayCells
+    }
+    if (mixed) levels.clear()
+    for (const cell of cells) levels.add(Number(cell.level))
     const runtime = performance.now() - startedAt
-    total += cells.length
+    const pageSourceCount = Number(data?.data?.sourceCellCount)
+    total += Number.isFinite(pageSourceCount)
+      ? pageSourceCount
+      : pageCells.reduce((sum, cell) => sum + (Number(cell.sourceCellCount) || 1), 0)
+    displayed = mixed ? cells.length : displayed + cells.length
     lastData = data
     result.value = data
     queryStats.value = {
       total,
+      displayed,
+      sourceLevel: data?.data?.sourceLevel,
+      renderLevel: data?.data?.renderLevel,
+      lod: data?.data?.lod === true,
+      mixedResolution: data?.data?.mixedResolution === true,
+      countExact: data?.data?.countExact === true,
+      levels: [...levels].sort((a, b) => a - b).map(level => `L${level}`).join(' / '),
+      displayCoarsened,
+      complete: data?.data?.hasMore !== true,
       status: data?.success === true ? 'success' : (data?.status || 'unknown'),
     }
 
     if (cells.length > 0) {
       emit('showGrid', {
         cells,
-        level: Number(basePayload.level),
+        level: Number(data?.data?.renderLevel ?? basePayload.level),
         runtime,
         renderer: 'instanced',
-        append: pageIndex > 0,
+        fillAlpha: data?.data?.lod === true ? 0.08 : 0.18,
+        outlineAlpha: data?.data?.lod === true ? 0.65 : 0.85,
+        append: mixed ? false : pageIndex > 0,
         skipFlyTo: options.skipFlyTo === true || pageIndex > 0,
       })
     } else if (pageIndex === 0) {
@@ -321,7 +363,7 @@ async function queryAndRenderTrueAltitudePages(basePayload, controller, options 
 
   gridsData.value = []
   totalCount = total
-  return { data: lastData, total, runtime: performance.now() - startedAt }
+  return { data: lastData, total, displayed, runtime: performance.now() - startedAt }
 }
 
 /**
@@ -581,7 +623,7 @@ async function submitAirspaceGridQuery() {
   const queryLevel = chartMode.value ? CHART_GRID_LEVEL : Number(airspaceGridForm.level)
   const estimatedCells = estimateCellCount(minLon, maxLon, minLat, maxLat, queryLevel)
   const WARN_THRESHOLD = 50000
-  if (!chartMode.value && estimatedCells > WARN_THRESHOLD) {
+  if (!chartMode.value && !trueAltitudeMode.value && estimatedCells > WARN_THRESHOLD) {
     const ok = window.confirm(
       `当前区域在 level ${queryLevel} 下预估约 ${estimatedCells.toLocaleString()} 个格网，` +
       `查询可能较慢。是否继续？\n\n（建议缩小区域或降低层级）`
@@ -604,7 +646,7 @@ async function submitAirspaceGridQuery() {
       [minLon, minLat],
     ]
 
-    // 真高查询返回完整结果；普通空域/航图分支仍保留各自的 maxCells 保护。
+    // 真高查询覆盖完整原始数据，显示端由后端自动选择聚合层级；普通空域/航图仍保留 maxCells。
     const payload = trueAltitudeMode.value ? buildTrueAltitudeRegionPayload({
       datasetId: airspaceGridForm.datasetId,
       polygon: polygon,
@@ -793,6 +835,13 @@ function clearGrids() {
           {{ selectedTrueAltitudeDataset.minAgl ?? 0 }}–{{ selectedTrueAltitudeDataset.maxAgl ?? '—' }} m
         </div>
         <div v-if="datasetError" class="error-box dataset-error">{{ datasetError }}</div>
+        <label class="dataset-hint">
+          <input v-model="experimentalMixedResolution" type="checkbox" :disabled="loading || dynamicZoomEnabled" />
+          混合多粒度网格（试验，默认关闭）
+        </label>
+        <div v-if="experimentalMixedResolution" class="dataset-hint">
+          内部粗网格、边界细网格；精确统计继续分页，最多绘制 100,000 个显示网格。关闭可回退原查询。
+        </div>
       </div>
 
       <!-- 普通空域ID -->
@@ -994,9 +1043,14 @@ function clearGrids() {
       <!-- 查询结果 -->
       <div v-if="queryStats" class="result-box">
         <div class="result-row">
-          <span class="result-label">网格数量</span>
-          <span class="result-num">{{ queryStats.total }}</span>
+          <span class="result-label">{{ queryStats.countExact ? (queryStats.complete ? '精确命中' : '精确命中（累计）') : (queryStats.lod ? 'LOD覆盖明细' : '原始命中') }}</span>
+          <span class="result-num">{{ Number(queryStats.total).toLocaleString() }}</span>
         </div>
+        <div v-if="queryStats.lod" class="result-row">
+          <span class="result-label">显示网格</span>
+          <span class="result-num">{{ Number(queryStats.displayed).toLocaleString() }}（{{ queryStats.mixedResolution ? queryStats.levels : `预生成 L${queryStats.renderLevel}` }}，权威层 L{{ queryStats.sourceLevel }}）</span>
+        </div>
+        <div v-if="queryStats.displayCoarsened" class="dataset-hint">显示节点已按父层级合并到预算内；区域保持完整概略覆盖，精确命中数仍按 L17 统计。</div>
         <div class="result-row">
           <span class="result-label">状态</span>
           <span class="result-status" :class="queryStats.status === 'success' ? 'success' : ''">
