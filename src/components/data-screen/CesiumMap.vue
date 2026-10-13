@@ -1,6 +1,7 @@
 <script setup>
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import * as Cesium from 'cesium'
+import { colorizeGridCells, getGridColorByLevel, resolveGridColor } from '../../utils/cesium/gridLevelColor'
 import {
   loadDeqingBuildings,
   drawBuildingModelsOnMap,
@@ -12,7 +13,7 @@ import {
   switchBaseLayer,
 } from '../../utils/tdtBaseLayers.js'
 import { createZhejiangTerrainProvider } from '../../utils/zhejiangTerrain.js'
-import { chartFeatureLabel } from '../../utils/staticFeatures.js'
+import { chartFeatureLabel, queryChartFeatures } from '../../utils/staticFeatures.js'
 import InstancedGridRenderer from '../../utils/cesium/InstancedGridRenderer.js'
 import GridRendererManager, { GRID_RENDERER } from '../../utils/cesium/GridRendererManager.js'
 
@@ -29,21 +30,51 @@ const cesiumEl = ref(null)
 let viewer = null
 let handler = null
 let tileset = null
-const LOD13_DATASETS = [
-  {
-    id: 'wuhan-tadiao',
-    label: '武汉塔吊',
-    url: '/wuhan/wuhan_tadiao_lod13_3dtiles/tileset.json',
-    attributesUrl: '/wuhan/wuhan_tadiao_lod13_3dtiles/attributes.json',
-    assetNames: ['tower.glb', 'tower_L0_0.glb'],
-  },
-  { id: 'wuhan-building', label: '武汉建筑', url: '/wuhan/wuhan_building_lod13_3dtiles/tileset.json' },
-  { id: 'deqing-building', label: '德清建筑', url: '/lod13_3dtiles/tileset.json' },
-]
+let LOD13_DATASETS = []
+const LOD13_TILESET_OPTIONS = Object.freeze({
+  // 中心视域优先：移动期间延后边缘请求，停止后再渐进补载。
+  maximumScreenSpaceError: 24,
+  cullWithChildrenBounds: true,
+  cullRequestsWhileMoving: true,
+  cullRequestsWhileMovingMultiplier: 120,
+  preloadFlightDestinations: true,
+  progressiveResolutionHeightFraction: 0.15,
+  foveatedScreenSpaceError: true,
+  foveatedConeSize: 0.2,
+  foveatedMinimumScreenSpaceErrorRelaxation: 8,
+  foveatedTimeDelay: 0.5,
+  dynamicScreenSpaceError: true,
+  dynamicScreenSpaceErrorDensity: 3.0e-4,
+  dynamicScreenSpaceErrorFactor: 32,
+  skipLevelOfDetail: true,
+  skipLevels: 1,
+  loadSiblings: false,
+})
+
+function createLod13EdgeFadeShader() {
+  return new Cesium.CustomShader({
+    fragmentShaderText: `
+      void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) {
+        vec2 screenUv = (gl_FragCoord.xy - czm_viewport.xy) / czm_viewport.zw;
+        vec2 nearestEdge = min(screenUv, vec2(1.0) - screenUv);
+        float edgeDistance = min(nearestEdge.x, nearestEdge.y);
+        float visibility = smoothstep(0.015, 0.14, edgeDistance);
+
+        // 屏幕门抖动维持不透明渲染路径，避免大量透明建筑的排序开销。
+        vec2 pixel = floor(gl_FragCoord.xy);
+        float noise = fract(52.9829189 * fract(dot(pixel, vec2(0.06711056, 0.00583715))));
+        if (noise > visibility) {
+          discard;
+        }
+      }
+    `,
+  })
+}
 const lod13Tilesets = new Map()
 const lod13FocusSpheres = new Map()
 let gridPrimitives = []
 let gridPrimitiveCells = new Map()
+let gridPrimitiveKinds = new Map()
 let instancedGridRenderers = []
 let chartGridEntities = []
 const gridRendererManager = new GridRendererManager()
@@ -55,12 +86,44 @@ const show3DTiles = ref(true)
 const showBuildings = ref(false) // 建筑白膜开关
 const showLod13 = ref(false) // LOD1.3 建筑模型开关
 const lod13Loading = ref(false) // LOD1.3 tileset 首次加载中
-const selectedLod13Id = ref(LOD13_DATASETS[0].id)
+const selectedLod13Id = ref('')
 const showLod13Panel = ref(false)
 const isMapReady = ref(false) // 地图是否准备就绪
 const chartFeatureLayers = ref([])
 const selectedGrid = ref(null)
 const selectedLod13Feature = ref(null)
+let gridFeatureRequest = null
+
+// 切换网格或关闭面板时取消旧请求，防止迟到的属性覆盖当前选中网格。
+watch(selectedGrid, () => gridFeatureRequest?.abort(), { flush: 'sync' })
+
+async function selectGridDetail(detail) {
+  selectedLod13Feature.value = null
+  selectedGrid.value = { ...detail, featuresLoading: false, featuresError: '', featuresTruncated: false }
+  const selected = selectedGrid.value
+  if (selected.features.length) return
+  const request = new AbortController()
+  gridFeatureRequest = request
+  selected.featuresLoading = true
+  try {
+    const data = await queryChartFeatures([selected], {
+      signal: request.signal,
+      includeRelatedLevels: true,
+    })
+    if (request.signal.aborted || selectedGrid.value !== selected) return
+    selected.features = [...new Map([...data.features2D, ...data.features3D].map(feature => [
+      `${feature.datasetId}-${feature.featureUid}-${feature.dimensionMode}`, feature,
+    ])).values()]
+    selected.featuresTruncated = data.truncated
+  } catch (error) {
+    if (!request.signal.aborted && selectedGrid.value === selected) {
+      selected.featuresError = error?.message || '航图要素属性加载失败'
+    }
+  } finally {
+    if (selectedGrid.value === selected) selected.featuresLoading = false
+    if (gridFeatureRequest === request) gridFeatureRequest = null
+  }
+}
 
 function featureBusinessType(properties) {
   return properties?.Type ?? properties?.type ?? properties?.['类型'] ?? ''
@@ -69,6 +132,12 @@ function featureBusinessType(properties) {
 function gridFeatureTypes(features) {
   const types = [...new Set(features.map(feature => featureBusinessType(feature.properties)).filter(Boolean))]
   return types.join('、') || '未标注'
+}
+
+function formatPropertyValue(value) {
+  if (value === null || value === undefined) return '—'
+  if (typeof value === 'object') return JSON.stringify(value, null, 2)
+  return String(value)
 }
 
 function toGridDetail(cell, bounds, fallbackLevel) {
@@ -85,6 +154,13 @@ function toGridDetail(cell, bounds, fallbackLevel) {
     aglCenter: cell?.aglCenter,
     datasetId: cell?.datasetId,
     datasetVersion: cell?.datasetVersion,
+    overviewColumn: cell?.overviewColumn === true,
+    overviewCellCount: cell?.overviewCellCount,
+    sourceCellCount: cell?.sourceCellCount,
+    overviewSegmentIndex: cell?.overviewSegmentIndex,
+    overviewSegmentCount: cell?.overviewSegmentCount,
+    overviewColumnBottom: cell?.overviewColumnBottom,
+    overviewColumnTop: cell?.overviewColumnTop,
     bounds,
     features: cell?.features || cell?.chartFeatures || [],
   }
@@ -112,6 +188,21 @@ function updateChartFeatureVisibility() {
       entity.rectangle.material = color.withAlpha(0.5)
       entity.rectangle.outlineColor = color
     }
+  })
+  gridPrimitiveCells.forEach((cells, primitive) => {
+    if (!primitive.ready || typeof primitive.getGeometryInstanceAttributes !== 'function') return
+    const kind = gridPrimitiveKinds.get(primitive)
+    cells.forEach((cell, index) => {
+      const activeFeature = cell.chartFeatures?.find(feature => enabled.has(feature.type))
+      const attributes = primitive.getGeometryInstanceAttributes(index)
+      if (!attributes) return
+      attributes.show = Cesium.ShowGeometryInstanceAttribute.toValue(Boolean(activeFeature), attributes.show)
+      if (activeFeature) {
+        const alpha = kind === 'fill' ? 0.5 : 1
+        const color = Cesium.Color.fromCssColorString(activeFeature.color).withAlpha(alpha)
+        attributes.color = Cesium.ColorGeometryInstanceAttribute.toValue(color, attributes.color)
+      }
+    })
   })
   viewer?.scene.requestRender()
 }
@@ -299,23 +390,31 @@ function drawGridBoundary(gridInfo, options = {}) {
   }
 
   const { skipFlyTo = false } = options
+  const coloredGridInfo = Array.isArray(gridInfo.cells)
+    ? { ...gridInfo, cells: colorizeGridCells(gridInfo.cells) }
+    : gridInfo
   console.log('[CesiumMap] drawGridBoundary:', {
     cellCount: gridInfo.cells?.length ?? (gridInfo.bounds ? 1 : 0),
     level: gridInfo.level,
     renderer: gridInfo.renderer,
   })
 
-  if (Array.isArray(gridInfo.cells) && gridInfo.cells.length > 0) {
-    const renderer = gridRendererManager.select(gridInfo.cells.length, {
-      requested: gridInfo.renderer,
+  if (Array.isArray(coloredGridInfo.cells) && coloredGridInfo.cells.length === 0) {
+    clearGridVisual()
+    return
+  }
+
+  if (Array.isArray(coloredGridInfo.cells) && coloredGridInfo.cells.length > 0) {
+    const renderer = gridRendererManager.select(coloredGridInfo.cells.length, {
+      requested: coloredGridInfo.renderer,
       supportsInstancing: viewer.scene.context?.instancedArrays !== false,
     })
     if (renderer === GRID_RENDERER.INSTANCED) {
-      drawGridInstanced(gridInfo, { skipFlyTo, append: gridInfo.append === true })
+      drawGridInstanced(coloredGridInfo, { skipFlyTo, append: coloredGridInfo.append === true })
       return
     }
     if (renderer === GRID_RENDERER.PRIMITIVE) {
-      drawGridPrimitives(gridInfo, { skipFlyTo, append: gridInfo.append === true })
+      drawGridPrimitives(coloredGridInfo, { skipFlyTo, append: coloredGridInfo.append === true })
       return
     }
   }
@@ -325,15 +424,15 @@ function drawGridBoundary(gridInfo, options = {}) {
   clearGridVisual()
 
   // 检查是否是多个网格（cells 数组）
-  if (gridInfo.cells && Array.isArray(gridInfo.cells) && gridInfo.cells.length > 0) {
-    console.log('[CesiumMap] 检测到多个网格:', gridInfo.cells.length)
+  if (coloredGridInfo.cells && Array.isArray(coloredGridInfo.cells) && coloredGridInfo.cells.length > 0) {
+    console.log('[CesiumMap] 检测到多个网格:', coloredGridInfo.cells.length)
     // 绘制多个网格边界
-    syncChartFeatureLayers(gridInfo.cells, previousChartLayers)
+    syncChartFeatureLayers(coloredGridInfo.cells, previousChartLayers)
     let minLon = Infinity, maxLon = -Infinity
     let minLat = Infinity, maxLat = -Infinity
     let minHeight = Infinity, maxHeight = -Infinity
 
-    gridInfo.cells.forEach((cell, index) => {
+    coloredGridInfo.cells.forEach((cell, index) => {
       // 兼容多种数据格式：优先从 bounds 取，其次直接从 cell 取
       let north, south, east, west, top = 0, bottom = 0
       if (cell.bounds) {
@@ -359,7 +458,7 @@ function drawGridBoundary(gridInfo, options = {}) {
       }
 
       // 前5个和最后5个网格打印位置分布
-      if (index < 5 || index >= gridInfo.cells.length - 5) {
+      if (index < 5 || index >= coloredGridInfo.cells.length - 5) {
         console.log(`格网${index + 1}: W=${west?.toFixed(6)}, S=${south?.toFixed(6)}, E=${east?.toFixed(6)}, N=${north?.toFixed(6)}`)
       }
 
@@ -372,7 +471,7 @@ function drawGridBoundary(gridInfo, options = {}) {
       maxHeight = Math.max(maxHeight, top)
 
       // 使用格网携带的颜色，如果没有则使用默认颜色
-      const cellColor = cell.color || '#3b82f6'
+      const cellColor = resolveGridColor(cell)
       const cellLevel = cell.level ?? cell.z
 
       // 绘制每个网格边界
@@ -421,11 +520,11 @@ function drawGridBoundary(gridInfo, options = {}) {
       }
     }
 
-    console.log('[CesiumMap] 已绘制多个网格边界:', gridInfo.cells.length)
+    console.log('[CesiumMap] 已绘制多个网格边界:', coloredGridInfo.cells.length)
     // 更新查询结果图例（支持多层级）
-    gridResultState.levels = collectGridLevels(gridInfo.cells, gridInfo.level)
-    gridResultState.total = gridInfo.cells.length
-    gridResultState.runtime = formatRuntime(gridInfo.runtime)
+    gridResultState.levels = collectGridLevels(coloredGridInfo.cells, coloredGridInfo.level)
+    gridResultState.total = coloredGridInfo.cells.length
+    gridResultState.runtime = formatRuntime(coloredGridInfo.runtime)
     gridResultState.visible = true
     updateChartFeatureVisibility()
     updateScaleBar()
@@ -459,9 +558,9 @@ function drawGridBoundary(gridInfo, options = {}) {
     id: gridBoundaryId,
     rectangle: {
       coordinates: Cesium.Rectangle.fromDegrees(west, south, east, north),
-      material: Cesium.Color.fromCssColorString('#3b82f6').withAlpha(0.2),
+      material: Cesium.Color.fromCssColorString(resolveGridColor(gridInfo)).withAlpha(0.2),
       outline: true,
-      outlineColor: Cesium.Color.fromCssColorString('#3b82f6'),
+      outlineColor: Cesium.Color.fromCssColorString(resolveGridColor(gridInfo)),
       outlineWidth: 2,
       height: bottom,
       extrudedHeight: top,
@@ -498,7 +597,7 @@ function drawGridBoundary(gridInfo, options = {}) {
   // 更新查询结果图例（单层级）
   const singleSizeLabel = computeCellSizeLabel({ bounds })
   gridResultState.levels = gridInfo.level != null
-    ? [{ level: Number(gridInfo.level), count: 1, color: '#3b82f6', sizeLabel: singleSizeLabel }]
+    ? [{ level: Number(gridInfo.level), count: 1, color: resolveGridColor(gridInfo), sizeLabel: singleSizeLabel }]
     : []
   gridResultState.total = 1
   gridResultState.runtime = formatRuntime(gridInfo.runtime)
@@ -1066,6 +1165,7 @@ function clearGridVisual() {
   gridPrimitives.forEach(primitive => viewer.scene.primitives.remove(primitive))
   gridPrimitives = []
   gridPrimitiveCells = new Map()
+  gridPrimitiveKinds = new Map()
   chartGridEntities = []
   chartFeatureLayers.value = []
   selectedGrid.value = null
@@ -1106,6 +1206,8 @@ function drawGridInstanced(gridInfo, options = {}) {
     cells: gridInfo.cells,
     fillAlpha: gridInfo.fillAlpha ?? 0.5,
     outlineAlpha: gridInfo.outlineAlpha ?? 1.0,
+    distanceFadeMinAlpha: gridInfo.distanceFadeMinAlpha,
+    denseOutline: gridInfo.denseOutline === true,
     enablePicking: gridInfo.enablePicking === true,
     level: gridInfo.level,
   })
@@ -1155,11 +1257,11 @@ function getInstancedGridCell(instanceId) {
 
 // DEM 查询结果是静态大批量矩形，使用批量 Primitive 避免逐格 Entity 的更新开销。
 function drawGridPrimitives(gridInfo, options = {}) {
+  const previousChartLayers = new Map(chartFeatureLayers.value.map(layer => [layer.type, layer.enabled]))
   if (!options.append) clearGridVisual()
   if (!gridInfo.cells.length) return
+  syncChartFeatureLayers(gridInfo.cells, previousChartLayers)
 
-  const fillColor = Cesium.Color.fromCssColorString('#3b82f6').withAlpha(0.5)
-  const outlineColor = Cesium.Color.fromCssColorString('#3b82f6')
   const batchSize = 50000
   let minLon = Infinity, maxLon = -Infinity
   let minLat = Infinity, maxLat = -Infinity
@@ -1179,6 +1281,7 @@ function drawGridPrimitives(gridInfo, options = {}) {
       if (![north, south, east, west, top, bottom].every(Number.isFinite)) continue
 
       const rectangle = Cesium.Rectangle.fromDegrees(west, south, east, north)
+      const cellColor = Cesium.Color.fromCssColorString(resolveGridColor(gridInfo.cells[index]))
       fills.push(new Cesium.GeometryInstance({
         id: batchCells.length,
         geometry: new Cesium.RectangleGeometry({
@@ -1188,7 +1291,8 @@ function drawGridPrimitives(gridInfo, options = {}) {
           vertexFormat: Cesium.PerInstanceColorAppearance.VERTEX_FORMAT,
         }),
         attributes: {
-          color: Cesium.ColorGeometryInstanceAttribute.fromColor(fillColor),
+          color: Cesium.ColorGeometryInstanceAttribute.fromColor(cellColor.withAlpha(0.5)),
+          show: new Cesium.ShowGeometryInstanceAttribute(true),
         },
       }))
       outlines.push(new Cesium.GeometryInstance({
@@ -1199,7 +1303,8 @@ function drawGridPrimitives(gridInfo, options = {}) {
           extrudedHeight: top,
         }),
         attributes: {
-          color: Cesium.ColorGeometryInstanceAttribute.fromColor(outlineColor),
+          color: Cesium.ColorGeometryInstanceAttribute.fromColor(cellColor),
+          show: new Cesium.ShowGeometryInstanceAttribute(true),
         },
       }))
       batchCells.push(gridInfo.cells[index])
@@ -1229,6 +1334,8 @@ function drawGridPrimitives(gridInfo, options = {}) {
     gridPrimitives.push(fillPrimitive, outlinePrimitive)
     gridPrimitiveCells.set(fillPrimitive, batchCells)
     gridPrimitiveCells.set(outlinePrimitive, batchCells)
+    gridPrimitiveKinds.set(fillPrimitive, 'fill')
+    gridPrimitiveKinds.set(outlinePrimitive, 'outline')
   }
 
   if (!validCount) return
@@ -1356,7 +1463,7 @@ function collectGridLevels(cells, fallbackLevel) {
   cells.forEach(cell => {
     // 优先用 cell.level，其次 cell.z（倾斜摄影聚合返回的字段）
     const lv = cell.level ?? cell.z ?? null
-    const color = cell.color || '#3b82f6'
+    const color = resolveGridColor(cell)
     if (lv !== null && lv !== undefined) {
       hasCellLevel = true
       if (!levelMap[lv]) {
@@ -1376,7 +1483,7 @@ function collectGridLevels(cells, fallbackLevel) {
   // cells 无层级字段时，用 payload 顶层 level（单层级）
   if (fallbackLevel != null) {
     const sizeLabel = cells.length > 0 ? computeCellSizeLabel(cells[0]) : ''
-    return [{ level: Number(fallbackLevel), count: cells.length, color: '#3b82f6', sizeLabel }]
+    return [{ level: Number(fallbackLevel), count: cells.length, color: getGridColorByLevel(fallbackLevel), sizeLabel }]
   }
   return []
 }
@@ -1402,7 +1509,7 @@ function toggle3DTiles() {
 }
 
 function selectedLod13Dataset() {
-  return LOD13_DATASETS.find(dataset => dataset.id === selectedLod13Id.value) || LOD13_DATASETS[0]
+  return LOD13_DATASETS.find(dataset => dataset.id === selectedLod13Id.value) || LOD13_DATASETS[0] || null
 }
 
 async function loadLod13Attributes(dataset) {
@@ -1434,6 +1541,7 @@ function pickedLod13Attributes(picked, dataset, tilesetInstance) {
 
   const featureId = pickedProperties.Id
     || pickedProperties.id
+    || pickedProperties.ID
     || pickedProperties.OID
     || pickedProperties.oid
     || pickedProperties.Name
@@ -1442,6 +1550,7 @@ function pickedLod13Attributes(picked, dataset, tilesetInstance) {
     if (!featureId) return dataset.attributes.length === 1
     const attributeId = attributes.Id
       || attributes.id
+      || attributes.ID
       || attributes.OID
       || attributes.oid
       || attributes.Name
@@ -1455,12 +1564,16 @@ function pickedLod13Attributes(picked, dataset, tilesetInstance) {
 
 // 加载指定 LOD1.3 tileset（幂等）：成功返回实例，失败返回 null
 async function ensureLod13Loaded(dataset = selectedLod13Dataset()) {
+  if (!dataset) return null
   const cachedTileset = lod13Tilesets.get(dataset.id)
   if (cachedTileset) return cachedTileset
   if (lod13Loading.value || !viewer) return null
   lod13Loading.value = true
   try {
-    const loadedTileset = await Cesium.Cesium3DTileset.fromUrl(dataset.url)
+    const loadedTileset = await Cesium.Cesium3DTileset.fromUrl(dataset.url, {
+      ...LOD13_TILESET_OPTIONS,
+      customShader: createLod13EdgeFadeShader(),
+    })
     viewer.scene.primitives.add(loadedTileset)
     loadedTileset.show = false
     lod13Tilesets.set(dataset.id, loadedTileset)
@@ -4301,6 +4414,17 @@ defineExpose({
 
 onMounted(async () => {
   try {
+    try {
+      const manifestResponse = await fetch('/lod13-datasets.json')
+      if (!manifestResponse.ok) throw new Error(`LOD1.3 清单请求失败: ${manifestResponse.status}`)
+      const manifest = await manifestResponse.json()
+      if (!Array.isArray(manifest)) throw new Error('LOD1.3 清单格式无效')
+      LOD13_DATASETS = manifest
+      selectedLod13Id.value = manifest[0]?.id || ''
+    } catch (error) {
+      console.warn('[CesiumMap] LOD1.3 数据清单加载失败，暂不显示模型列表:', error)
+    }
+
     // 配置 Cesium Ion Token
     Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJmZDBhNDFhZi1iZDZiLTQxOTItODBmNy0wNTM5MzNkNDE1MjciLCJpZCI6MzgzMjUyLCJpYXQiOjE3Njk0MDI3NjN9.Z7q5n75AghS4cysQLhuLx2_70MrUJLjgGTgrqEtcnyo'
 
@@ -4390,8 +4514,18 @@ onMounted(async () => {
       return
     }
     if (pickedEntity?.__chartGridDetail) {
-      selectedGrid.value = pickedEntity.__chartGridDetail
+      void selectGridDetail(pickedEntity.__chartGridDetail)
       return
+    }
+    // GeometryInstance 的 id 由 Cesium 放在 picked.id 中。
+    const primitiveCells = gridPrimitiveCells.get(picked?.primitive)
+    const primitiveCellId = Number.isInteger(picked?.id) ? picked.id : picked?.instanceId
+    if (primitiveCells && Number.isInteger(primitiveCellId)) {
+      const cell = primitiveCells[primitiveCellId]
+      if (cell) {
+        void selectGridDetail(toGridDetail(cell, cell.bounds, cell.level ?? cell.z))
+        return
+      }
     }
     if (instancedGridRenderers.length) {
       const cartesian = viewer.scene.pickPosition(movement.position)
@@ -4403,19 +4537,12 @@ onMounted(async () => {
       for (const renderer of instancedGridRenderers) {
         const extent = renderer.extent
         if (longitude < extent.west || longitude > extent.east || latitude < extent.south || latitude > extent.north) continue
-        cell = renderer.getCellAt(longitude, latitude, null)
+        cell = renderer.getCellAt(longitude, latitude, cartographic?.height)
+          || renderer.getCellAt(longitude, latitude, null)
         if (cell) break
       }
       if (cell) {
-        selectedGrid.value = toGridDetail(cell, cell.bounds, cell.level ?? cell.z)
-        return
-      }
-    }
-    const primitiveCells = gridPrimitiveCells.get(picked?.primitive)
-    if (primitiveCells && Number.isInteger(picked.instanceId)) {
-      const cell = primitiveCells[picked.instanceId]
-      if (cell) {
-        selectedGrid.value = toGridDetail(cell, cell.bounds, cell.level ?? cell.z)
+        void selectGridDetail(toGridDetail(cell, cell.bounds, cell.level ?? cell.z))
         return
       }
     }
@@ -4485,6 +4612,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  gridFeatureRequest?.abort()
   stopUavAnimation()
   if (scaleBarTimer) {
     clearTimeout(scaleBarTimer)
@@ -4516,7 +4644,7 @@ onBeforeUnmount(() => {
         <small>{{ chartFeatureLayers.length ? `${chartFeatureLayers.length} 类` : '未加载' }}</small>
       </div>
       <div v-if="!chartFeatureLayers.length" class="chart-feature-empty">
-        请在“航图要素网格查询”中执行查询后，在此筛选显示要素。
+        点击网格可查看关联航图要素属性；航图查询后可在此筛选要素显示。
       </div>
       <label
         v-for="layer in chartFeatureLayers"
@@ -4539,8 +4667,9 @@ onBeforeUnmount(() => {
           <span>已选网格</span>
           <button type="button" aria-label="关闭网格详情" @click="selectedGrid = null">×</button>
         </div>
-        <div>编码：{{ selectedGrid.code }}</div>
+        <div>编码：{{ selectedGrid.code }}{{ selectedGrid.overviewColumn ? '（代表网格）' : '' }}</div>
         <div>层级：{{ selectedGrid.level }}</div>
+        <div v-if="selectedGrid.overviewColumn">垂直概览：整列合并 {{ Number(selectedGrid.overviewCellCount).toLocaleString() }} 个显示节点<span v-if="selectedGrid.overviewSegmentCount"> · 当前第 {{ selectedGrid.overviewSegmentIndex }}/{{ selectedGrid.overviewSegmentCount }} 段</span></div>
         <div v-if="selectedGrid.datasetId">数据集：{{ selectedGrid.datasetId }} · v{{ selectedGrid.datasetVersion }}</div>
         <div v-if="selectedGrid.row !== undefined || selectedGrid.column !== undefined || selectedGrid.layer !== undefined">
           行列高号：{{ selectedGrid.row ?? '—' }} / {{ selectedGrid.column ?? '—' }} / {{ selectedGrid.layer ?? '—' }}
@@ -4551,13 +4680,31 @@ onBeforeUnmount(() => {
         </div>
         <div>要素类型：{{ gridFeatureTypes(selectedGrid.features) }}</div>
         <div>经纬度：{{ selectedGrid.bounds.west.toFixed(6) }}, {{ selectedGrid.bounds.south.toFixed(6) }} ～ {{ selectedGrid.bounds.east.toFixed(6) }}, {{ selectedGrid.bounds.north.toFixed(6) }}</div>
-        <div>高度：{{ selectedGrid.bounds.bottom.toFixed(2) }} ～ {{ selectedGrid.bounds.top.toFixed(2) }} m</div>
+        <div>{{ selectedGrid.overviewSegmentCount ? '当前段高度' : '高度' }}：{{ selectedGrid.bounds.bottom.toFixed(2) }} ～ {{ selectedGrid.bounds.top.toFixed(2) }} m</div>
+        <div v-if="selectedGrid.overviewSegmentCount">整列高度：{{ selectedGrid.overviewColumnBottom.toFixed(2) }} ～ {{ selectedGrid.overviewColumnTop.toFixed(2) }} m</div>
         <div class="selected-grid-features">关联要素（{{ selectedGrid.features.length }}）</div>
+        <div v-if="selectedGrid.featuresLoading">正在加载航图要素属性…</div>
+        <div v-else-if="selectedGrid.featuresError" role="alert">
+          {{ selectedGrid.featuresError }}
+          <button type="button" @click="selectGridDetail(selectedGrid)">重试</button>
+        </div>
+        <div v-else-if="!selectedGrid.features.length">该网格范围内暂无关联航图要素。</div>
+        <div v-if="selectedGrid.featuresTruncated">关联映射较多，当前仅显示前 10,000 条映射中的要素。</div>
         <article v-for="feature in selectedGrid.features" :key="`${feature.datasetId}-${feature.featureUid}`" class="selected-grid-feature">
           <b>{{ chartFeatureLabel(feature) }}</b>
+          <span v-if="feature.datasetId">数据集：{{ feature.datasetId }}</span>
+          <span v-if="feature.featureUid">要素编号：{{ feature.featureUid }}</span>
+          <span v-if="feature.featureType">要素分类：{{ feature.featureType }}</span>
           <span v-if="featureBusinessType(feature.properties)">类型：{{ featureBusinessType(feature.properties) }}</span>
           <span>{{ feature.dimensionMode }} · {{ feature.verticalMode || '—' }}</span>
           <span v-if="feature.minHeight !== null && feature.minHeight !== undefined">高度：{{ feature.minHeight }} ～ {{ feature.maxHeight }} m</span>
+          <dl v-if="feature.properties && Object.keys(feature.properties).length" class="grid-property-list">
+            <div v-for="(value, key) in feature.properties" :key="key" class="grid-property-row">
+              <dt>{{ key }}</dt>
+              <dd>{{ formatPropertyValue(value) }}</dd>
+            </div>
+          </dl>
+          <span v-else class="grid-property-empty">暂无附加属性</span>
         </article>
       </section>
       <section v-if="selectedLod13Feature" class="selected-grid-detail">
@@ -4622,7 +4769,7 @@ onBeforeUnmount(() => {
         <div class="toggle-switch" :class="{ active: showLod13 }">
           <div class="toggle-slider" />
         </div>
-        <span class="base-layer-current">{{ selectedLod13Dataset().label }}</span>
+        <span class="base-layer-current">{{ selectedLod13Dataset()?.label || '加载中...' }}</span>
         <svg class="base-layer-chevron" :class="{ open: showLod13Panel }" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" @click.stop="showLod13Panel = !showLod13Panel">
           <polyline points="6 9 12 15 18 9" />
         </svg>
@@ -5064,6 +5211,32 @@ onBeforeUnmount(() => {
   padding: 5px;
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.06);
+  overflow-wrap: anywhere;
+}
+
+.grid-property-list {
+  margin: 6px 0 0;
+}
+
+.grid-property-row {
+  display: grid;
+  grid-template-columns: minmax(60px, 35%) minmax(0, 1fr);
+  gap: 8px;
+  padding: 4px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.grid-property-row dt {
+  color: #93c5fd;
+}
+
+.grid-property-row dd {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.grid-property-empty {
+  color: rgba(255, 255, 255, 0.55);
 }
 
 .selected-grid-feature pre {

@@ -552,7 +552,7 @@ export function exportBuildingModelJSON(buildings, outputPath = 'deqing/deqing-b
     metadata: {
       source: 'deqing shp/dbf',
       buildingCount: buildings.length,
-      coordinateSystem: 'WGS84',
+      coordinateSystem: 'CGCS2000 (EPSG:4490)',
       heightUnit: 'meter',
       generatedAt: new Date().toISOString(),
     },

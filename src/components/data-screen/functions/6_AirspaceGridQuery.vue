@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { ZoomIn, Loader2 } from 'lucide-vue-next'
 import { errorMessage } from '../../../utils/http'
+import { getGridVisualStyle } from '../../../utils/cesium/gridVisualStyle'
 import {
   activeTrueAltitudeDatasets,
   buildTrueAltitudeRegionPayload,
@@ -9,7 +10,6 @@ import {
   toAirspaceMapCells,
 } from '../../../utils/trueAltitudeGrid'
 import {
-  CHART_GRID_LEVEL,
   CHART_DATASETS,
   CHART_DATASET_TREE,
   chartFeatureColor,
@@ -35,6 +35,7 @@ const props = defineProps({
 const emit = defineEmits(['close', 'showPoint', 'showGrid', 'get-view-bounds'])
 const chartMode = computed(() => props.functionName === '航图要素网格查询')
 const trueAltitudeMode = computed(() => props.functionName === '真高空域网格查询')
+const trueAltitudeDatasetMode = computed(() => trueAltitudeMode.value || chartMode.value)
 
 /** 高度快选：100, 200, 300, 400, 500, 600 */
 const heightPresetOptions = [100, 200, 300, 400, 500, 600]
@@ -129,7 +130,6 @@ function setNodeSelected(node, checked) {
 
 watch(chartMode, (active) => {
   if (!active) return
-  airspaceGridForm.level = CHART_GRID_LEVEL
   if (airspaceGridForm.top > 300) airspaceGridForm.top = 300
 }, { immediate: true })
 
@@ -139,6 +139,7 @@ const selectedTrueAltitudeDataset = computed(() =>
 
 function applyTrueAltitudeDataset(dataset) {
   if (!dataset) return
+  // 数据集层级只作为默认值；航图模式允许用户按实际 Feature 层级调整。
   airspaceGridForm.level = Number(dataset.activeLevel)
   if (Number.isFinite(Number(dataset.minAgl))) airspaceGridForm.minAgl = Number(dataset.minAgl)
   if (Number.isFinite(Number(dataset.maxAgl))) airspaceGridForm.maxAgl = Number(dataset.maxAgl)
@@ -152,9 +153,14 @@ async function loadTrueAltitudeDatasets() {
     const response = await fetch('/api/true-altitude-airspace/datasets')
     if (!response.ok) throw new Error(await errorMessage(response, `数据集加载失败，状态码 ${response.status}`))
     const body = await response.json()
-    const datasets = Array.isArray(body?.data?.datasets) ? body.data.datasets : []
+    const datasets = Array.isArray(body?.data?.datasets)
+      ? body.data.datasets
+      : (Array.isArray(body?.datasets) ? body.datasets : [])
     trueAltitudeDatasets.value = activeTrueAltitudeDatasets(body)
-    if (!trueAltitudeDatasets.value.some(dataset => dataset.datasetId === airspaceGridForm.datasetId)) {
+    const hasSelectedDataset = trueAltitudeDatasets.value.some(
+      dataset => dataset.datasetId === airspaceGridForm.datasetId,
+    )
+    if (!hasSelectedDataset && (!chartMode.value || !airspaceGridForm.datasetId)) {
       airspaceGridForm.datasetId = trueAltitudeDatasets.value[0]?.datasetId || ''
     }
     applyTrueAltitudeDataset(selectedTrueAltitudeDataset.value)
@@ -173,7 +179,7 @@ watch(() => airspaceGridForm.datasetId, () => {
   applyTrueAltitudeDataset(selectedTrueAltitudeDataset.value)
 })
 
-watch(trueAltitudeMode, (active) => {
+watch(trueAltitudeDatasetMode, (active) => {
   if (active) loadTrueAltitudeDatasets()
 }, { immediate: true })
 
@@ -240,6 +246,7 @@ async function buildDisplayedCells(rawGrids, signal) {
       ...cell,
       color: chartFeatureColor(primaryFeature),
       description: featureDescription(cell, features),
+      features,
       chartFeatures,
     }]
   })
@@ -325,6 +332,7 @@ async function queryAndRenderTrueAltitudePages(basePayload, controller, options 
     queryStats.value = {
       total,
       displayed,
+      rendered: displayed,
       sourceLevel: data?.data?.sourceLevel,
       renderLevel: data?.data?.renderLevel,
       lod: data?.data?.lod === true,
@@ -337,13 +345,16 @@ async function queryAndRenderTrueAltitudePages(basePayload, controller, options 
     }
 
     if (cells.length > 0) {
+      const visualStyle = getGridVisualStyle(displayed, data?.data?.lod === true)
       emit('showGrid', {
         cells,
         level: Number(data?.data?.renderLevel ?? basePayload.level),
         runtime,
         renderer: 'instanced',
-        fillAlpha: data?.data?.lod === true ? 0.08 : 0.18,
-        outlineAlpha: data?.data?.lod === true ? 0.65 : 0.85,
+        fillAlpha: visualStyle.fillAlpha,
+        outlineAlpha: visualStyle.outlineAlpha,
+        distanceFadeMinAlpha: visualStyle.distanceFadeMinAlpha,
+        denseOutline: displayed >= 3000,
         append: mixed ? false : pageIndex > 0,
         skipFlyTo: options.skipFlyTo === true || pageIndex > 0,
       })
@@ -363,7 +374,13 @@ async function queryAndRenderTrueAltitudePages(basePayload, controller, options 
 
   gridsData.value = []
   totalCount = total
-  return { data: lastData, total, displayed, runtime: performance.now() - startedAt }
+  return {
+    data: lastData,
+    total,
+    displayed,
+    rendered: queryStats.value?.rendered ?? displayed,
+    runtime: performance.now() - startedAt,
+  }
 }
 
 /**
@@ -375,7 +392,7 @@ async function onViewBoundsChanged(bounds) {
   if (!dynamicZoomEnabled.value) return
   if (!bounds) return
   if (chartMode.value && selectedDatasetIds.value.length === 0) return
-  if (trueAltitudeMode.value && !airspaceGridForm.datasetId) return
+  if (trueAltitudeDatasetMode.value && !airspaceGridForm.datasetId) return
 
   // 1. 取消上一次未完成的请求（避免旧响应覆盖新响应）
   if (abortController) {
@@ -386,7 +403,7 @@ async function onViewBoundsChanged(bounds) {
   abortController = controller
 
   // 2. 使用用户手动设置的层级（不做自动映射，尊重用户选择）
-  const queryLevel = chartMode.value ? CHART_GRID_LEVEL : (Number(airspaceGridForm.level) || 12)
+  const queryLevel = Number(airspaceGridForm.level)
 
   dynamicLoading.value = true
   error.value = ''
@@ -413,7 +430,9 @@ async function onViewBoundsChanged(bounds) {
       maxAgl: Number(airspaceGridForm.maxAgl),
       level: queryLevel,
     }) : {
-      airspaceId: airspaceGridForm.airspaceId.trim(),
+      ...(chartMode.value
+        ? { datasetId: airspaceGridForm.datasetId }
+        : { airspaceId: airspaceGridForm.airspaceId.trim() }),
       polygon,
       bottom: chartMode.value ? Math.max(Number(airspaceGridForm.bottom) || 0, 0) : (Number(airspaceGridForm.bottom) || 0),
       top: chartMode.value ? Math.min(Number(airspaceGridForm.top) || 300, 300) : (Number(airspaceGridForm.top) || 600),
@@ -468,6 +487,15 @@ async function onViewBoundsChanged(bounds) {
         total: chartMode.value ? cells.length : totalCount,
         status: data?.success === true ? 'success' : (data?.status || 'unknown'),
       }
+      if (chartMode.value) {
+        chartSummary.value = {
+          ...chartSummary.value,
+          baseDatasetId: data?.data?.datasetId || airspaceGridForm.datasetId,
+          baseDatasetVersion: data?.data?.datasetVersion,
+          mappings: Number(data?.data?.mappingCount) || 0,
+          truncated: data?.data?.truncated === true,
+        }
+      }
       emit('showGrid', { cells, level: queryLevel, runtime, skipFlyTo: true })
     } else {
       gridsData.value = []
@@ -490,7 +518,7 @@ function toggleDynamicZoom() {
     error.value = '请至少勾选一种航图要素'
     return
   }
-  if (!dynamicZoomEnabled.value && trueAltitudeMode.value && !airspaceGridForm.datasetId) {
+  if (!dynamicZoomEnabled.value && trueAltitudeDatasetMode.value && !airspaceGridForm.datasetId) {
     error.value = '请选择已激活的真高数据集'
     return
   }
@@ -579,6 +607,10 @@ async function submitAirspaceGridQuery() {
     error.value = '请输入有效的层级'
     return
   }
+  if (chartMode.value && (Number(airspaceGridForm.level) < 1 || Number(airspaceGridForm.level) > 21)) {
+    error.value = '航图查询层级必须在 1–21 之间'
+    return
+  }
 
   // 验证边界参数
   if (airspaceGridForm.minLon === null || airspaceGridForm.maxLon === null ||
@@ -587,12 +619,12 @@ async function submitAirspaceGridQuery() {
     return
   }
 
-  if (trueAltitudeMode.value && !airspaceGridForm.datasetId) {
+  if (trueAltitudeDatasetMode.value && !airspaceGridForm.datasetId) {
     error.value = '请选择已激活的真高数据集'
     return
   }
-  // 普通空域和航图查询仍使用 airspaceId
-  if (!trueAltitudeMode.value && (!airspaceGridForm.airspaceId || airspaceGridForm.airspaceId.trim() === '')) {
+  // 只有旧版普通空域查询继续使用 airspaceId。
+  if (!trueAltitudeDatasetMode.value && (!airspaceGridForm.airspaceId || airspaceGridForm.airspaceId.trim() === '')) {
     error.value = '请输入空域ID'
     return
   }
@@ -617,10 +649,17 @@ async function submitAirspaceGridQuery() {
       error.value = '真高范围必须满足 0 ≤ 最低真高 ≤ 最高真高'
       return
     }
+  } else {
+    const bottom = Number(airspaceGridForm.bottom)
+    const top = Number(airspaceGridForm.top)
+    if (!Number.isFinite(bottom) || !Number.isFinite(top) || bottom > top) {
+      error.value = '海拔范围必须满足最低高度 ≤ 最高高度'
+      return
+    }
   }
 
   // 估算格网数量，超过阈值时预警
-  const queryLevel = chartMode.value ? CHART_GRID_LEVEL : Number(airspaceGridForm.level)
+  const queryLevel = Number(airspaceGridForm.level)
   const estimatedCells = estimateCellCount(minLon, maxLon, minLat, maxLat, queryLevel)
   const WARN_THRESHOLD = 50000
   if (!chartMode.value && !trueAltitudeMode.value && estimatedCells > WARN_THRESHOLD) {
@@ -654,7 +693,9 @@ async function submitAirspaceGridQuery() {
       maxAgl: Number(airspaceGridForm.maxAgl),
       level: queryLevel,
     }) : {
-      airspaceId: airspaceGridForm.airspaceId.trim(),
+      ...(chartMode.value
+        ? { datasetId: airspaceGridForm.datasetId }
+        : { airspaceId: airspaceGridForm.airspaceId.trim() }),
       polygon: polygon,
       bottom: chartMode.value ? Math.max(Number(airspaceGridForm.bottom) || 0, 0) : (Number(airspaceGridForm.bottom) || 0),
       top: chartMode.value ? Math.min(Number(airspaceGridForm.top) || 300, 300) : (Number(airspaceGridForm.top) || 600),
@@ -713,9 +754,8 @@ async function submitAirspaceGridQuery() {
     console.log('[空域网格查询] 原始返回:', data)
     if (chartMode.value) {
       console.info('[航图专题网格诊断]', {
-        airspaceId: data?.data?.airspaceId,
-        version: data?.data?.version,
-        airspaceVersion: data?.data?.airspaceVersion,
+        datasetId: data?.data?.datasetId,
+        datasetVersion: data?.data?.datasetVersion,
         matchedCount: data?.data?.matchedCount,
         mappingCount: data?.data?.mappingCount,
         truncated: data?.data?.truncated,
@@ -759,6 +799,15 @@ async function submitAirspaceGridQuery() {
       const cells = await buildDisplayedCells(gridsData.value, controller.signal)
 
       queryStats.value.total = chartMode.value ? cells.length : totalCount
+      if (chartMode.value) {
+        chartSummary.value = {
+          ...chartSummary.value,
+          baseDatasetId: data?.data?.datasetId || airspaceGridForm.datasetId,
+          baseDatasetVersion: data?.data?.datasetVersion,
+          mappings: Number(data?.data?.mappingCount) || 0,
+          truncated: data?.data?.truncated === true,
+        }
+      }
 
       console.log('[空域网格查询] 转换后的 cells 前3条:', JSON.stringify(cells.slice(0, 3)))
       emit('showGrid', { cells, level: queryLevel, runtime })
@@ -800,8 +849,7 @@ function clearGrids() {
       <div class="form-group">
         <div class="group-title">层级设置</div>
         <div class="level-row">
-          <div v-if="chartMode" class="fixed-level">Level {{ CHART_GRID_LEVEL }}（航图固定层级）</div>
-          <div v-else-if="trueAltitudeMode" class="fixed-level">
+          <div v-if="trueAltitudeMode" class="fixed-level">
             {{ selectedTrueAltitudeDataset ? `Level ${airspaceGridForm.level}（活动版本固定层级）` : '请先选择数据集' }}
           </div>
           <select
@@ -817,29 +865,45 @@ function clearGrids() {
       </div>
 
       <!-- 真高数据集 -->
-      <div v-if="trueAltitudeMode" class="form-group">
+      <div v-if="trueAltitudeDatasetMode" class="form-group">
         <div class="dataset-title-row">
-          <div class="group-title">真高数据集</div>
+          <div class="group-title">{{ chartMode ? '真高空域基底' : '真高数据集' }}</div>
           <button type="button" class="dataset-refresh" :disabled="datasetLoading" @click="loadTrueAltitudeDatasets">
             {{ datasetLoading ? '加载中...' : '刷新' }}
           </button>
         </div>
-        <select v-model="airspaceGridForm.datasetId" class="level-select" :disabled="datasetLoading">
+        <input
+          v-if="chartMode"
+          v-model.trim="airspaceGridForm.datasetId"
+          list="true-altitude-dataset-options"
+          type="text"
+          class="airspace-id-input"
+          placeholder="选择或输入真高空域 datasetId"
+        >
+        <datalist v-if="chartMode" id="true-altitude-dataset-options">
+          <option v-for="dataset in trueAltitudeDatasets" :key="dataset.datasetId" :value="dataset.datasetId">
+            v{{ dataset.activeVersion }} · L{{ dataset.activeLevel }}
+          </option>
+        </datalist>
+        <select v-else v-model="airspaceGridForm.datasetId" class="level-select" :disabled="datasetLoading">
           <option value="" disabled>{{ datasetLoading ? '正在加载数据集' : '选择已激活数据集' }}</option>
           <option v-for="dataset in trueAltitudeDatasets" :key="dataset.datasetId" :value="dataset.datasetId">
             {{ dataset.datasetId }} · v{{ dataset.activeVersion }} · L{{ dataset.activeLevel }}
           </option>
         </select>
         <div v-if="selectedTrueAltitudeDataset" class="dataset-hint">
-          活动版本 v{{ selectedTrueAltitudeDataset.activeVersion }}；可用真高
+          活动版本 v{{ selectedTrueAltitudeDataset.activeVersion }}；权威层 L{{ selectedTrueAltitudeDataset.activeLevel }}；可用真高
           {{ selectedTrueAltitudeDataset.minAgl ?? 0 }}–{{ selectedTrueAltitudeDataset.maxAgl ?? '—' }} m
         </div>
         <div v-if="datasetError" class="error-box dataset-error">{{ datasetError }}</div>
-        <label class="dataset-hint">
+        <div v-if="chartMode && !trueAltitudeDatasets.length" class="dataset-hint">
+          未加载到数据集清单时仍可手动输入 datasetId。
+        </div>
+        <label v-if="trueAltitudeMode" class="dataset-hint">
           <input v-model="experimentalMixedResolution" type="checkbox" :disabled="loading || dynamicZoomEnabled" />
           混合多粒度网格（试验，默认关闭）
         </label>
-        <div v-if="experimentalMixedResolution" class="dataset-hint">
+        <div v-if="trueAltitudeMode && experimentalMixedResolution" class="dataset-hint">
           内部粗网格、边界细网格；精确统计继续分页，最多绘制 100,000 个显示网格。关闭可回退原查询。
         </div>
       </div>
@@ -955,7 +1019,7 @@ function clearGrids() {
 
       <!-- 高程/真高参数 -->
       <div class="form-group">
-        <div class="group-title">{{ trueAltitudeMode ? '真高范围（AGL）' : '高程参数' }}</div>
+        <div class="group-title">{{ trueAltitudeMode ? '真高范围（AGL）' : (chartMode ? '海拔范围（MSL）' : '高程参数') }}</div>
         <div class="height-grid">
           <div class="coord-line">
             <span class="coord-label">{{ trueAltitudeMode ? '最低' : '底' }}</span>
@@ -1025,7 +1089,7 @@ function clearGrids() {
         <button
           class="btn-query"
           @click="submitAirspaceGridQuery"
-          :disabled="loading || datasetLoading || (chartMode && !selectedDatasetIds.length) || (trueAltitudeMode && !airspaceGridForm.datasetId)"
+          :disabled="loading || datasetLoading || (chartMode && !selectedDatasetIds.length) || (trueAltitudeDatasetMode && !airspaceGridForm.datasetId)"
         >
           <span>{{ loading ? '查询中...' : (chartMode ? '查询并展示航图要素' : (trueAltitudeMode ? '查询真高网格' : '查询')) }}</span>
         </button>
@@ -1043,13 +1107,14 @@ function clearGrids() {
       <!-- 查询结果 -->
       <div v-if="queryStats" class="result-box">
         <div class="result-row">
-          <span class="result-label">{{ queryStats.countExact ? (queryStats.complete ? '精确命中' : '精确命中（累计）') : (queryStats.lod ? 'LOD覆盖明细' : '原始命中') }}</span>
+          <span class="result-label">{{ queryStats.countExact ? (queryStats.complete ? '精确命中' : '累计命中') : (queryStats.lod ? 'LOD 覆盖' : '原始命中') }}</span>
           <span class="result-num">{{ Number(queryStats.total).toLocaleString() }}</span>
         </div>
         <div v-if="queryStats.lod" class="result-row">
-          <span class="result-label">显示网格</span>
-          <span class="result-num">{{ Number(queryStats.displayed).toLocaleString() }}（{{ queryStats.mixedResolution ? queryStats.levels : `预生成 L${queryStats.renderLevel}` }}，权威层 L{{ queryStats.sourceLevel }}）</span>
+          <span class="result-label">显示节点</span>
+          <span class="result-num">{{ Number(queryStats.displayed).toLocaleString() }}</span>
         </div>
+        <div v-if="queryStats.lod" class="result-meta">{{ queryStats.mixedResolution ? queryStats.levels : `预生成 L${queryStats.renderLevel}` }} · 权威层 L{{ queryStats.sourceLevel }}</div>
         <div v-if="queryStats.displayCoarsened" class="dataset-hint">显示节点已按父层级合并到预算内；区域保持完整概略覆盖，精确命中数仍按 L17 统计。</div>
         <div class="result-row">
           <span class="result-label">状态</span>
@@ -1066,11 +1131,16 @@ function clearGrids() {
 
       <div v-if="chartMode && chartSummary" class="chart-summary">
         <div class="chart-summary-title">航图要素</div>
+        <div v-if="chartSummary.baseDatasetId" class="result-meta">
+          真高基底 {{ chartSummary.baseDatasetId }}<span v-if="chartSummary.baseDatasetVersion != null"> · v{{ chartSummary.baseDatasetVersion }}</span>
+        </div>
         <div class="chart-summary-counts">
           <span>要素网格 <b>{{ chartSummary.grids }}</b></span>
           <span>二维要素 <b>{{ chartSummary.features2D }}</b></span>
           <span>三维要素 <b>{{ chartSummary.features3D }}</b></span>
+          <span>关联映射 <b>{{ chartSummary.mappings }}</b></span>
         </div>
+        <div v-if="chartSummary.truncated" class="chart-warning">结果达到显示上限，请缩小视域或减少勾选要素。</div>
         <div v-if="chartSummary.datasets.length" class="theme-legend">
           <span v-for="dataset in chartSummary.datasets" :key="dataset.id">
             <i :style="{ background: dataset.color }" />{{ dataset.label }}
@@ -1574,34 +1644,51 @@ function clearGrids() {
 /* 结果区 */
 .result-box {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid #dbe4ec;
+  border-radius: 8px;
+  background: #f8fafc;
 }
 
 .result-row {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px;
-  border: 1px solid #ddd;
-  background: #f9f9f9;
+  display: grid;
+  grid-template-columns: minmax(88px, auto) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 12px;
 }
 
 .result-label {
   font-size: 13px;
   color: #64748b;
+  white-space: nowrap;
 }
 
 .result-num {
-  font-size: 18px;
+  min-width: 0;
+  font-size: 16px;
   font-weight: 600;
   color: #334155;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  word-break: keep-all;
+}
+
+.result-meta {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: right;
+  white-space: normal;
+  word-break: keep-all;
 }
 
 .result-status {
   font-size: 15px;
   font-weight: 600;
   color: #c00;
+  text-align: right;
 }
 
 .result-status.success {
@@ -1621,6 +1708,16 @@ function clearGrids() {
   color: #0c4a6e;
   font-size: 14px;
   font-weight: 600;
+}
+
+.chart-warning {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #fff7ed;
+  color: #c2410c;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .chart-summary-counts,

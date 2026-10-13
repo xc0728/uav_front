@@ -1,6 +1,5 @@
 import { errorMessage } from './http.js'
 
-export const CHART_GRID_LEVEL = 16
 export const CHART_THEMES = [
   'air_route',
   'vertiport',
@@ -14,44 +13,39 @@ export const CHART_THEMES = [
   'administrative',
   'structure',
   'communication',
+  'surveillance',
   'landuse',
   'landcover',
 ]
 
 export const CHART_DATASETS = [
-  ['route_l1_north_south_120', '航路网航路南北向L1真高120', 'air_route', '#06b6d4'],
-  ['route_l1_east_west_170', '航路网航路东西向L1真高170', 'air_route', '#3b82f6'],
-  ['route_l2_north_south_220', '航路网航路南北向L2真高220', 'air_route', '#6366f1'],
-  ['route_l2_northwest_270', '航路网航路西北向L2真高270', 'air_route', '#8b5cf6'],
-  ['route_node_departure_net1', '航路网1离场点', 'air_route', '#22d3ee'],
-  ['route_node_arrival_net2', '航路网2进场点', 'air_route', '#60a5fa'],
-  ['route_node_entry_net3', '航路网3进入点', 'air_route', '#818cf8'],
-  ['route_node_entry_net4', '航路网4进入点', 'air_route', '#a78bfa'],
-  ['route_node_waypoint_net6', '航路网6航路点', 'air_route', '#c084fc'],
-  ['route_ramp_same_level', '航路网同层路口匝道', 'air_route', '#14b8a6'],
-  ['route_ramp_cross_level', '航路网异层匝道', 'air_route', '#f97316'],
-  ['route_uturn_bidirectional', '航路网双向掉头连接', 'air_route', '#ec4899'],
-  ['route_takeoff_landing_points', '航路网起降点', 'vertiport', '#22c55e'],
-  ['route_takeoff_landing_connectors', '航路网起降点线', 'vertiport', '#84cc16'],
-  ['prohibited_airspace', '禁止性管制空域', 'airspace', '#ef4444'],
-  ['flight_obstacles', '空间限制设施（障碍物）', 'obstacle', '#f97316'],
-  ['utility_power_poles', '电杆', 'utility', '#a855f7'],
-  ['utility_power_lines', '输电线', 'utility', '#d946ef'],
-  ['road_and_facilities', '道路及附属设施', 'road', '#eab308'],
-  ['landcover_bare_surface', '裸露地表', 'landcover', '#a16207'],
-  ['landuse_unused_land', '未利用地', 'landuse', '#78716c'],
-  ['landuse_artificial_excavation', '人工堆掘地', 'landuse', '#b45309'],
-  ['landcover_forest_grass', '林草覆盖', 'landcover', '#16a34a'],
-  ['landuse_cultivated_land', '种植土地', 'landuse', '#65a30d'],
-  ['landuse_construction_land', '建设用地', 'landuse', '#64748b'],
-  ['water_ponds', '水塘', 'water', '#0ea5e9'],
-  ['water_lake_points', '湖泊位置点', 'water', '#2563eb'],
-  ['admin_county_areas', '县级行政区', 'admin', '#7c3aed'],
-  ['admin_township_areas', '乡镇级行政区', 'admin', '#a78bfa'],
-  ['structure_bridge_lines', '桥隧设施线', 'structure', '#475569'],
-  ['utility_fire_hydrants', '消防设施', 'utility', '#dc2626'],
-  ['transport_road_service_facilities', '道路交通服务设施', 'transport', '#f59e0b'],
-  ['communication_facilities', '通信设施', 'communication', '#db2777'],
+  ['deqing_chart_l17_takeoff_points', '起降点', 'vertiport', '#22c55e'],
+  ['deqing_chart_l17_surveillance_points', '监控设施', 'surveillance', '#ef4444'],
+  ['deqing_chart_l17_rail_facility_points', '铁路服务设施点', 'transport', '#f59e0b'],
+  ['deqing_chart_l17_water_extension_points', '水系附属点', 'water', '#38bdf8'],
+  ['deqing_chart_l17_road_facility_points', '道路服务设施点', 'transport', '#f97316'],
+  ['deqing_chart_l17_landcover_extension_lines', '地表覆盖附属线', 'landcover', '#84cc16'],
+  ['deqing_chart_l17_water_facility_lines', '水利设施线', 'water', '#0ea5e9'],
+  ['deqing_chart_l17_rail_facility_lines', '铁路服务设施线', 'transport', '#d97706'],
+  ['deqing_chart_l17_road_facility_lines', '道路服务设施线', 'transport', '#eab308'],
+  ['deqing_chart_l17_artificial_structures', '人工构筑物', 'structure', '#64748b'],
+  ['deqing_chart_l17_structure_attachments', '构筑物附属面', 'structure', '#475569'],
+  ['deqing_chart_l17_landuse_extensions', '土地利用附属面', 'landuse', '#a16207'],
+  ['deqing_chart_l17_unused_land', '未利用地', 'landuse', '#78716c'],
+  ['deqing_chart_l17_agricultural_land', '农业用地', 'landuse', '#65a30d'],
+  ['deqing_chart_l17_cultivated_land', '种植土地', 'landuse', '#16a34a'],
+  ['deqing_chart_l17_road_extensions', '道路附属面', 'road', '#facc15'],
+  ['deqing_chart_l17_road_junctions', '道路交叉口', 'road', '#f59e0b'],
+  ['deqing_chart_l17_roundabouts', '环岛', 'road', '#fb923c'],
+  ['deqing_chart_l17_road_facility_areas', '道路服务设施面', 'transport', '#ea580c'],
+  ['deqing_chart_l17_hydropower_plants', '水电站', 'utility', '#a855f7'],
+  ['deqing_chart_l17_hydraulic_structures', '水工构筑物', 'water', '#06b6d4'],
+  ['deqing_chart_l17_reservoir_extensions', '水库水塘附属面', 'water', '#0284c7'],
+  ['deqing_chart_l17_river_lake_extensions', '河流湖泊附属面', 'water', '#2563eb'],
+  ['deqing_chart_l17_water_extensions', '水系附属面', 'water', '#3b82f6'],
+  ['deqing_chart_l17_ponds', '水塘', 'water', '#0ea5e9'],
+  ['deqing_chart_l17_rivers', '河流', 'water', '#1d4ed8'],
+  ['deqing_chart_l17_lakes', '湖泊', 'water', '#4f46e5'],
 ].map(([id, label, theme, color]) => ({ id, label, theme, color }))
 
 const DATASETS_BY_ID = Object.fromEntries(CHART_DATASETS.map(dataset => [dataset.id, dataset]))
@@ -61,11 +55,13 @@ const THEME_LABELS = {
   utility: '市政设施', transport: '交通设施', road: '道路', water: '水体',
   admin: '行政区划', administrative: '行政区划', landuse: '土地利用', landcover: '地表覆盖',
   structure: '构筑物', communication: '通信设施',
+  surveillance: '监控设施',
 }
 
 const TREE_GROUPS = [
   ['aeronautical', '航空要素', ['air_route', 'vertiport']],
   ['airspace_safety', '空域安全', ['airspace', 'obstacle']],
+  ['surveillance', '监控设施', ['surveillance']],
   ['infrastructure', '城市基础设施', ['utility', 'transport', 'road', 'structure', 'communication']],
   ['geography', '自然与地表', ['water', 'landuse', 'landcover']],
   ['administration', '行政区划', ['admin']],
@@ -97,7 +93,7 @@ const MAX_CONCURRENCY = 4
 const MAX_REGION_SPLIT_DEPTH = 6
 
 export async function queryChartRegion(payload, { signal } = {}) {
-  const body = { ...payload, level: CHART_GRID_LEVEL }
+  const body = { ...payload }
   if (!body.datasetIds?.length && !body.featureTypes?.length && !body.themes?.length) body.themes = CHART_THEMES
   const response = await fetch('/api/static-features/region/grids', {
     method: 'POST',
@@ -186,24 +182,26 @@ async function postGridFeatures(payload, signal) {
   return response.json()
 }
 
-export async function queryChartFeatures(cells, { signal } = {}) {
+export async function queryChartFeatures(cells, { signal, includeRelatedLevels = false } = {}) {
   const groups = new Map()
   for (const cell of cells) {
     const code = String(cell.code || '')
+    const level = Number(cell.level ?? String(code).replace(/^dqg/, '').length)
     const bottom = Number(cell.bounds?.bottom)
     const top = Number(cell.bounds?.top)
-    if (!code || !Number.isFinite(bottom) || !Number.isFinite(top) || bottom >= top) continue
-    const key = `${bottom}\u0000${top}`
-    if (!groups.has(key)) groups.set(key, { bottom, top, codes: new Set() })
+    if (!code || !Number.isInteger(level) || !Number.isFinite(bottom) || !Number.isFinite(top) || bottom >= top) continue
+    const key = `${level}\u0000${bottom}\u0000${top}`
+    if (!groups.has(key)) groups.set(key, { level, bottom, top, codes: new Set() })
     groups.get(key).codes.add(code)
   }
 
-  const jobs = [...groups.values()].flatMap(({ bottom, top, codes }) =>
+  const jobs = [...groups.values()].flatMap(({ level, bottom, top, codes }) =>
     chunks([...codes], MAX_CODES_PER_REQUEST).map(batch => ({
-      level: CHART_GRID_LEVEL,
+      level,
       codes: batch,
       bottom,
       top,
+      ...(includeRelatedLevels ? { includeRelatedLevels: true } : {}),
     })),
   )
   const responses = new Array(jobs.length)
@@ -218,8 +216,9 @@ export async function queryChartFeatures(cells, { signal } = {}) {
   return responses.reduce((result, response) => {
     result.features2D.push(...(response?.data?.features2D || []))
     result.features3D.push(...(response?.data?.features3D || []))
+    result.truncated ||= response?.data?.truncated === true
     return result
-  }, { features2D: [], features3D: [] })
+  }, { features2D: [], features3D: [], truncated: false })
 }
 
 

@@ -161,7 +161,7 @@ const trueAltForm = ref({
   sourceTable: 'demgrid',
   description: '',
   polygon: '',
-  level: 15,
+  level: 17,
   minAgl: 0,
   maxAgl: 600,
   showAdvanced: false,
@@ -203,8 +203,8 @@ function validateTrueAltitude(key) {
     else if (v.length > 128) e.datasetId = '长度不能超过 128 个字符'
   }
   if (!isBlank(f.sourceTable) && !DEM_TABLE_RE.test(String(f.sourceTable).trim())) e.sourceTable = '表名格式：demgrid 或 demgrid_<层级>'
-  const lv = intCheck(f.level, '网格层级', 1, 21)
-  if (lv) e.level = lv
+  const lv = intCheck(f.level, '网格层级', 17, 17)
+  if (lv) e.level = '真高权威明细固定使用 L17；L16-L10 显示层级自动生成'
   const mn = numCheck(f.minAgl, '最低真高', 0, 100000)
   if (mn) e.minAgl = mn
   const mx = numCheck(f.maxAgl, '最高真高', 0, 100000)
@@ -222,7 +222,7 @@ function validateTrueAltitude(key) {
     if (bs) e.batchSize = bs
     const ct = intCheck(f.computeThreads, '计算线程数', 0)
     if (ct) e.computeThreads = ct
-    const io = intCheck(f.maxConcurrentIo, '最大并发 IO', 1)
+    const io = intCheck(f.maxConcurrentIo, '最大并发 IO', 1, 64)
     if (io) e.maxConcurrentIo = io
     if (!isBlank(f.resumeVersion)) {
       const rv = intCheck(f.resumeVersion, '续跑版本号', 1)
@@ -1079,7 +1079,7 @@ onBeforeUnmount(() => {
       <!-- DEM 地面网格 -->
       <section v-show="activeTab === 'dem'" class="storage-card">
         <div class="card-title">DEM 地面网格构建</div>
-        <p class="card-desc">流式读取 EPSG:4326 单波段 DEM GeoTIFF，按目标 DQG 网格中心双线性采样并批量写入 PostgreSQL。相同 buildId 可从检查点继续。</p>
+        <p class="card-desc">流式读取 GDAL 可识别且可转换到 EPSG:4490 的单波段 DEM GeoTIFF，按目标 DQG 网格中心双线性采样并批量写入 PostgreSQL。相同 buildId 可从检查点继续。</p>
 
         <div class="form-grid">
           <div class="form-field" :class="{ 'has-error': errors.buildId }">
@@ -1205,8 +1205,8 @@ onBeforeUnmount(() => {
             <span v-if="errors.sourceTable" class="field-error">{{ errors.sourceTable }}</span>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.level }">
-            <label>网格层级（1-21）</label>
-            <input v-model.number="trueAltForm.level" type="number" min="1" max="21" @blur="validateField('level')" />
+            <label>网格层级（权威明细固定 L17；L16-L10 自动生成）</label>
+            <input v-model.number="trueAltForm.level" type="number" min="17" max="17" readonly @blur="validateField('level')" />
             <span v-if="errors.level" class="field-error">{{ errors.level }}</span>
           </div>
           <div class="form-field">
@@ -1265,8 +1265,8 @@ onBeforeUnmount(() => {
             <span v-if="errors.computeThreads" class="field-error">{{ errors.computeThreads }}</span>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.maxConcurrentIo }">
-            <label>最大并发 IO</label>
-            <input v-model.number="trueAltForm.maxConcurrentIo" type="number" min="1" @blur="validateField('maxConcurrentIo')" />
+            <label>最大并发 IO（1-64）</label>
+            <input v-model.number="trueAltForm.maxConcurrentIo" type="number" min="1" max="64" @blur="validateField('maxConcurrentIo')" />
             <span v-if="errors.maxConcurrentIo" class="field-error">{{ errors.maxConcurrentIo }}</span>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.resumeVersion }">

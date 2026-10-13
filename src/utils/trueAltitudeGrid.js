@@ -1,8 +1,19 @@
 export function activeTrueAltitudeDatasets(body) {
-  const datasets = Array.isArray(body?.data?.datasets) ? body.data.datasets : []
-  return datasets.filter(dataset =>
-    dataset?.activeVersion != null && Number.isInteger(Number(dataset?.activeLevel)),
-  )
+  const datasets = Array.isArray(body?.data?.datasets)
+    ? body.data.datasets
+    : (Array.isArray(body?.datasets) ? body.datasets : [])
+  return datasets
+    .map(dataset => ({
+      ...dataset,
+      datasetId: dataset?.datasetId ?? dataset?.dataset_id ?? '',
+      activeVersion: dataset?.activeVersion ?? dataset?.active_version ?? null,
+      activeLevel: dataset?.activeLevel ?? dataset?.active_level ?? dataset?.level ?? null,
+      minAgl: dataset?.minAgl ?? dataset?.min_agl ?? null,
+      maxAgl: dataset?.maxAgl ?? dataset?.max_agl ?? null,
+    }))
+    .filter(dataset =>
+      dataset.datasetId && dataset.activeVersion != null && Number.isInteger(Number(dataset.activeLevel)),
+    )
 }
 
 export function buildTrueAltitudeRegionPayload({
@@ -145,4 +156,92 @@ export function compactMixedDisplayCells(existing, incoming, target = 100000, mi
   }
   cells.sort((a, b) => a.code.localeCompare(b.code))
   return { cells, coarsened }
+}
+
+function horizontalColumnKey(cell) {
+  const bounds = cell?.bounds || {}
+  const coordinate = value => Number(value).toFixed(12)
+  return [
+    cell?.datasetId ?? '',
+    cell?.datasetVersion ?? '',
+    cell?.level ?? '',
+    coordinate(bounds.west),
+    coordinate(bounds.south),
+    coordinate(bounds.east),
+    coordinate(bounds.north),
+  ].join('|')
+}
+
+/**
+ * 将同一水平格网的多个高度层折叠为一根显示列。
+ * 该函数只减少前端绘制边线，不改变查询命中数，也不参与业务聚合。
+ */
+export function collapseVerticalGridColumns(existing, incoming) {
+  const columns = new Map()
+
+  for (const source of [...existing, ...incoming]) {
+    if (!source?.bounds) continue
+    const key = horizontalColumnKey(source)
+    const current = columns.get(key)
+    const sourceDisplayCount = Number(source.overviewCellCount) || 1
+    const sourceCellCount = Number(source.sourceCellCount) || 1
+    if (current) {
+      current.bounds.bottom = Math.min(current.bounds.bottom, source.bounds.bottom)
+      current.bounds.top = Math.max(current.bounds.top, source.bounds.top)
+      current.overviewCellCount += sourceDisplayCount
+      current.sourceCellCount += sourceCellCount
+      continue
+    }
+
+    columns.set(key, {
+      ...source,
+      bounds: { ...source.bounds },
+      center: null,
+      z: undefined,
+      groundElevation: undefined,
+      minAgl: undefined,
+      maxAgl: undefined,
+      aglBottom: undefined,
+      aglTop: undefined,
+      aglCenter: undefined,
+      overviewColumn: true,
+      overviewCellCount: sourceDisplayCount,
+      sourceCellCount,
+    })
+  }
+
+  return [...columns.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, column]) => column)
+}
+
+/**
+ * 将一根概览列均匀切成少量显示段，以有限横线恢复高度层次感。
+ * 分段仍然只是显示表达，不代表业务高度层边界。
+ */
+export function segmentVerticalGridColumns(columns, targetSegments = 4) {
+  const limit = Math.max(1, Math.floor(Number(targetSegments) || 1))
+  return columns.flatMap(column => {
+    const bottom = Number(column?.bounds?.bottom)
+    const top = Number(column?.bounds?.top)
+    const sourceLayers = Math.max(1, Math.floor(Number(column?.overviewCellCount) || 1))
+    const segmentCount = Math.min(limit, sourceLayers)
+    if (segmentCount <= 1 || !Number.isFinite(bottom) || !Number.isFinite(top) || top <= bottom) {
+      return [column]
+    }
+
+    const span = top - bottom
+    return Array.from({ length: segmentCount }, (_, index) => ({
+      ...column,
+      bounds: {
+        ...column.bounds,
+        bottom: bottom + span * index / segmentCount,
+        top: bottom + span * (index + 1) / segmentCount,
+      },
+      overviewSegmentIndex: index + 1,
+      overviewSegmentCount: segmentCount,
+      overviewColumnBottom: bottom,
+      overviewColumnTop: top,
+    }))
+  })
 }
