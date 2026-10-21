@@ -1,3 +1,23 @@
+export const TRUE_ALTITUDE_QUERY_MODE = Object.freeze({
+  LOD: 'lod',
+  HIGHEST_RESOLUTION: 'highest-resolution',
+})
+
+/**
+ * 真高区域查询的显示精度参数。
+ * 最高精度模式必须完全省略 LOD 参数，令后端直接查询数据集权威层。
+ */
+export function trueAltitudeQueryOptions(
+  mode,
+  { renderTargetCells = 100000, experimentalMixedResolution = false } = {},
+) {
+  if (mode !== TRUE_ALTITUDE_QUERY_MODE.LOD) return {}
+  return {
+    renderTargetCells: Number(renderTargetCells),
+    ...(experimentalMixedResolution ? { experimentalMixedResolution: true } : {}),
+  }
+}
+
 export function activeTrueAltitudeDatasets(body) {
   const datasets = Array.isArray(body?.data?.datasets)
     ? body.data.datasets
@@ -26,6 +46,7 @@ export function buildTrueAltitudeRegionPayload({
   pageSize = 50000,
   cursor,
   renderTargetCells,
+  attributeCode,
   experimentalMixedResolution = false,
 }) {
   const payload = {
@@ -39,6 +60,7 @@ export function buildTrueAltitudeRegionPayload({
   if (datasetVersion != null) payload.datasetVersion = Number(datasetVersion)
   if (cursor) payload.cursor = cursor
   if (renderTargetCells != null) payload.renderTargetCells = Number(renderTargetCells)
+  if (attributeCode) payload.attributeCode = attributeCode
   if (experimentalMixedResolution) payload.experimentalMixedResolution = true
   return payload
 }
@@ -49,9 +71,17 @@ export function toAirspaceMapCells(rawGrids) {
     .map(cell => {
       const grid = cell?.data?.grid || cell
       const bounds = grid.bounds
+      const code = String(grid.code || cell.code || '')
+      const rawLevel = grid.level ?? cell.level
+      const explicitLevel = Number(rawLevel)
+      const normalizedCode = code.replace(/^dqg/, '')
+      const level = rawLevel !== null && rawLevel !== undefined && rawLevel !== ''
+        && Number.isInteger(explicitLevel) && explicitLevel >= 0 && explicitLevel <= 21
+        ? explicitLevel
+        : (/^[0-7]+$/.test(normalizedCode) ? normalizedCode.length : null)
       return {
-        code: String(grid.code || cell.code || ''),
-        level: grid.level ?? cell.level,
+        code,
+        level,
         x: grid.x ?? grid.column,
         y: grid.y ?? grid.row,
         z: grid.z ?? grid.layer,
@@ -79,6 +109,9 @@ export function toAirspaceMapCells(rawGrids) {
         datasetVersion: grid.dataset_version,
         lod: grid.lod === true,
         sourceCellCount: Number(grid.source_cell_count ?? 1),
+        attributeCode: grid.attributeCode ?? grid.attribute_code ?? null,
+        attributeValue: grid.attributeValue ?? grid.attribute_value ?? null,
+        attributeGrid: Boolean(grid.attributeCode ?? grid.attribute_code),
         features: Array.isArray(cell.features) ? cell.features : null,
       }
     })

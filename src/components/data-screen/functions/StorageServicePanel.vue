@@ -1,6 +1,7 @@
 <script setup>
 import { ref, reactive, computed, onBeforeUnmount } from 'vue'
-import { Loader2, RefreshCw, ChevronDown, ChevronUp, Box, Building2, Mountain, Cloud, Search, Layers, Waypoints, Radar, Wrench } from 'lucide-vue-next'
+import { Loader2, RefreshCw, ChevronDown, ChevronUp, Box, Building2, Mountain, Cloud, Search, Layers, Waypoints, Radar, Wrench, FileSpreadsheet } from 'lucide-vue-next'
+import FeatureDatasetManager from './FeatureDatasetManager.vue'
 
 // ==================== Tab 状态 ====================
 const TABS = [
@@ -9,7 +10,10 @@ const TABS = [
   { id: 'dem', label: 'DEM 地面网格', icon: Mountain },
   { id: 'demClassify', label: 'DEM 地形分类', icon: Layers },
   { id: 'trueAltitude', label: '真高空域剖分', icon: Cloud },
+  { id: 'parquetAttribute', label: 'Parquet 属性导入', icon: FileSpreadsheet },
+  { id: 'fieldResample', label: '多维场重采样', icon: Cloud },
   { id: 'featureImport', label: '静态 Feature 导入', icon: Waypoints },
+  { id: 'featureManage', label: '航图要素管理', icon: Waypoints },
   { id: 'saveGrid', label: '空域网格入库', icon: Radar },
   { id: 'maintain', label: '维护与查询', icon: Wrench },
   { id: 'job', label: '任务查询', icon: Search },
@@ -33,6 +37,8 @@ const submittingMap = reactive({
   dem: false,
   demClassify: false,
   trueAltitude: false,
+  parquetAttribute: false,
+  fieldResample: false,
   featureImport: false,
   saveGrid: false,
 })
@@ -232,6 +238,126 @@ function validateTrueAltitude(key) {
   return key ? { [key]: e[key] || '' } : e
 }
 
+// ==================== Parquet 网格属性导入 ====================
+const parquetAttributeForm = ref({
+  template: 'dqg_noise_v1',
+  datasetId: '',
+  datasetVersion: '',
+  input: 'data/dqg_noise/dqg_native_noise_l17.parquet',
+  level: 17,
+  dryRun: true,
+  source: 'dqg_noise_simulation',
+  showAdvanced: false,
+  batchSize: 100000,
+  maxRows: 20000000,
+  heightTolerance: 0.02,
+  registerMissingAttributes: true,
+})
+
+function validateParquetAttribute(key) {
+  const f = parquetAttributeForm.value
+  const e = {}
+  if (f.template !== 'dqg_noise_v1') e.template = '当前仅支持 DQG 噪声模拟 v1 模板'
+  if (isBlank(f.datasetId)) e.datasetId = '目标数据集标识不能为空'
+  else {
+    const value = String(f.datasetId).trim()
+    if (!DATASET_ID_RE.test(value)) e.datasetId = '仅允许字母/数字/下划线/点/短横线'
+    else if (value.length > 128) e.datasetId = '长度不能超过 128 个字符'
+  }
+  const version = intCheck(f.datasetVersion, '目标版本号', 1)
+  if (version) e.datasetVersion = version
+  if (isBlank(f.input)) e.input = 'Parquet 文件路径不能为空'
+  else if (!/\.parquet$/i.test(String(f.input).trim())) e.input = '输入文件必须为 .parquet'
+  const level = intCheck(f.level, '网格层级', 17, 17)
+  if (level) e.level = '当前模板固定使用 L17'
+  if (f.showAdvanced) {
+    if (isBlank(f.source)) e.source = '来源标识不能为空'
+    else if (String(f.source).length > 128) e.source = '来源标识不能超过 128 个字符'
+    const batchSize = intCheck(f.batchSize, '批量行数', 10000, 100000)
+    if (batchSize) e.batchSize = batchSize
+    const maxRows = intCheck(f.maxRows, '最大源行数', 1, 100000000)
+    if (maxRows) e.maxRows = maxRows
+    const tolerance = numCheck(f.heightTolerance, '高度容差', 0, 1)
+    if (tolerance) e.heightTolerance = tolerance
+  }
+  return key ? { [key]: e[key] || '' } : e
+}
+
+// ==================== 多维场重采样 ====================
+const FIELD_VARIABLE_RE = /^[A-Za-z_][A-Za-z0-9_.-]*$/
+const ATTRIBUTE_CODE_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
+const fieldResampleForm = ref({
+  datasetId: '',
+  datasetVersion: '',
+  input: 'data/deqing_map/emf_deqing_v4/emf_deqing_v4.nc',
+  inputFormat: 'netcdf',
+  sourceCrs: 'EPSG:4549',
+  xVariable: 'x',
+  yVariable: 'y',
+  groundVariable: 'ground_height',
+  verticalVariable: 'height_agl',
+  valueVariable: 'field_total',
+  verticalReference: 'AGL',
+  attributeCode: 'emf_strength_dbuv_m',
+  attributeName: '电磁场强',
+  category: 'environment_field',
+  unit: 'dBμV/m',
+  description: '低空三维电磁场强',
+  valueTransform: 'log10',
+  transformScale: 10,
+  transformOffset: 120,
+  dryRun: true,
+  showAdvanced: false,
+  source: 'emf_simulation',
+  batchSize: 50000,
+  maxSourceLocations: 5000000,
+  maxSourceValues: 100000000,
+  maxTargetCells: 100000000,
+  registerMissingAttribute: true,
+})
+
+function validateFieldResample(key) {
+  const f = fieldResampleForm.value
+  const e = {}
+  if (isBlank(f.datasetId)) e.datasetId = '目标数据集标识不能为空'
+  else if (!DATASET_ID_RE.test(String(f.datasetId).trim())) e.datasetId = '数据集标识格式不正确'
+  const version = intCheck(f.datasetVersion, '目标版本号', 1)
+  if (version) e.datasetVersion = version
+  if (isBlank(f.input)) e.input = 'NetCDF 文件路径不能为空'
+  else if (!/\.nc4?$/i.test(String(f.input).trim())) e.input = '输入文件必须为 .nc 或 .nc4'
+  if (isBlank(f.sourceCrs)) e.sourceCrs = '源坐标系不能为空'
+  for (const [name, label] of [
+    ['xVariable', 'X 坐标变量'], ['yVariable', 'Y 坐标变量'],
+    ['verticalVariable', '垂直坐标变量'], ['valueVariable', '数值变量'],
+  ]) {
+    if (isBlank(f[name])) e[name] = `${label}不能为空`
+    else if (!FIELD_VARIABLE_RE.test(String(f[name]).trim())) e[name] = `${label}名称格式不正确`
+  }
+  if (f.verticalReference === 'AGL') {
+    if (isBlank(f.groundVariable)) e.groundVariable = 'AGL 模式必须指定地面高程变量'
+    else if (!FIELD_VARIABLE_RE.test(String(f.groundVariable).trim())) e.groundVariable = '地面高程变量名称格式不正确'
+  }
+  if (isBlank(f.attributeCode)) e.attributeCode = '属性编码不能为空'
+  else if (!ATTRIBUTE_CODE_RE.test(String(f.attributeCode).trim())) e.attributeCode = '仅允许字母开头的字母、数字和下划线'
+  if (isBlank(f.attributeName)) e.attributeName = '属性名称不能为空'
+  const scale = numCheck(f.transformScale, '变换乘数', -1e12, 1e12)
+  if (scale) e.transformScale = scale
+  const offset = numCheck(f.transformOffset, '变换偏移', -1e12, 1e12)
+  if (offset) e.transformOffset = offset
+  if (f.showAdvanced) {
+    if (isBlank(f.source)) e.source = '来源标识不能为空'
+    const batchSize = intCheck(f.batchSize, '批量行数', 10000, 100000)
+    if (batchSize) e.batchSize = batchSize
+    const sourceLocations = intCheck(f.maxSourceLocations, '最大源水平点数', 3, 50000000)
+    if (sourceLocations) e.maxSourceLocations = sourceLocations
+    const sourceValues = intCheck(f.maxSourceValues, '最大源场数值数', 3, 1000000000)
+    if (sourceValues) e.maxSourceValues = sourceValues
+    const targetCells = intCheck(f.maxTargetCells, '最大目标格元数', 1, 1000000000)
+    if (targetCells) e.maxTargetCells = targetCells
+  }
+  return key ? { [key]: e[key] || '' } : e
+}
+
 // ==================== DEM 地形分类 ====================
 const demClassifyForm = ref({
   sourceTable: 'demgrid_16',
@@ -278,6 +404,7 @@ const featureForm = ref({
   heightSource: 'NONE',
   showAdvanced: false,
   featureTypeMapping: '',
+  propertyFields: '',
   minHeightField: '',
   maxHeightField: '',
   maxMappings: 5000000,
@@ -308,6 +435,19 @@ function validateFeature(key) {
         if (!m || typeof m !== 'object' || Array.isArray(m)) e.featureTypeMapping = '必须为 JSON 对象，如 {"禁止性管制空域":"prohibited_airspace"}'
       } catch {
         e.featureTypeMapping = '必须为合法 JSON 对象'
+      }
+    }
+    if (!isBlank(f.propertyFields)) {
+      try {
+        const fields = JSON.parse(String(f.propertyFields))
+        if (!Array.isArray(fields) || fields.length === 0 ||
+            fields.some(name => typeof name !== 'string' || !name.trim())) {
+          e.propertyFields = '必须为非空字符串 JSON 数组，如 ["GRID_ID","TOT_SCORE"]'
+        } else if (new Set(fields).size !== fields.length) {
+          e.propertyFields = '字段名不能重复'
+        }
+      } catch {
+        e.propertyFields = '必须为合法 JSON 数组'
       }
     }
     const hasMin = !isBlank(f.minHeightField)
@@ -653,6 +793,8 @@ function validateField(key) {
     dem: validateDem,
     demClassify: validateDemClassify,
     trueAltitude: validateTrueAltitude,
+    parquetAttribute: validateParquetAttribute,
+    fieldResample: validateFieldResample,
     featureImport: validateFeature,
     saveGrid: validateSaveGrid,
   }
@@ -779,6 +921,96 @@ async function submitTrueAltitude() {
   }
 }
 
+async function submitParquetAttribute() {
+  const e = validateParquetAttribute()
+  setErrors(e)
+  if (hasErrors(e)) return
+  submittingMap.parquetAttribute = true
+  feedback.value = null
+  const f = parquetAttributeForm.value
+  try {
+    const body = {
+      template: f.template,
+      datasetId: String(f.datasetId).trim(),
+      datasetVersion: Number(f.datasetVersion),
+      input: String(f.input).trim(),
+      level: Number(f.level),
+      dryRun: Boolean(f.dryRun),
+    }
+    if (f.showAdvanced) {
+      body.source = String(f.source).trim()
+      body.batchSize = Number(f.batchSize)
+      body.maxRows = Number(f.maxRows)
+      body.heightTolerance = Number(f.heightTolerance)
+      body.registerMissingAttributes = Boolean(f.registerMissingAttributes)
+    }
+    const data = await postJson('/api/grid-attributes/parquet-import-jobs', body)
+    handleJobAccepted(data, f.dryRun ? 'Parquet 网格属性预检' : 'Parquet 网格属性导入')
+  } catch (err) {
+    feedback.value = {
+      type: 'error',
+      title: 'Parquet 网格属性任务提交失败',
+      detail: err?.message || '网络错误，请稍后重试',
+    }
+  } finally {
+    submittingMap.parquetAttribute = false
+  }
+}
+
+async function submitFieldResample() {
+  const e = validateFieldResample()
+  setErrors(e)
+  if (hasErrors(e)) return
+  submittingMap.fieldResample = true
+  feedback.value = null
+  const f = fieldResampleForm.value
+  try {
+    const body = {
+      datasetId: String(f.datasetId).trim(),
+      datasetVersion: Number(f.datasetVersion),
+      input: String(f.input).trim(),
+      inputFormat: f.inputFormat,
+      sourceCrs: String(f.sourceCrs).trim(),
+      xVariable: String(f.xVariable).trim(),
+      yVariable: String(f.yVariable).trim(),
+      groundVariable: String(f.groundVariable || '').trim(),
+      verticalVariable: String(f.verticalVariable).trim(),
+      valueVariable: String(f.valueVariable).trim(),
+      verticalReference: f.verticalReference,
+      attributeCode: String(f.attributeCode).trim(),
+      attributeName: String(f.attributeName).trim(),
+      category: String(f.category).trim(),
+      unit: String(f.unit || '').trim(),
+      description: String(f.description || '').trim(),
+      valueTransform: f.valueTransform,
+      transformScale: Number(f.transformScale),
+      transformOffset: Number(f.transformOffset),
+      horizontalInterpolation: 'delaunay_linear',
+      verticalInterpolation: 'linear',
+      outsidePolicy: 'skip',
+      dryRun: Boolean(f.dryRun),
+    }
+    if (f.showAdvanced) {
+      body.source = String(f.source).trim()
+      body.batchSize = Number(f.batchSize)
+      body.maxSourceLocations = Number(f.maxSourceLocations)
+      body.maxSourceValues = Number(f.maxSourceValues)
+      body.maxTargetCells = Number(f.maxTargetCells)
+      body.registerMissingAttribute = Boolean(f.registerMissingAttribute)
+    }
+    const data = await postJson('/api/grid-attributes/field-resample-import-jobs', body)
+    handleJobAccepted(data, f.dryRun ? '多维场重采样预检' : '多维场重采样挂载')
+  } catch (err) {
+    feedback.value = {
+      type: 'error',
+      title: '多维场重采样任务提交失败',
+      detail: err?.message || '网络错误，请稍后重试',
+    }
+  } finally {
+    submittingMap.fieldResample = false
+  }
+}
+
 async function submitDemClassify() {
   const e = validateDemClassify()
   setErrors(e)
@@ -823,6 +1055,7 @@ async function submitFeatureImport() {
     if (!isBlank(f.featureTypeField)) body.featureTypeField = String(f.featureTypeField).trim()
     if (f.showAdvanced) {
       if (!isBlank(f.featureTypeMapping)) body.featureTypeMapping = JSON.parse(String(f.featureTypeMapping))
+      if (!isBlank(f.propertyFields)) body.propertyFields = JSON.parse(String(f.propertyFields))
       if (!isBlank(f.minHeightField)) body.minHeightField = String(f.minHeightField).trim()
       if (!isBlank(f.maxHeightField)) body.maxHeightField = String(f.maxHeightField).trim()
       body.maxMappings = Number(f.maxMappings)
@@ -1286,6 +1519,249 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
+      <!-- Parquet 网格属性导入 -->
+      <section v-show="activeTab === 'parquetAttribute'" class="storage-card">
+        <div class="card-title">Parquet 网格属性批量导入</div>
+        <p class="card-desc">通过字段模板把 Parquet 中的批量属性挂载到已有网格。当前提供 DQG 噪声模拟 v1 模板；建议先执行只读预检，确认源文件与目标网格完全一致后再正式导入。</p>
+
+        <div class="form-grid">
+          <div class="form-field" :class="{ 'has-error': errors.template }">
+            <label>字段模板 <span class="req">*</span></label>
+            <select v-model="parquetAttributeForm.template" @change="validateField('template')">
+              <option value="dqg_noise_v1">DQG 噪声模拟 v1</option>
+            </select>
+            <span v-if="errors.template" class="field-error">{{ errors.template }}</span>
+            <span v-else class="field-hint">模板定义源字段、目标属性编码、数据类型和校验规则</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.level }">
+            <label>网格层级</label>
+            <input v-model.number="parquetAttributeForm.level" type="number" min="17" max="17" readonly @blur="validateField('level')" />
+            <span v-if="errors.level" class="field-error">{{ errors.level }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.datasetId }">
+            <label>目标数据集标识 <span class="req">*</span></label>
+            <input v-model="parquetAttributeForm.datasetId" type="text" placeholder="deqing_true_altitude_l17" @blur="validateField('datasetId')" />
+            <span v-if="errors.datasetId" class="field-error">{{ errors.datasetId }}</span>
+            <span v-else class="field-hint">必须是当前已激活的 L17 真高网格数据集</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.datasetVersion }">
+            <label>目标活动版本号 <span class="req">*</span></label>
+            <input v-model.number="parquetAttributeForm.datasetVersion" type="number" min="1" placeholder="1" @blur="validateField('datasetVersion')" />
+            <span v-if="errors.datasetVersion" class="field-error">{{ errors.datasetVersion }}</span>
+          </div>
+          <div class="form-field span-2" :class="{ 'has-error': errors.input }">
+            <label>Parquet 文件路径 <span class="req">*</span></label>
+            <input v-model="parquetAttributeForm.input" type="text" placeholder="data/dqg_noise/dqg_native_noise_l17.parquet" @blur="validateField('input')" />
+            <span v-if="errors.input" class="field-error">{{ errors.input }}</span>
+            <span v-else class="field-hint">项目根目录下的相对路径，不允许绝对路径、.. 或符号链接</span>
+          </div>
+        </div>
+
+        <div class="check-group">
+          <label class="checkbox-item">
+            <input v-model="parquetAttributeForm.dryRun" type="checkbox" />
+            <span>只执行全量预检，不写入属性事实和活动绑定（推荐先勾选）</span>
+          </label>
+        </div>
+
+        <button class="advanced-toggle" type="button" @click="parquetAttributeForm.showAdvanced = !parquetAttributeForm.showAdvanced">
+          <component :is="parquetAttributeForm.showAdvanced ? ChevronUp : ChevronDown" :size="14" />
+          <span>{{ parquetAttributeForm.showAdvanced ? '收起高级参数' : '展开高级参数' }}</span>
+        </button>
+
+        <div v-show="parquetAttributeForm.showAdvanced" class="form-grid advanced">
+          <div class="form-field" :class="{ 'has-error': errors.source }">
+            <label>来源标识</label>
+            <input v-model="parquetAttributeForm.source" type="text" maxlength="128" @blur="validateField('source')" />
+            <span v-if="errors.source" class="field-error">{{ errors.source }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.batchSize }">
+            <label>RowBinary 批量行数</label>
+            <input v-model.number="parquetAttributeForm.batchSize" type="number" min="10000" max="100000" @blur="validateField('batchSize')" />
+            <span v-if="errors.batchSize" class="field-error">{{ errors.batchSize }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.maxRows }">
+            <label>最大源行数</label>
+            <input v-model.number="parquetAttributeForm.maxRows" type="number" min="1" max="100000000" @blur="validateField('maxRows')" />
+            <span v-if="errors.maxRows" class="field-error">{{ errors.maxRows }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.heightTolerance }">
+            <label>高度边界容差（米）</label>
+            <input v-model.number="parquetAttributeForm.heightTolerance" type="number" min="0" max="1" step="0.001" @blur="validateField('heightTolerance')" />
+            <span v-if="errors.heightTolerance" class="field-error">{{ errors.heightTolerance }}</span>
+          </div>
+          <div class="form-field span-2">
+            <label class="checkbox-item">
+              <input v-model="parquetAttributeForm.registerMissingAttributes" type="checkbox" />
+              <span>正式导入时自动注册模板中缺失的属性定义</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="submit-row">
+          <button class="btn-primary" type="button" :disabled="submittingMap.parquetAttribute" @click="submitParquetAttribute">
+            <Loader2 v-if="submittingMap.parquetAttribute" :size="14" class="spin" />
+            <span>{{ submittingMap.parquetAttribute ? '提交中...' : (parquetAttributeForm.dryRun ? '提交预检任务' : '提交正式导入') }}</span>
+          </button>
+          <span class="submit-hint">任务提交后进入异步队列，并自动跳转到任务进度页面</span>
+        </div>
+      </section>
+
+      <!-- 多维场重采样 -->
+      <section v-show="activeTab === 'fieldResample'" class="storage-card">
+        <div class="card-title">多维场数据重采样与网格属性挂载</div>
+        <p class="card-desc">读取 NetCDF 点剖面数据，在服务端生成候选 L17 DQG 格元并完成水平 Delaunay、垂直线性插值；候选结果仅在 ClickHouse 内与权威真高网格关联，不分页回读目标网格。</p>
+
+        <div class="form-grid">
+          <div class="form-field" :class="{ 'has-error': errors.datasetId }">
+            <label>目标数据集标识 <span class="req">*</span></label>
+            <input v-model="fieldResampleForm.datasetId" type="text" placeholder="deqing_true_altitude_l17" @blur="validateField('datasetId')" />
+            <span v-if="errors.datasetId" class="field-error">{{ errors.datasetId }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.datasetVersion }">
+            <label>目标活动版本号 <span class="req">*</span></label>
+            <input v-model.number="fieldResampleForm.datasetVersion" type="number" min="1" @blur="validateField('datasetVersion')" />
+            <span v-if="errors.datasetVersion" class="field-error">{{ errors.datasetVersion }}</span>
+          </div>
+          <div class="form-field span-2" :class="{ 'has-error': errors.input }">
+            <label>NetCDF 文件路径 <span class="req">*</span></label>
+            <input v-model="fieldResampleForm.input" type="text" placeholder="data/field/source.nc" @blur="validateField('input')" />
+            <span v-if="errors.input" class="field-error">{{ errors.input }}</span>
+            <span v-else class="field-hint">项目根目录下的 .nc/.nc4 相对路径</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.sourceCrs }">
+            <label>源水平坐标系 <span class="req">*</span></label>
+            <input v-model="fieldResampleForm.sourceCrs" type="text" placeholder="EPSG:4549" @blur="validateField('sourceCrs')" />
+            <span v-if="errors.sourceCrs" class="field-error">{{ errors.sourceCrs }}</span>
+          </div>
+          <div class="form-field">
+            <label>垂直坐标基准</label>
+            <select v-model="fieldResampleForm.verticalReference" @change="validateField('groundVariable')">
+              <option value="AGL">AGL（离地高度）</option>
+              <option value="ABSOLUTE">ABSOLUTE（绝对高度）</option>
+            </select>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.xVariable }">
+            <label>X 坐标变量 <span class="req">*</span></label>
+            <input v-model="fieldResampleForm.xVariable" type="text" @blur="validateField('xVariable')" />
+            <span v-if="errors.xVariable" class="field-error">{{ errors.xVariable }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.yVariable }">
+            <label>Y 坐标变量 <span class="req">*</span></label>
+            <input v-model="fieldResampleForm.yVariable" type="text" @blur="validateField('yVariable')" />
+            <span v-if="errors.yVariable" class="field-error">{{ errors.yVariable }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.groundVariable }">
+            <label>地面高程变量</label>
+            <input v-model="fieldResampleForm.groundVariable" type="text" :disabled="fieldResampleForm.verticalReference !== 'AGL'" @blur="validateField('groundVariable')" />
+            <span v-if="errors.groundVariable" class="field-error">{{ errors.groundVariable }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.verticalVariable }">
+            <label>垂直坐标变量 <span class="req">*</span></label>
+            <input v-model="fieldResampleForm.verticalVariable" type="text" @blur="validateField('verticalVariable')" />
+            <span v-if="errors.verticalVariable" class="field-error">{{ errors.verticalVariable }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.valueVariable }">
+            <label>原始数值变量 <span class="req">*</span></label>
+            <input v-model="fieldResampleForm.valueVariable" type="text" @blur="validateField('valueVariable')" />
+            <span v-if="errors.valueVariable" class="field-error">{{ errors.valueVariable }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.attributeCode }">
+            <label>目标属性编码 <span class="req">*</span></label>
+            <input v-model="fieldResampleForm.attributeCode" type="text" @blur="validateField('attributeCode')" />
+            <span v-if="errors.attributeCode" class="field-error">{{ errors.attributeCode }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.attributeName }">
+            <label>目标属性名称 <span class="req">*</span></label>
+            <input v-model="fieldResampleForm.attributeName" type="text" @blur="validateField('attributeName')" />
+            <span v-if="errors.attributeName" class="field-error">{{ errors.attributeName }}</span>
+          </div>
+          <div class="form-field">
+            <label>单位</label>
+            <input v-model="fieldResampleForm.unit" type="text" placeholder="dBμV/m" />
+          </div>
+          <div class="form-field">
+            <label>数值变换</label>
+            <select v-model="fieldResampleForm.valueTransform">
+              <option value="identity">原值：scale × value + offset</option>
+              <option value="log10">对数：scale × log10(value) + offset</option>
+            </select>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.transformScale }">
+            <label>变换乘数</label>
+            <input v-model.number="fieldResampleForm.transformScale" type="number" step="any" @blur="validateField('transformScale')" />
+            <span v-if="errors.transformScale" class="field-error">{{ errors.transformScale }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.transformOffset }">
+            <label>变换偏移</label>
+            <input v-model.number="fieldResampleForm.transformOffset" type="number" step="any" @blur="validateField('transformOffset')" />
+            <span v-if="errors.transformOffset" class="field-error">{{ errors.transformOffset }}</span>
+          </div>
+        </div>
+
+        <div class="check-group">
+          <label class="checkbox-item">
+            <input v-model="fieldResampleForm.dryRun" type="checkbox" />
+            <span>只执行重采样和权威网格成员校验，不激活属性（推荐先勾选）</span>
+          </label>
+        </div>
+
+        <button class="advanced-toggle" type="button" @click="fieldResampleForm.showAdvanced = !fieldResampleForm.showAdvanced">
+          <component :is="fieldResampleForm.showAdvanced ? ChevronUp : ChevronDown" :size="14" />
+          <span>{{ fieldResampleForm.showAdvanced ? '收起高级参数' : '展开高级参数' }}</span>
+        </button>
+
+        <div v-show="fieldResampleForm.showAdvanced" class="form-grid advanced">
+          <div class="form-field">
+            <label>属性分类</label>
+            <input v-model="fieldResampleForm.category" type="text" />
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.source }">
+            <label>来源标识</label>
+            <input v-model="fieldResampleForm.source" type="text" maxlength="128" @blur="validateField('source')" />
+            <span v-if="errors.source" class="field-error">{{ errors.source }}</span>
+          </div>
+          <div class="form-field span-2">
+            <label>属性说明</label>
+            <input v-model="fieldResampleForm.description" type="text" maxlength="2000" />
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.batchSize }">
+            <label>RowBinary 批量行数</label>
+            <input v-model.number="fieldResampleForm.batchSize" type="number" min="10000" max="100000" @blur="validateField('batchSize')" />
+            <span v-if="errors.batchSize" class="field-error">{{ errors.batchSize }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.maxSourceLocations }">
+            <label>最大源水平点数</label>
+            <input v-model.number="fieldResampleForm.maxSourceLocations" type="number" min="3" max="50000000" @blur="validateField('maxSourceLocations')" />
+            <span v-if="errors.maxSourceLocations" class="field-error">{{ errors.maxSourceLocations }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.maxSourceValues }">
+            <label>最大源场数值数</label>
+            <input v-model.number="fieldResampleForm.maxSourceValues" type="number" min="3" max="1000000000" @blur="validateField('maxSourceValues')" />
+            <span v-if="errors.maxSourceValues" class="field-error">{{ errors.maxSourceValues }}</span>
+          </div>
+          <div class="form-field" :class="{ 'has-error': errors.maxTargetCells }">
+            <label>最大候选目标格元数</label>
+            <input v-model.number="fieldResampleForm.maxTargetCells" type="number" min="1" max="1000000000" @blur="validateField('maxTargetCells')" />
+            <span v-if="errors.maxTargetCells" class="field-error">{{ errors.maxTargetCells }}</span>
+          </div>
+          <div class="form-field">
+            <label class="checkbox-item">
+              <input v-model="fieldResampleForm.registerMissingAttribute" type="checkbox" />
+              <span>正式导入时自动注册缺失属性</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="submit-row">
+          <button class="btn-primary" type="button" :disabled="submittingMap.fieldResample" @click="submitFieldResample">
+            <Loader2 v-if="submittingMap.fieldResample" :size="14" class="spin" />
+            <span>{{ submittingMap.fieldResample ? '提交中...' : (fieldResampleForm.dryRun ? '提交重采样预检' : '提交重采样挂载') }}</span>
+          </button>
+          <span class="submit-hint">任务直接生成候选 DQG，ClickHouse 仅执行批量成员关联和属性写入</span>
+        </div>
+      </section>
+
       <!-- 静态 Feature 导入 -->
       <section v-show="activeTab === 'featureImport'" class="storage-card">
         <div class="card-title">静态业务 Feature-DQG 导入</div>
@@ -1367,6 +1843,17 @@ onBeforeUnmount(() => {
             <span v-if="errors.featureTypeMapping" class="field-error">{{ errors.featureTypeMapping }}</span>
             <span v-else class="field-hint">可选：把字段中的中文业务值映射为 ASCII feature_type code</span>
           </div>
+          <div class="form-field span-2" :class="{ 'has-error': errors.propertyFields }">
+            <label>保留属性字段（JSON 数组）</label>
+            <textarea
+              v-model="featureForm.propertyFields"
+              rows="2"
+              placeholder='["GRID_ID","TOT_SCORE"]'
+              @blur="validateField('propertyFields')"
+            ></textarea>
+            <span v-if="errors.propertyFields" class="field-error">{{ errors.propertyFields }}</span>
+            <span v-else class="field-hint">可选：留空保存全部源属性；填写后只保存数组中列出的字段</span>
+          </div>
           <div class="form-field" :class="{ 'has-error': errors.minHeightField }">
             <label>RANGE 最小高度字段</label>
             <input v-model="featureForm.minHeightField" type="text" placeholder="仅 3D RANGE 使用" @blur="validateField('minHeightField')" />
@@ -1391,6 +1878,11 @@ onBeforeUnmount(() => {
           </button>
           <span class="submit-hint">提交后任务进入异步队列，将自动跟踪进度</span>
         </div>
+      </section>
+
+      <!-- 航图要素数据管理 -->
+      <section v-show="activeTab === 'featureManage'" class="dataset-manager-shell">
+        <FeatureDatasetManager />
       </section>
 
       <!-- 空域网格入库 -->

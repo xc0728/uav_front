@@ -1,81 +1,113 @@
 import { errorMessage } from './http.js'
 
 export const CHART_THEMES = [
-  'air_route',
   'vertiport',
+  'navigation',
+  'surveillance',
   'airspace',
-  'obstacle',
   'utility',
   'transport',
   'road',
   'water',
-  'admin',
-  'administrative',
   'structure',
-  'communication',
-  'surveillance',
   'landuse',
   'landcover',
 ]
 
+export const LOD13_BUILDING_DATASET_ID = 'deqing_lod13_buildings'
+
 export const CHART_DATASETS = [
-  ['deqing_chart_l17_takeoff_points', '起降点', 'vertiport', '#22c55e'],
-  ['deqing_chart_l17_surveillance_points', '监控设施', 'surveillance', '#ef4444'],
-  ['deqing_chart_l17_rail_facility_points', '铁路服务设施点', 'transport', '#f59e0b'],
-  ['deqing_chart_l17_water_extension_points', '水系附属点', 'water', '#38bdf8'],
-  ['deqing_chart_l17_road_facility_points', '道路服务设施点', 'transport', '#f97316'],
-  ['deqing_chart_l17_landcover_extension_lines', '地表覆盖附属线', 'landcover', '#84cc16'],
-  ['deqing_chart_l17_water_facility_lines', '水利设施线', 'water', '#0ea5e9'],
-  ['deqing_chart_l17_rail_facility_lines', '铁路服务设施线', 'transport', '#d97706'],
-  ['deqing_chart_l17_road_facility_lines', '道路服务设施线', 'transport', '#eab308'],
-  ['deqing_chart_l17_artificial_structures', '人工构筑物', 'structure', '#64748b'],
-  ['deqing_chart_l17_structure_attachments', '构筑物附属面', 'structure', '#475569'],
-  ['deqing_chart_l17_landuse_extensions', '土地利用附属面', 'landuse', '#a16207'],
-  ['deqing_chart_l17_unused_land', '未利用地', 'landuse', '#78716c'],
-  ['deqing_chart_l17_agricultural_land', '农业用地', 'landuse', '#65a30d'],
-  ['deqing_chart_l17_cultivated_land', '种植土地', 'landuse', '#16a34a'],
-  ['deqing_chart_l17_road_extensions', '道路附属面', 'road', '#facc15'],
-  ['deqing_chart_l17_road_junctions', '道路交叉口', 'road', '#f59e0b'],
-  ['deqing_chart_l17_roundabouts', '环岛', 'road', '#fb923c'],
-  ['deqing_chart_l17_road_facility_areas', '道路服务设施面', 'transport', '#ea580c'],
-  ['deqing_chart_l17_hydropower_plants', '水电站', 'utility', '#a855f7'],
-  ['deqing_chart_l17_hydraulic_structures', '水工构筑物', 'water', '#06b6d4'],
-  ['deqing_chart_l17_reservoir_extensions', '水库水塘附属面', 'water', '#0284c7'],
-  ['deqing_chart_l17_river_lake_extensions', '河流湖泊附属面', 'water', '#2563eb'],
-  ['deqing_chart_l17_water_extensions', '水系附属面', 'water', '#3b82f6'],
-  ['deqing_chart_l17_ponds', '水塘', 'water', '#0ea5e9'],
-  ['deqing_chart_l17_rivers', '河流', 'water', '#1d4ed8'],
-  ['deqing_chart_l17_lakes', '湖泊', 'water', '#4f46e5'],
-].map(([id, label, theme, color]) => ({ id, label, theme, color }))
+  ['deqing_chart_l17_takeoff_points', '起降点', 'vertiport', '#22c55e', '2D', 'takeoff_point', ['功能要素'], 81],
+  ['deqing_chart_l17_surveillance_points', '监视设施', 'surveillance', '#f43f5e', '2D', 'surveillance_facility', ['环境要素', '建构筑物', '人工构筑物'], 13],
+  ['deqing_chart_l17_navigation_monitoring_stations', '导航监测数据', 'navigation', '#8b5cf6', '2D', 'navigation_monitoring_station', ['功能要素', '飞行控制空间', '飞行信息控制要素'], 78],
+  ['deqing_chart_l17_water_facility_points', '水利设施点', 'utility', '#06b6d4', '2D', 'water_facility', ['环境要素', '建构筑物', '人工构筑物'], 11],
+  ['deqing_chart_l17_prohibited_airspace', '禁止性管制空域', 'airspace', '#dc2626', '3D', 'prohibited_airspace', ['功能要素', '飞行控制空间', '空域管理单元'], 70],
+  ['deqing_chart_l17_rail_facility_lines', '轨道交通服务设施线', 'transport', '#d97706', '2D', 'rail_service_facility_line', ['环境要素', '公共交通服务设施'], 63],
+  ['deqing_chart_l17_road_facility_areas', '道路交通服务设施面', 'transport', '#ea580c', '2D', 'road_service_facility_area', ['环境要素', '公共交通服务设施'], 64],
+  ['deqing_chart_l17_road_junctions', '路口', 'road', '#f59e0b', '2D', 'road_junction_area', ['环境要素', '地面道路及附属设施'], 4],
+  ['deqing_chart_l17_roads', '道路', 'road', '#facc15', '2D', 'road', ['环境要素', '地面道路及附属设施'], 3],
+  ['deqing_chart_l17_hydropower_plants', '水电厂房', 'utility', '#a855f7', '2D', 'hydropower_plant_area', ['环境要素', '水体', '水工设施'], 60],
+  ['deqing_chart_l17_lakes', '湖泊', 'water', '#4f46e5', '2D', 'lake_area', ['环境要素', '水体', '江河湖泊'], 46],
+  ['deqing_chart_l17_ponds', '水塘', 'water', '#0ea5e9', '2D', 'pond_area', ['环境要素', '水体', '水库水塘'], 49],
+  ['deqing_chart_l17_reservoir_extensions', '水库水塘扩展要素', 'water', '#0284c7', '2D', 'reservoir_pond_extension_area', ['环境要素', '水体', '水库水塘'], 50],
+  ['deqing_chart_l17_rivers', '江河', 'water', '#1d4ed8', '2D', 'river_area', ['环境要素', '水体', '江河湖泊'], 45],
+  ['deqing_chart_l17_artificial_structures', '人工构筑物扩展要素', 'structure', '#64748b', '2D', 'artificial_structure_area', ['环境要素', '建构筑物', '人工构筑物'], 15],
+  ['deqing_chart_l17_structure_attachments', '建构筑物及附属扩展要素', 'structure', '#475569', '2D', 'structure_attachment_area', ['环境要素', '建构筑物'], 16],
+  ['deqing_chart_l17_agricultural_land', '农用地', 'landuse', '#65a30d', '2D', 'agricultural_land_area', ['环境要素', '地表覆盖与土地利用', '土地利用'], 41],
+  ['deqing_chart_l17_artificial_excavation', '人工堆掘地', 'landuse', '#a16207', '2D', 'artificial_excavation_area', ['环境要素', '地表覆盖与土地利用', '地表覆盖'], 38],
+  ['deqing_chart_l17_construction_land', '建设用地', 'landuse', '#92400e', '2D', 'construction_land_area', ['环境要素', '地表覆盖与土地利用', '土地利用'], 42],
+  ['deqing_chart_l17_cultivated_land', '种植土地', 'landuse', '#16a34a', '2D', 'cultivated_land_area', ['环境要素', '地表覆盖与土地利用', '地表覆盖'], 36],
+  ['deqing_chart_l17_unused_land', '未利用地', 'landuse', '#78716c', '2D', 'unused_land_area', ['环境要素', '地表覆盖与土地利用', '土地利用'], 43],
+  ['deqing_chart_l17_bare_surface', '裸露地表', 'landcover', '#a8a29e', '2D', 'bare_surface_area', ['环境要素', '地表覆盖与土地利用', '地表覆盖'], 39],
+  ['deqing_chart_l17_forest_grass_cover', '林草覆盖', 'landcover', '#15803d', '2D', 'forest_grass_cover', ['环境要素', '地表覆盖与土地利用', '地表覆盖'], 37],
+  ['deqing_chart_l17_wetlands', '湿地', 'landcover', '#14b8a6', '2D', 'wetland', ['环境要素', '水体', '滩涂湿地'], 52],
+  [LOD13_BUILDING_DATASET_ID, '建筑物（LOD1.3）', 'structure', '#fb7185', '3D', 'lod13_building', ['环境要素', '建构筑物'], 9, 'lod13'],
+].map(([id, label, theme, color, dimensionMode, featureType, catalogPath, catalogOrder, sourceKind = 'static']) => ({
+  id, label, theme, color, dimensionMode, featureType, catalogPath, catalogOrder, sourceKind,
+}))
 
 const DATASETS_BY_ID = Object.fromEntries(CHART_DATASETS.map(dataset => [dataset.id, dataset]))
 
 const THEME_LABELS = {
-  air_route: '航路', vertiport: '起降设施', airspace: '空域', obstacle: '障碍物',
+  vertiport: '起降设施', navigation: '导航监测', surveillance: '监视设施', airspace: '空域安全',
   utility: '市政设施', transport: '交通设施', road: '道路', water: '水体',
-  admin: '行政区划', administrative: '行政区划', landuse: '土地利用', landcover: '地表覆盖',
-  structure: '构筑物', communication: '通信设施',
-  surveillance: '监控设施',
+  landuse: '土地利用', landcover: '地表覆盖', structure: '构筑物',
 }
 
-const TREE_GROUPS = [
-  ['aeronautical', '航空要素', ['air_route', 'vertiport']],
-  ['airspace_safety', '空域安全', ['airspace', 'obstacle']],
-  ['surveillance', '监控设施', ['surveillance']],
-  ['infrastructure', '城市基础设施', ['utility', 'transport', 'road', 'structure', 'communication']],
-  ['geography', '自然与地表', ['water', 'landuse', 'landcover']],
-  ['administration', '行政区划', ['admin']],
-]
+function buildDatasetTree(datasets) {
+  const roots = []
+  for (const dataset of datasets) {
+    let siblings = roots
+    let path = ''
+    for (const label of dataset.catalogPath) {
+      path = path ? `${path}/${label}` : label
+      let node = siblings.find(item => item.label === label)
+      if (!node) {
+        node = { id: path, label, order: dataset.catalogOrder, children: [] }
+        siblings.push(node)
+      }
+      node.order = Math.min(node.order, dataset.catalogOrder)
+      siblings = node.children
+    }
+    siblings.push({
+      id: dataset.id,
+      label: dataset.label,
+      order: dataset.catalogOrder,
+      dataset,
+      children: [],
+    })
+  }
 
-export const CHART_DATASET_TREE = TREE_GROUPS.map(([id, label, themes]) => ({
-  id,
-  label,
-  children: themes.map(theme => ({
-    id: theme,
-    label: THEME_LABELS[theme],
-    datasets: CHART_DATASETS.filter(dataset => dataset.theme === theme),
-  })).filter(child => child.datasets.length),
-})).filter(group => group.children.length)
+  function sortNodes(nodes) {
+    nodes.sort((left, right) => left.order - right.order)
+    nodes.forEach(node => {
+      sortNodes(node.children)
+    })
+  }
+  sortNodes(roots)
+  return roots
+}
+
+export const CHART_DATASET_TREE = buildDatasetTree(CHART_DATASETS)
+
+export function filterChartDatasetTree(datasetLayers) {
+  const layersById = datasetLayers instanceof Map
+    ? datasetLayers
+    : new Map((datasetLayers || []).map(layer => [layer.type || layer.id, layer]))
+
+  function filterNodes(nodes) {
+    return nodes.flatMap(node => {
+      if (node.dataset) {
+        const layer = layersById.get(node.dataset.id)
+        return layer ? [{ ...node, dataset: { ...node.dataset, ...layer } }] : []
+      }
+      const children = filterNodes(node.children || [])
+      return children.length ? [{ ...node, children }] : []
+    })
+  }
+
+  return filterNodes(CHART_DATASET_TREE)
+}
 
 export function chartFeatureLabel(feature) {
   return DATASETS_BY_ID[feature.datasetId]?.label || feature.featureType || THEME_LABELS[feature.theme] || feature.datasetId || '未命名要素'
@@ -85,6 +117,19 @@ export function chartFeatureColor(feature) {
   return DATASETS_BY_ID[feature.datasetId]?.color || '#38bdf8'
 }
 
+export function chartFeatureDimensionMode(feature) {
+  const mode = feature?.dimensionMode || DATASETS_BY_ID[feature?.datasetId]?.dimensionMode
+  return mode === '3D' ? '3D' : '2D'
+}
+
+export function chartFeatureDimensionLabel(feature) {
+  const mode = chartFeatureDimensionMode(feature)
+  if (mode === '2D') return '二维水平要素'
+  if (feature?.verticalMode === 'ALL') return '三维 · 全高度'
+  if (feature?.verticalMode === 'RANGE') return '三维 · 高度范围'
+  return '三维要素'
+}
+
 export function chartThemeLabel(theme) {
   return THEME_LABELS[theme] || theme
 }
@@ -92,8 +137,34 @@ const MAX_CODES_PER_REQUEST = 1000
 const MAX_CONCURRENCY = 4
 const MAX_REGION_SPLIT_DEPTH = 6
 
-export async function queryChartRegion(payload, { signal } = {}) {
-  const body = { ...payload }
+function chartFeatureIdentity(feature) {
+  return [
+    feature?.datasetId,
+    feature?.featureUid,
+    feature?.dimensionMode,
+    feature?.code,
+    feature?.level,
+  ].map(value => String(value ?? '')).join('\u0000')
+}
+
+function mergeChartCells(groups) {
+  const merged = new Map()
+  groups.flat().forEach(cell => {
+    const code = String(cell?.code || cell?.data?.grid?.code || '')
+    if (!code) return
+    const existing = merged.get(code)
+    if (!existing) {
+      merged.set(code, { ...cell, features: [...(cell.features || [])] })
+      return
+    }
+    const features = [...(existing.features || []), ...(cell.features || [])]
+    existing.features = [...new Map(features.map(feature => [chartFeatureIdentity(feature), feature])).values()]
+  })
+  return [...merged.values()].sort((left, right) => String(left.code).localeCompare(String(right.code)))
+}
+
+export async function queryChartRegion(payload, { signal, cursor } = {}) {
+  const body = { ...payload, ...(cursor ? { cursor } : {}) }
   if (!body.datasetIds?.length && !body.featureTypes?.length && !body.themes?.length) body.themes = CHART_THEMES
   const response = await fetch('/api/static-features/region/grids', {
     method: 'POST',
@@ -105,6 +176,245 @@ export async function queryChartRegion(payload, { signal } = {}) {
     throw new Error(await errorMessage(response, `航图专题网格查询失败（${response.status}）`))
   }
   return response.json()
+}
+
+function polygonBounds(polygon) {
+  const points = Array.isArray(polygon) ? polygon : []
+  const longitudes = points.map(point => Number(point?.[0])).filter(Number.isFinite)
+  const latitudes = points.map(point => Number(point?.[1])).filter(Number.isFinite)
+  if (longitudes.length < 3 || latitudes.length < 3) throw new Error('LOD1.3 建筑网格查询边界无效')
+  return {
+    minLon: Math.min(...longitudes),
+    maxLon: Math.max(...longitudes),
+    minLat: Math.min(...latitudes),
+    maxLat: Math.max(...latitudes),
+  }
+}
+
+function lod13Feature(cell, properties, index) {
+  const featureUid = properties?.tjh_featur || properties?.modelid || properties?.ID
+    || properties?.OID || `${cell.code}-${index}`
+  return {
+    code: cell.code,
+    datasetId: LOD13_BUILDING_DATASET_ID,
+    featureUid: String(featureUid),
+    featureType: 'lod13_building',
+    theme: 'structure',
+    dimensionMode: '3D',
+    verticalMode: 'RANGE',
+    minHeight: Number(cell.bottom),
+    maxHeight: Number(cell.top),
+    properties: properties || {},
+  }
+}
+
+export async function queryLod13BuildingGrids(payload, { signal, cursor } = {}) {
+  const bounds = polygonBounds(payload.polygon)
+  const response = await fetch('/api/multiSource/triangleGrid/queryOsgbGrid', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      level: Number(payload.level),
+      source: 'lod13',
+      maxCells: Math.min(Number(payload.maxCells) || 50000, 50000),
+      ...(payload.renderOnly === true ? { renderOnly: true } : {}),
+      ...(cursor ? { cursor } : {}),
+      ...bounds,
+    }),
+    signal,
+  })
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, `LOD1.3 建筑网格查询失败（${response.status}）`))
+  }
+  const body = await response.json()
+  if (body?.data?.data_source !== 'clickhouse') {
+    throw new Error('LOD1.3 建筑网格查询未使用 ClickHouse，已拒绝混用 PostgreSQL 结果')
+  }
+  const scannedCursor = lastGridCode(body?.data?.cells || [])
+  const bottom = Number(payload.bottom)
+  const top = Number(payload.top)
+  const cells = (body?.data?.cells || [])
+    .filter(cell => !Number.isFinite(bottom) || !Number.isFinite(top)
+      || (Number(cell.top) > bottom && Number(cell.bottom) < top))
+    .map(cell => {
+      const properties = Array.isArray(cell.properties) && cell.properties.length
+        ? cell.properties
+        : [{}]
+      return {
+        ...cell,
+        level: Number(payload.level),
+        features: properties.map((item, index) => lod13Feature(cell, item, index)),
+      }
+    })
+  return {
+    status: body?.status || 'success',
+    success: body?.status === 'success',
+    data: { ...body?.data, count: cells.length, cells, scannedCursor },
+  }
+}
+
+export async function queryLod13GridFeatures(cell, { signal } = {}) {
+  const code = String(cell?.code || '')
+  const level = Number(cell?.level ?? code.replace(/^dqg/, '').length)
+  const bounds = cell?.bounds || {}
+  const west = Number(bounds.west)
+  const east = Number(bounds.east)
+  const south = Number(bounds.south)
+  const north = Number(bounds.north)
+  if (!code || !Number.isInteger(level) || ![west, east, south, north].every(Number.isFinite)) {
+    throw new Error('LOD1.3 网格详情参数无效')
+  }
+  const response = await fetch('/api/multiSource/triangleGrid/queryOsgbGrid', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      level,
+      source: 'lod13',
+      code,
+      minLon: west,
+      maxLon: east,
+      minLat: south,
+      maxLat: north,
+      maxCells: 10,
+    }),
+    signal,
+  })
+  if (!response.ok) {
+    throw new Error(await errorMessage(response, `LOD1.3 建筑属性查询失败（${response.status}）`))
+  }
+  const body = await response.json()
+  if (body?.data?.data_source !== 'clickhouse') {
+    throw new Error('LOD1.3 建筑属性查询未使用 ClickHouse')
+  }
+  const rows = (body?.data?.cells || []).filter(row => String(row?.code || '') === code.replace(/^dqg/, ''))
+  return rows.flatMap(row => {
+    const properties = Array.isArray(row.properties) && row.properties.length ? row.properties : [{}]
+    return properties.map((item, index) => lod13Feature(row, item, index))
+  })
+}
+
+function lastGridCode(cells) {
+  return cells.length ? String(cells[cells.length - 1]?.code || '') : ''
+}
+
+export async function queryChartSourcePages(payload, { signal, onPage } = {}) {
+  const requestedIds = payload.datasetIds || []
+  const staticIds = requestedIds.filter(id => id !== LOD13_BUILDING_DATASET_ID)
+  const includeLod13 = requestedIds.includes(LOD13_BUILDING_DATASET_ID)
+  const states = [
+    ...(staticIds.length ? [{
+      name: 'static', cursor: undefined, watermark: undefined, hasMore: true,
+      done: false, initialized: false, buffer: [], response: null,
+      query: cursor => queryChartRegion({ ...payload, datasetIds: staticIds }, { signal, cursor }),
+    }] : []),
+    ...(includeLod13 ? [{
+      name: 'lod13', cursor: undefined, watermark: undefined, hasMore: true,
+      done: false, initialized: false, buffer: [], response: null,
+      query: cursor => queryLod13BuildingGrids(payload, { signal, cursor }),
+    }] : []),
+  ]
+  let pageIndex = 0
+  let committedCursor
+
+  async function fetchNext(state) {
+    const response = await state.query(state.cursor)
+    const data = response?.data || {}
+    const cells = data.cells || []
+    const scannedCursor = data.scannedCursor || lastGridCode(cells) || data.nextCursor
+    if (data.hasMore === true && !scannedCursor) {
+      throw new Error(`${state.name} 航图分页返回 hasMore，但当前页没有可推进游标`)
+    }
+    if (scannedCursor && state.cursor && scannedCursor <= state.cursor) {
+      throw new Error(`${state.name} 航图分页游标没有向前推进`)
+    }
+    state.response = response
+    state.buffer.push(...cells)
+    state.initialized = true
+    state.hasMore = data.hasMore === true
+    state.done = !state.hasMore
+    if (scannedCursor) {
+      state.cursor = scannedCursor
+      state.watermark = scannedCursor
+    }
+  }
+
+  while (!signal?.aborted && states.length > 0) {
+    const refill = states.filter(state =>
+      !state.initialized || (!state.done && state.watermark === committedCursor),
+    )
+    await Promise.all(refill.map(fetchNext))
+
+    const activeWatermarks = states
+      .filter(state => !state.done)
+      .map(state => state.watermark)
+      .filter(Boolean)
+      .sort()
+    const boundary = activeWatermarks[0]
+    const boundedGroups = states.map(state => {
+      if (!boundary) {
+        const cells = state.buffer
+        state.buffer = []
+        return cells
+      }
+      const cells = state.buffer.filter(cell => String(cell?.code || '') <= boundary)
+      state.buffer = state.buffer.filter(cell => String(cell?.code || '') > boundary)
+      return cells
+    })
+    const cells = mergeChartCells(boundedGroups)
+    const pending = states.some(state => !state.done || state.buffer.length > 0)
+    const features = cells.flatMap(cell => cell.features || [])
+    const staticResponse = states.find(state => state.name === 'static')?.response
+    const lod13Response = states.find(state => state.name === 'lod13')?.response
+    const data = {
+      ...(staticResponse?.data || lod13Response?.data || {}),
+      cells,
+      matchedCount: cells.length,
+      mappingCount: features.length,
+      lod13Count: new Set(features
+        .filter(feature => feature.datasetId === LOD13_BUILDING_DATASET_ID)
+        .map(feature => feature.code)).size,
+      hasMore: pending,
+      nextCursor: pending ? (boundary || committedCursor) : null,
+      dataSource: 'clickhouse',
+      pageIndex,
+    }
+    const page = { status: 'success', success: true, data }
+    if (onPage) await onPage(page)
+    if (boundary) committedCursor = boundary
+    pageIndex += 1
+    if (!pending) break
+  }
+
+  return { cursor: committedCursor, pageCount: pageIndex }
+}
+
+export async function queryChartSources(payload, { signal } = {}) {
+  const pages = []
+  await queryChartSourcePages(payload, {
+    signal,
+    onPage: page => pages.push(page),
+  })
+  const firstData = pages[0]?.data || {}
+  const cells = mergeChartCells(pages.map(page => page.data.cells || []))
+  const features = cells.flatMap(cell => cell.features || [])
+  return {
+    status: 'success',
+    success: true,
+    data: {
+      ...firstData,
+      cells,
+      matchedCount: cells.length,
+      mappingCount: features.length,
+      lod13Count: new Set(features
+        .filter(feature => feature.datasetId === LOD13_BUILDING_DATASET_ID)
+        .map(feature => feature.code)).size,
+      hasMore: false,
+      nextCursor: null,
+      truncated: false,
+      dataSource: 'clickhouse',
+      pageCount: pages.length,
+    },
+  }
 }
 
 function splitRegion(payload) {

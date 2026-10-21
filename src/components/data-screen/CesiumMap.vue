@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import * as Cesium from 'cesium'
 import { colorizeGridCells, getGridColorByLevel, resolveGridColor } from '../../utils/cesium/gridLevelColor'
 import {
@@ -13,9 +13,26 @@ import {
   switchBaseLayer,
 } from '../../utils/tdtBaseLayers.js'
 import { createZhejiangTerrainProvider } from '../../utils/zhejiangTerrain.js'
-import { chartFeatureLabel, queryChartFeatures } from '../../utils/staticFeatures.js'
+import {
+  chartFeatureDimensionLabel,
+  chartFeatureLabel,
+  filterChartDatasetTree,
+  queryChartFeatures,
+  queryLod13GridFeatures,
+} from '../../utils/staticFeatures.js'
+import ChartDatasetTreeNode from './functions/ChartDatasetTreeNode.vue'
 import InstancedGridRenderer from '../../utils/cesium/InstancedGridRenderer.js'
 import GridRendererManager, { GRID_RENDERER } from '../../utils/cesium/GridRendererManager.js'
+import { buildGridHighlightPaths } from '../../utils/cesium/gridHighlight.js'
+import {
+  chartAttributeLabel,
+  visibleChartAttributes,
+} from '../../utils/chartAttributeLabels.js'
+import {
+  formatNoiseAttribute,
+  noiseAttributeLabel,
+  visibleNoiseAttributes,
+} from '../../utils/noiseGrid.js'
 
 // 模块级别的存储（持久化，不随组件销毁而丢失）
 const routeGridEntities = {}
@@ -77,6 +94,7 @@ let gridPrimitiveCells = new Map()
 let gridPrimitiveKinds = new Map()
 let instancedGridRenderers = []
 let chartGridEntities = []
+let selectedGridHighlight = null
 const gridRendererManager = new GridRendererManager()
 
 const lon = ref(null)
@@ -90,6 +108,10 @@ const selectedLod13Id = ref('')
 const showLod13Panel = ref(false)
 const isMapReady = ref(false) // 地图是否准备就绪
 const chartFeatureLayers = ref([])
+const chartFeatureTree = computed(() => filterChartDatasetTree(chartFeatureLayers.value))
+const enabledChartFeatureIds = computed(() => (
+  chartFeatureLayers.value.filter(layer => layer.enabled).map(layer => layer.type)
+))
 const selectedGrid = ref(null)
 const selectedLod13Feature = ref(null)
 let gridFeatureRequest = null
@@ -97,24 +119,121 @@ let gridFeatureRequest = null
 // 切换网格或关闭面板时取消旧请求，防止迟到的属性覆盖当前选中网格。
 watch(selectedGrid, () => gridFeatureRequest?.abort(), { flush: 'sync' })
 
+function removeSelectedGridHighlight() {
+  if (selectedGridHighlight && viewer && !viewer.isDestroyed()) {
+    viewer.scene.primitives.remove(selectedGridHighlight)
+    viewer.scene.requestRender()
+  }
+  selectedGridHighlight = null
+}
+
+function showSelectedGridHighlight(detail) {
+  removeSelectedGridHighlight()
+  if (!viewer || viewer.isDestroyed()) return
+
+  const paths = buildGridHighlightPaths(detail?.bounds)
+  if (!paths.length) return
+
+  const collection = new Cesium.PolylineCollection()
+  const material = Cesium.Material.fromType('Color', {
+    color: Cesium.Color.fromCssColorString('#ffb000'),
+  })
+  paths.forEach(path => {
+    collection.add({
+      positions: path.map(([longitude, latitude, altitude]) => (
+        Cesium.Cartesian3.fromDegrees(longitude, latitude, altitude)
+      )),
+      width: 4,
+      material,
+    })
+  })
+
+  selectedGridHighlight = viewer.scene.primitives.add(collection)
+  viewer.scene.requestRender()
+}
+
+function clearSelectedGridSelection() {
+  selectedGrid.value = null
+  removeSelectedGridHighlight()
+}
+
 async function selectGridDetail(detail) {
   selectedLod13Feature.value = null
-  selectedGrid.value = { ...detail, featuresLoading: false, featuresError: '', featuresTruncated: false }
+  selectedGrid.value = {
+    ...detail,
+    features: Array.isArray(detail?.features) ? detail.features : [],
+    attributes: detail?.attributes || {},
+    featuresLoading: false,
+    attributesLoading: false,
+    featuresError: '',
+    attributesError: '',
+    featuresTruncated: false,
+  }
   const selected = selectedGrid.value
+  showSelectedGridHighlight(selected)
+  if (selected.attributeGrid) {
+    const request = new AbortController()
+    gridFeatureRequest = request
+    selected.attributesLoading = true
+    try {
+      const response = await fetch('/api/true-altitude-airspace/grid/cell', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          datasetId: selected.datasetId,
+          datasetVersion: selected.datasetVersion,
+          level: Number(selected.level),
+          code: selected.code,
+        }),
+        signal: request.signal,
+      })
+      if (!response.ok) throw new Error(await response.text() || `状态码 ${response.status}`)
+      const body = await response.json()
+      if (request.signal.aborted || selectedGrid.value !== selected) return
+      selected.attributes = body?.data?.attributes || {}
+      const grid = body?.data?.grid || {}
+      selected.row = grid.y ?? selected.row
+      selected.column = grid.x ?? selected.column
+      selected.layer = grid.z ?? selected.layer
+      selected.groundElevation = grid.ground_elevation ?? selected.groundElevation
+      selected.aglBottom = grid.agl_bottom ?? selected.aglBottom
+      selected.aglTop = grid.agl_top ?? selected.aglTop
+    } catch (error) {
+      if (!request.signal.aborted && selectedGrid.value === selected) {
+        selected.attributesError = error?.message || '网格属性加载失败'
+      }
+    } finally {
+      if (selectedGrid.value === selected) selected.attributesLoading = false
+      if (gridFeatureRequest === request) gridFeatureRequest = null
+    }
+    return
+  }
   if (selected.features.length) return
   const request = new AbortController()
   gridFeatureRequest = request
   selected.featuresLoading = true
   try {
-    const data = await queryChartFeatures([selected], {
-      signal: request.signal,
-      includeRelatedLevels: true,
-    })
+    const sourceMask = Number(selected.chartSourceMask) || 0
+    const [staticData, lod13Features] = await Promise.all([
+      sourceMask === 0 || (sourceMask & 1) !== 0
+        ? queryChartFeatures([selected], {
+            signal: request.signal,
+            includeRelatedLevels: true,
+          })
+        : Promise.resolve({ features2D: [], features3D: [], truncated: false }),
+      (sourceMask & 2) !== 0
+        ? queryLod13GridFeatures(selected, { signal: request.signal })
+        : Promise.resolve([]),
+    ])
     if (request.signal.aborted || selectedGrid.value !== selected) return
-    selected.features = [...new Map([...data.features2D, ...data.features3D].map(feature => [
+    selected.features = [...new Map([
+      ...staticData.features2D,
+      ...staticData.features3D,
+      ...lod13Features,
+    ].map(feature => [
       `${feature.datasetId}-${feature.featureUid}-${feature.dimensionMode}`, feature,
     ])).values()]
-    selected.featuresTruncated = data.truncated
+    selected.featuresTruncated = staticData.truncated
   } catch (error) {
     if (!request.signal.aborted && selectedGrid.value === selected) {
       selected.featuresError = error?.message || '航图要素属性加载失败'
@@ -131,7 +250,7 @@ function featureBusinessType(properties) {
 
 function gridFeatureTypes(features) {
   const types = [...new Set(features.map(feature => featureBusinessType(feature.properties)).filter(Boolean))]
-  return types.join('、') || '未标注'
+  return types.join('、')
 }
 
 function formatPropertyValue(value) {
@@ -161,6 +280,11 @@ function toGridDetail(cell, bounds, fallbackLevel) {
     overviewSegmentCount: cell?.overviewSegmentCount,
     overviewColumnBottom: cell?.overviewColumnBottom,
     overviewColumnTop: cell?.overviewColumnTop,
+    chartSourceMask: cell?.chartSourceMask,
+    attributeCode: cell?.attributeCode,
+    attributeValue: cell?.attributeValue,
+    attributeGrid: cell?.attributeGrid === true,
+    attributes: cell?.attributes || {},
     bounds,
     features: cell?.features || cell?.chartFeatures || [],
   }
@@ -176,6 +300,18 @@ function syncChartFeatureLayers(cells, previous = new Map(chartFeatureLayers.val
     })
   })
   chartFeatureLayers.value = [...layers.values()].sort((a, b) => a.label.localeCompare(b.label))
+}
+
+function syncChartLayerMetadata(layers, previous = new Map(chartFeatureLayers.value.map(layer => [layer.type, layer.enabled]))) {
+  if (!Array.isArray(layers)) return
+  chartFeatureLayers.value = layers.map(layer => {
+    const type = layer.type || layer.id
+    return {
+      ...layer,
+      type,
+      enabled: previous.get(type) ?? layer.enabled ?? true,
+    }
+  }).filter(layer => layer.type)
 }
 
 function updateChartFeatureVisibility() {
@@ -205,6 +341,14 @@ function updateChartFeatureVisibility() {
     })
   })
   viewer?.scene.requestRender()
+}
+
+function setChartFeatureIdsEnabled(ids, enabled) {
+  const targetIds = new Set(ids)
+  chartFeatureLayers.value.forEach(layer => {
+    if (targetIds.has(layer.type)) layer.enabled = enabled
+  })
+  updateChartFeatureVisibility()
 }
 
 // ==================== 查询结果图例 + 比例尺（仅在查询出网格后显示） ====================
@@ -1168,7 +1312,7 @@ function clearGridVisual() {
   gridPrimitiveKinds = new Map()
   chartGridEntities = []
   chartFeatureLayers.value = []
-  selectedGrid.value = null
+  clearSelectedGridSelection()
 
   // 清除之前的单个网格边界
   const boundaryEntity = viewer.entities.getById('grid-boundary')
@@ -1199,14 +1343,24 @@ function clearGridVisual() {
 
 // 百万级静态网格使用共享立方体模板 + GPU 实例属性，避免逐格 GeometryInstance。
 function drawGridInstanced(gridInfo, options = {}) {
+  const previousChartLayers = new Map(chartFeatureLayers.value.map(layer => [layer.type, layer.enabled]))
   if (!options.append) clearGridVisual()
   if (!gridInfo.cells.length) return
+  syncChartLayerMetadata(gridInfo.chartLayers, previousChartLayers)
 
   const renderer = new InstancedGridRenderer({
     cells: gridInfo.cells,
     fillAlpha: gridInfo.fillAlpha ?? 0.5,
     outlineAlpha: gridInfo.outlineAlpha ?? 1.0,
     distanceFadeMinAlpha: gridInfo.distanceFadeMinAlpha,
+    detailBeginPx: gridInfo.detailBeginPx,
+    detailEndPx: gridInfo.detailEndPx,
+    minorFarAlpha: gridInfo.minorFarAlpha,
+    minorNearAlpha: gridInfo.minorNearAlpha,
+    primaryFarAlpha: gridInfo.primaryFarAlpha,
+    primaryNearAlpha: gridInfo.primaryNearAlpha,
+    primaryStep: gridInfo.primaryStep,
+    farBrightness: gridInfo.farBrightness,
     denseOutline: gridInfo.denseOutline === true,
     enablePicking: gridInfo.enablePicking === true,
     level: gridInfo.level,
@@ -4510,7 +4664,7 @@ onMounted(async () => {
     )
     if (lod13Attributes) {
       selectedLod13Feature.value = lod13Attributes
-      selectedGrid.value = null
+      clearSelectedGridSelection()
       return
     }
     if (pickedEntity?.__chartGridDetail) {
@@ -4528,6 +4682,19 @@ onMounted(async () => {
       }
     }
     if (instancedGridRenderers.length) {
+      const ray = viewer.camera.getPickRay(movement.position)
+      let nearestRayHit
+      for (const renderer of instancedGridRenderers) {
+        const hit = renderer.pickCell(ray)
+        if (hit && (!nearestRayHit || hit.distance < nearestRayHit.distance)) nearestRayHit = hit
+      }
+      if (nearestRayHit?.cell) {
+        const cell = nearestRayHit.cell
+        void selectGridDetail(toGridDetail(cell, cell.bounds, cell.level ?? cell.z))
+        return
+      }
+
+      // 极端投影或无有效射线时保留原坐标查询作为兼容回退。
       const cartesian = viewer.scene.pickPosition(movement.position)
         || viewer.camera.pickEllipsoid(movement.position)
       const cartographic = cartesian && Cesium.Cartographic.fromCartesian(cartesian)
@@ -4546,7 +4713,7 @@ onMounted(async () => {
         return
       }
     }
-    selectedGrid.value = null
+    clearSelectedGridSelection()
     selectedLod13Feature.value = null
 
     // 获取点击位置的 cartesian 坐标
@@ -4613,6 +4780,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   gridFeatureRequest?.abort()
+  clearSelectedGridSelection()
   stopUavAnimation()
   if (scaleBarTimer) {
     clearTimeout(scaleBarTimer)
@@ -4646,26 +4814,23 @@ onBeforeUnmount(() => {
       <div v-if="!chartFeatureLayers.length" class="chart-feature-empty">
         点击网格可查看关联航图要素属性；航图查询后可在此筛选要素显示。
       </div>
-      <label
-        v-for="layer in chartFeatureLayers"
-        :key="layer.type"
-        class="chart-feature-option"
-        :title="layer.label"
-      >
-        <input
-          v-model="layer.enabled"
-          type="checkbox"
-          :aria-label="`显示${layer.label}`"
-          @change="updateChartFeatureVisibility"
-        >
-        <i :style="{ background: layer.color }" />
-        <span>{{ layer.label }}</span>
-        <small>{{ layer.count }}</small>
-      </label>
+      <div v-else class="chart-feature-tree">
+        <ChartDatasetTreeNode
+          v-for="node in chartFeatureTree"
+          :key="node.id"
+          :node="node"
+          :selected-dataset-ids="enabledChartFeatureIds"
+          variant="dark"
+          @toggle="setChartFeatureIdsEnabled"
+        />
+      </div>
+    </aside>
+
+    <aside v-if="selectedGrid || selectedLod13Feature" class="selection-detail-popup">
       <section v-if="selectedGrid" class="selected-grid-detail">
         <div class="selected-grid-title">
           <span>已选网格</span>
-          <button type="button" aria-label="关闭网格详情" @click="selectedGrid = null">×</button>
+          <button type="button" aria-label="关闭网格详情" @click="clearSelectedGridSelection">×</button>
         </div>
         <div>编码：{{ selectedGrid.code }}{{ selectedGrid.overviewColumn ? '（代表网格）' : '' }}</div>
         <div>层级：{{ selectedGrid.level }}</div>
@@ -4678,29 +4843,50 @@ onBeforeUnmount(() => {
         <div v-if="selectedGrid.aglBottom !== undefined || selectedGrid.aglTop !== undefined">
           真高：{{ Number(selectedGrid.aglBottom).toFixed(2) }} ～ {{ Number(selectedGrid.aglTop).toFixed(2) }} m
         </div>
-        <div>要素类型：{{ gridFeatureTypes(selectedGrid.features) }}</div>
+        <div v-if="!selectedGrid.attributeGrid && gridFeatureTypes(selectedGrid.features)">要素类型：{{ gridFeatureTypes(selectedGrid.features) }}</div>
         <div>经纬度：{{ selectedGrid.bounds.west.toFixed(6) }}, {{ selectedGrid.bounds.south.toFixed(6) }} ～ {{ selectedGrid.bounds.east.toFixed(6) }}, {{ selectedGrid.bounds.north.toFixed(6) }}</div>
         <div>{{ selectedGrid.overviewSegmentCount ? '当前段高度' : '高度' }}：{{ selectedGrid.bounds.bottom.toFixed(2) }} ～ {{ selectedGrid.bounds.top.toFixed(2) }} m</div>
         <div v-if="selectedGrid.overviewSegmentCount">整列高度：{{ selectedGrid.overviewColumnBottom.toFixed(2) }} ～ {{ selectedGrid.overviewColumnTop.toFixed(2) }} m</div>
-        <div class="selected-grid-features">关联要素（{{ selectedGrid.features.length }}）</div>
-        <div v-if="selectedGrid.featuresLoading">正在加载航图要素属性…</div>
-        <div v-else-if="selectedGrid.featuresError" role="alert">
-          {{ selectedGrid.featuresError }}
-          <button type="button" @click="selectGridDetail(selectedGrid)">重试</button>
-        </div>
-        <div v-else-if="!selectedGrid.features.length">该网格范围内暂无关联航图要素。</div>
-        <div v-if="selectedGrid.featuresTruncated">关联映射较多，当前仅显示前 10,000 条映射中的要素。</div>
-        <article v-for="feature in selectedGrid.features" :key="`${feature.datasetId}-${feature.featureUid}`" class="selected-grid-feature">
+        <template v-if="selectedGrid.attributeGrid">
+          <div class="selected-grid-features">网格噪声属性</div>
+          <div class="selected-attribute-current">
+            当前专题：{{ noiseAttributeLabel(selectedGrid.attributeCode) }} ·
+            {{ formatNoiseAttribute(selectedGrid.attributeCode, selectedGrid.attributeValue) }}
+          </div>
+          <div v-if="selectedGrid.attributesLoading">正在加载完整网格属性…</div>
+          <div v-else-if="selectedGrid.attributesError" role="alert">
+            {{ selectedGrid.attributesError }}
+            <button type="button" @click="selectGridDetail(selectedGrid)">重试</button>
+          </div>
+          <dl v-else-if="visibleNoiseAttributes(selectedGrid.attributes).length" class="grid-property-list noise-property-list">
+            <div v-for="attribute in visibleNoiseAttributes(selectedGrid.attributes)" :key="attribute.code" class="grid-property-row">
+              <dt>{{ attribute.label }}</dt>
+              <dd>{{ formatNoiseAttribute(attribute.code, attribute.value) }}</dd>
+            </div>
+          </dl>
+          <div v-else>该网格暂无可显示的噪声属性。</div>
+        </template>
+        <template v-else>
+          <div class="selected-grid-features">关联要素（{{ selectedGrid.features.length }}）</div>
+          <div v-if="selectedGrid.featuresLoading">正在加载航图要素属性…</div>
+          <div v-else-if="selectedGrid.featuresError" role="alert">
+            {{ selectedGrid.featuresError }}
+            <button type="button" @click="selectGridDetail(selectedGrid)">重试</button>
+          </div>
+          <div v-else-if="!selectedGrid.features.length">该网格范围内暂无关联航图要素。</div>
+          <div v-if="selectedGrid.featuresTruncated">关联映射较多，当前仅显示前 10,000 条映射中的要素。</div>
+        </template>
+        <article v-for="feature in (selectedGrid.attributeGrid ? [] : selectedGrid.features)" :key="`${feature.datasetId}-${feature.featureUid}`" class="selected-grid-feature">
           <b>{{ chartFeatureLabel(feature) }}</b>
           <span v-if="feature.datasetId">数据集：{{ feature.datasetId }}</span>
-          <span v-if="feature.featureUid">要素编号：{{ feature.featureUid }}</span>
+          <span v-if="feature.featureUid">系统要素ID：{{ feature.featureUid }}</span>
           <span v-if="feature.featureType">要素分类：{{ feature.featureType }}</span>
           <span v-if="featureBusinessType(feature.properties)">类型：{{ featureBusinessType(feature.properties) }}</span>
-          <span>{{ feature.dimensionMode }} · {{ feature.verticalMode || '—' }}</span>
+          <span>{{ chartFeatureDimensionLabel(feature) }}</span>
           <span v-if="feature.minHeight !== null && feature.minHeight !== undefined">高度：{{ feature.minHeight }} ～ {{ feature.maxHeight }} m</span>
-          <dl v-if="feature.properties && Object.keys(feature.properties).length" class="grid-property-list">
-            <div v-for="(value, key) in feature.properties" :key="key" class="grid-property-row">
-              <dt>{{ key }}</dt>
+          <dl v-if="visibleChartAttributes(feature.properties).length" class="grid-property-list">
+            <div v-for="[key, value] in visibleChartAttributes(feature.properties)" :key="key" class="grid-property-row">
+              <dt>{{ chartAttributeLabel(key) }}</dt>
               <dd>{{ formatPropertyValue(value) }}</dd>
             </div>
           </dl>
@@ -4712,8 +4898,8 @@ onBeforeUnmount(() => {
           <span>{{ selectedLod13Feature.title }}属性</span>
           <button type="button" aria-label="关闭模型属性" @click="selectedLod13Feature = null">×</button>
         </div>
-        <div v-for="(value, key) in selectedLod13Feature.properties" :key="key">
-          {{ key }}：{{ value ?? '—' }}
+        <div v-for="[key, value] in visibleChartAttributes(selectedLod13Feature.properties)" :key="key">
+          {{ chartAttributeLabel(key) }}：{{ formatPropertyValue(value) }}
         </div>
       </section>
     </aside>
@@ -5136,6 +5322,23 @@ onBeforeUnmount(() => {
   font-size: 11px;
 }
 
+.selection-detail-popup {
+  position: absolute;
+  top: 80px;
+  right: 270px;
+  width: min(440px, calc(100vw - 320px));
+  max-height: calc(100vh - 150px);
+  overflow-y: auto;
+  padding: 16px 18px;
+  color: #f8fafc;
+  background: rgba(15, 23, 42, 0.94);
+  border: 1px solid rgba(147, 197, 253, 0.35);
+  border-radius: 12px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.42);
+  z-index: 22;
+  backdrop-filter: blur(10px);
+}
+
 .chart-feature-option {
   gap: 8px;
   padding: 6px 4px;
@@ -5173,20 +5376,25 @@ onBeforeUnmount(() => {
   line-height: 1.6;
 }
 
+.chart-feature-tree {
+  margin: 0 -4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
 .selected-grid-detail {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  margin: 0;
   color: rgba(255, 255, 255, 0.85);
-  font-size: 11px;
-  line-height: 1.65;
+  font-size: 14px;
+  line-height: 1.75;
 }
 
 .selected-grid-title {
   display: flex;
   justify-content: space-between;
   color: #fff;
-  font-size: 13px;
+  margin-bottom: 10px;
+  font-size: 17px;
   font-weight: 600;
 }
 
@@ -5200,17 +5408,32 @@ onBeforeUnmount(() => {
 }
 
 .selected-grid-features {
-  margin-top: 6px;
+  margin-top: 10px;
   color: #93c5fd;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.selected-attribute-current {
+  margin: 6px 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(59, 130, 246, 0.12);
+  color: #bfdbfe;
+}
+
+.noise-property-list {
+  font-size: 15px;
 }
 
 .selected-grid-feature {
   display: flex;
   flex-direction: column;
-  margin-top: 5px;
-  padding: 5px;
-  border-radius: 4px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 7px;
   background: rgba(255, 255, 255, 0.06);
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 
@@ -5220,9 +5443,9 @@ onBeforeUnmount(() => {
 
 .grid-property-row {
   display: grid;
-  grid-template-columns: minmax(60px, 35%) minmax(0, 1fr);
-  gap: 8px;
-  padding: 4px 0;
+  grid-template-columns: minmax(100px, 38%) minmax(0, 1fr);
+  gap: 12px;
+  padding: 6px 0;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
