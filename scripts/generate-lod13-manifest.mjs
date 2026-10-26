@@ -32,8 +32,10 @@ const datasets = (await Promise.all(tilesets.map(async (tilesetFile) => {
   if (ignoredDirectories.has(directoryName)) return null
   const attributesFile = path.join(path.dirname(tilesetFile), 'attributes.json')
   const hasAttributes = await readFile(attributesFile).then(() => true).catch(() => false)
+  // 纯中文目录名会被 ASCII 过滤清空，空 id 会与前端空闲加载标识冲突，回退用原始目录名
+  const asciiId = relativeDir.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-|-$/g, '')
   return {
-    id: relativeDir.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-|-$/g, ''),
+    id: asciiId || relativeDir,
     label: knownLabels[directoryName] || directoryName,
     url: `/${relativeDir}/tileset.json`,
     ...(hasAttributes ? { attributesUrl: `/${relativeDir}/attributes.json` } : {}),
