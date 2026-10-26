@@ -1,15 +1,25 @@
 import * as Cesium from 'cesium'
 
 // 天地图浏览器端 key，可通过 VITE_TDT_KEY 环境变量覆盖
-const TDT_KEY = import.meta.env.VITE_TDT_KEY || '165bf7b260b0e00a80b6aa3071b41ba8'
+//const TDT_KEY = import.meta.env?.VITE_TDT_KEY || '165bf7b260b0e00a80b6aa3071b41ba8'
+const TDT_KEY = import.meta.env?.VITE_TDT_KEY || '91e6ca15ca5586151980961a7b1039b7'
+
+export const DEFAULT_BASE_LAYER_TYPE = 'img'
+export const DEFAULT_OSGB_VISIBLE = false
 
 // 可选底图（UI 展示顺序）
 export const BASE_LAYER_OPTIONS = [
+  { id: 'none', label: '关闭' },
   { id: 'default', label: '默认' },
   { id: 'img', label: '影像' },
   { id: 'vec', label: '矢量' },
   { id: 'ter', label: '地形' },
 ]
+
+export function nextBaseLayerVisibilityType(currentType, lastVisibleType = DEFAULT_BASE_LAYER_TYPE) {
+  if (currentType !== 'none') return 'none'
+  return lastVisibleType === 'none' ? DEFAULT_BASE_LAYER_TYPE : lastVisibleType
+}
 
 // 天地图图源定义：底图 + 注记两层，全部使用 w（Web 墨卡托）切片
 const TDT_LAYERS = {
@@ -65,11 +75,11 @@ export function initBaseLayers(viewer) {
   }
 }
 
-// type: 'default' | 'img' | 'vec' | 'ter'
+// type: 'none' | 'default' | 'img' | 'vec' | 'ter'
 export function switchBaseLayer(viewer, type) {
   const state = getState(viewer)
   if (!viewer || !state.defaultLayer || type === state.currentType) return
-  if (type !== 'default' && !TDT_LAYERS[type]) {
+  if (type !== 'none' && type !== 'default' && !TDT_LAYERS[type]) {
     console.warn(`[tdtBaseLayers] 未知的底图类型: ${type}`)
     return
   }
@@ -77,7 +87,7 @@ export function switchBaseLayer(viewer, type) {
   removeTdtLayers(viewer, state)
   state.defaultLayer.show = type === 'default'
 
-  if (type !== 'default') {
+  if (type !== 'none' && type !== 'default') {
     const def = TDT_LAYERS[type]
     const baseLayer = viewer.imageryLayers.addImageryProvider(
       createTdtProvider(def.base, def.baseFormat, def.maxLevel)

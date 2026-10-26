@@ -1333,8 +1333,9 @@ function nextPage() {
 }
 
 onMounted(() => {
-  // 默认进入航线信息管理
-  selectModule(infoModules.find(m => m.id === 'route-info'))
+  // 默认展示航线信息管理，但启动时不请求列表；由用户点击模块或“刷新”后加载。
+  activeModuleId.value = 'route-info'
+  currentView.value = 'list'
 })
 
 defineExpose({

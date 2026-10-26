@@ -286,6 +286,12 @@ function validateParquetAttribute(key) {
 // ==================== 多维场重采样 ====================
 const FIELD_VARIABLE_RE = /^[A-Za-z_][A-Za-z0-9_.-]*$/
 const ATTRIBUTE_CODE_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
+const FIELD_VALUE_PRESETS = {
+  original: { valueTransform: 'identity', transformScale: 1, transformOffset: 0 },
+  emfSquared: { valueTransform: 'log10', transformScale: 10, transformOffset: 120 },
+  emfAmplitude: { valueTransform: 'log10', transformScale: 20, transformOffset: 120 },
+}
+const fieldValuePreset = ref('emfSquared')
 const fieldResampleForm = ref({
   datasetId: '',
   datasetVersion: '',
@@ -315,6 +321,30 @@ const fieldResampleForm = ref({
   maxTargetCells: 100000000,
   registerMissingAttribute: true,
 })
+
+function applyFieldValuePreset() {
+  const preset = FIELD_VALUE_PRESETS[fieldValuePreset.value]
+  if (!preset) return
+  Object.assign(fieldResampleForm.value, preset)
+  if (fieldValuePreset.value !== 'original') fieldResampleForm.value.unit = 'dBμV/m'
+  delete errors.value.transformScale
+  delete errors.value.transformOffset
+}
+
+function openManagedFieldImport({ type, attribute, binding }) {
+  switchTab(type)
+  const form = type === 'fieldResample' ? fieldResampleForm.value : parquetAttributeForm.value
+  if (binding) {
+    form.datasetId = binding.datasetId
+    form.datasetVersion = binding.datasetVersion
+  }
+  if (type === 'fieldResample' && attribute) {
+    form.attributeCode = attribute.code
+    form.attributeName = attribute.name || attribute.code
+    form.category = attribute.category || 'environment_field'
+    form.unit = attribute.unit || ''
+  }
+}
 
 function validateFieldResample(key) {
   const f = fieldResampleForm.value
@@ -390,18 +420,21 @@ const FEATURE_THEMES = [
   'communication', 'navigation', 'surveillance', 'airspace', 'obstacle',
   'vertiport', 'terrain', 'air_route', 'utility', 'structure',
 ]
-const HEIGHT_SOURCES = ['NONE', 'ATTRIBUTE', 'GEOMETRY_Z']
+const HEIGHT_SOURCES = ['NONE', 'ATTRIBUTE', 'GEOMETRY_Z', 'DEM_AGL']
 
 const featureForm = ref({
   datasetId: '',
   datasetName: '',
   theme: 'road',
   dimensionMode: '2D',
-  level: 14,
+  level: 17,
   input: '',
   featureType: 'road',
   featureTypeField: '',
   heightSource: 'NONE',
+  aglHeightField: 'Descriptio',
+  demGridTable: 'demgrid_17',
+  demNoDataPolicy: 'SKIP_CELL',
   showAdvanced: false,
   featureTypeMapping: '',
   propertyFields: '',
@@ -428,6 +461,12 @@ function validateFeature(key) {
   if (isBlank(f.featureType) && isBlank(f.featureTypeField)) e.featureType = '固定 Feature 类型与类型字段必须二选一'
   if (!isBlank(f.featureType) && !isBlank(f.featureTypeField)) e.featureTypeField = '与固定 Feature 类型互斥，请清空其中一项'
   if (!HEIGHT_SOURCES.includes(f.heightSource)) e.heightSource = '高度来源不合法'
+  if (f.dimensionMode === '2D' && f.heightSource !== 'NONE') e.heightSource = '2D 模式只能选择无高度'
+  if (f.heightSource === 'DEM_AGL') {
+    if (f.dimensionMode !== '3D') e.heightSource = 'DEM＋离地高度仅用于 3D 面要素'
+    if (isBlank(f.aglHeightField)) e.aglHeightField = '请填写离地高度上限字段'
+    if (!['ERROR', 'SKIP_CELL'].includes(f.demNoDataPolicy)) e.demNoDataPolicy = '请选择缺测处理方式'
+  }
   if (f.showAdvanced) {
     if (!isBlank(f.featureTypeMapping)) {
       try {
@@ -452,7 +491,8 @@ function validateFeature(key) {
     }
     const hasMin = !isBlank(f.minHeightField)
     const hasMax = !isBlank(f.maxHeightField)
-    if (hasMin !== hasMax) e.minHeightField = 'RANGE 最小/最大高度字段必须成对填写'
+    if (f.heightSource === 'DEM_AGL' && (hasMin || hasMax)) e.minHeightField = 'DEM_AGL 不允许混填绝对底高/顶高字段，请清空'
+    else if (hasMin !== hasMax) e.minHeightField = 'RANGE 最小/最大高度字段必须成对填写'
     else if ((hasMin || hasMax) && f.dimensionMode !== '3D') e.minHeightField = 'RANGE 高度字段仅 3D 模式可用'
     const mm = intCheck(f.maxMappings, '稀疏映射上限', 1, 50000000)
     if (mm) e.maxMappings = mm
@@ -1050,6 +1090,12 @@ async function submitFeatureImport() {
       input: String(f.input).trim(),
       heightSource: f.heightSource,
     }
+    if (f.heightSource === 'DEM_AGL') {
+      body.heightReference = 'ABSOLUTE'
+      body.aglHeightField = String(f.aglHeightField).trim()
+      body.demGridTable = String(f.demGridTable || 'demgrid_17').trim()
+      body.demNoDataPolicy = f.demNoDataPolicy
+    }
     if (!isBlank(f.datasetName)) body.datasetName = String(f.datasetName).trim()
     if (!isBlank(f.featureType)) body.featureType = String(f.featureType).trim()
     if (!isBlank(f.featureTypeField)) body.featureTypeField = String(f.featureTypeField).trim()
@@ -1177,6 +1223,7 @@ onBeforeUnmount(() => {
       <section v-show="activeTab === 'osgb'" class="storage-card">
         <div class="card-title">OSGB / 3D Tiles 模型网格化入库</div>
         <p class="card-desc">读取指定目录中的 OSGB 或 3D Tiles 模型，将三角面映射为指定层级的网格并写入数据库。任务提交后异步执行，将自动跟踪执行进度。</p>
+        <p v-if="osgbForm.mode === 'sync'" class="card-desc">标准入库默认自动同步 ClickHouse；任务成功后重新查询航图要素即可显示。同步失败时 PostgreSQL 数据保留，只需重试同步，无需重新网格化。</p>
 
         <div class="mode-row">
           <span class="mode-label">入库模式</span>
@@ -1610,7 +1657,7 @@ onBeforeUnmount(() => {
       <!-- 多维场重采样 -->
       <section v-show="activeTab === 'fieldResample'" class="storage-card">
         <div class="card-title">多维场数据重采样与网格属性挂载</div>
-        <p class="card-desc">读取 NetCDF 点剖面数据，在服务端生成候选 L17 DQG 格元并完成水平 Delaunay、垂直线性插值；候选结果仅在 ClickHouse 内与权威真高网格关联，不分页回读目标网格。</p>
+        <p class="card-desc">读取 NetCDF 点剖面数据，按编码游标分批读取目标空域的 L17 权威格元，仅对这些格元执行水平 Delaunay、垂直线性插值；不再先生成源场范围内的全部三维候选。</p>
 
         <div class="form-grid">
           <div class="form-field" :class="{ 'has-error': errors.datasetId }">
@@ -1680,19 +1727,31 @@ onBeforeUnmount(() => {
             <label>单位</label>
             <input v-model="fieldResampleForm.unit" type="text" placeholder="dBμV/m" />
           </div>
-          <div class="form-field">
+          <div class="form-field span-2">
+            <label>数值保存方式</label>
+            <select v-model="fieldValuePreset" @change="applyFieldValuePreset">
+              <option value="original">原值保存（不换算）</option>
+              <option value="emfSquared">电磁场强平方值 → dBμV/m（本次通导监兼容文件）</option>
+              <option value="emfAmplitude">电磁场强 V/m → dBμV/m</option>
+              <option value="custom">自定义换算</option>
+            </select>
+            <span v-if="fieldValuePreset === 'emfSquared'" class="field-hint">适用于本次 *_profiles.nc 的 field_total（单位为 (V/m)²），自动使用 log10、10、120。</span>
+            <span v-else-if="fieldValuePreset === 'emfAmplitude'" class="field-hint">适用于单位为 V/m 的场强值，例如原文件的 E_V_M，自动使用 log10、20、120。</span>
+            <span v-else-if="fieldValuePreset === 'original'" class="field-hint">插值结果直接保存，自动使用 identity、1、0；请填写源数值对应的单位。</span>
+          </div>
+          <div v-if="fieldValuePreset === 'custom'" class="form-field">
             <label>数值变换</label>
             <select v-model="fieldResampleForm.valueTransform">
               <option value="identity">原值：scale × value + offset</option>
               <option value="log10">对数：scale × log10(value) + offset</option>
             </select>
           </div>
-          <div class="form-field" :class="{ 'has-error': errors.transformScale }">
+          <div v-if="fieldValuePreset === 'custom'" class="form-field" :class="{ 'has-error': errors.transformScale }">
             <label>变换乘数</label>
             <input v-model.number="fieldResampleForm.transformScale" type="number" step="any" @blur="validateField('transformScale')" />
             <span v-if="errors.transformScale" class="field-error">{{ errors.transformScale }}</span>
           </div>
-          <div class="form-field" :class="{ 'has-error': errors.transformOffset }">
+          <div v-if="fieldValuePreset === 'custom'" class="form-field" :class="{ 'has-error': errors.transformOffset }">
             <label>变换偏移</label>
             <input v-model.number="fieldResampleForm.transformOffset" type="number" step="any" @blur="validateField('transformOffset')" />
             <span v-if="errors.transformOffset" class="field-error">{{ errors.transformOffset }}</span>
@@ -1741,9 +1800,10 @@ onBeforeUnmount(() => {
             <span v-if="errors.maxSourceValues" class="field-error">{{ errors.maxSourceValues }}</span>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.maxTargetCells }">
-            <label>最大候选目标格元数</label>
+            <label>最大有效目标格元数</label>
             <input v-model.number="fieldResampleForm.maxTargetCells" type="number" min="1" max="1000000000" @blur="validateField('maxTargetCells')" />
             <span v-if="errors.maxTargetCells" class="field-error">{{ errors.maxTargetCells }}</span>
+            <span v-else class="field-hint">限制插值有效且属于目标空域的输出数量，不限制读取批次数；超限会报错，不会截断入库。</span>
           </div>
           <div class="form-field">
             <label class="checkbox-item">
@@ -1758,7 +1818,7 @@ onBeforeUnmount(() => {
             <Loader2 v-if="submittingMap.fieldResample" :size="14" class="spin" />
             <span>{{ submittingMap.fieldResample ? '提交中...' : (fieldResampleForm.dryRun ? '提交重采样预检' : '提交重采样挂载') }}</span>
           </button>
-          <span class="submit-hint">任务直接生成候选 DQG，ClickHouse 仅执行批量成员关联和属性写入</span>
+          <span class="submit-hint">L17 权威格元分批重采样，按批次限制内存，保留最终成员校验和属性写入计数核验。</span>
         </div>
       </section>
 
@@ -1821,9 +1881,32 @@ onBeforeUnmount(() => {
               <option value="NONE">NONE（无高度）</option>
               <option value="ATTRIBUTE">ATTRIBUTE（属性字段）</option>
               <option value="GEOMETRY_Z">GEOMETRY_Z（几何 Z 值）</option>
+              <option value="DEM_AGL">DEM_AGL（L17 地面高程＋离地高度上限）</option>
             </select>
             <span v-if="errors.heightSource" class="field-error">{{ errors.heightSource }}</span>
           </div>
+          <template v-if="featureForm.heightSource === 'DEM_AGL'">
+            <div class="form-field" :class="{ 'has-error': errors.aglHeightField }">
+              <label>离地高度上限字段（米） <span class="req">*</span></label>
+              <input v-model="featureForm.aglHeightField" type="text" placeholder="Descriptio" @blur="validateField('aglHeightField')" />
+              <span v-if="errors.aglHeightField" class="field-error">{{ errors.aglHeightField }}</span>
+              <span v-else class="field-hint">从地面至该离地高度禁飞，支持纯数值字符串；不读取几何 Z 值</span>
+            </div>
+            <div class="form-field">
+              <label>地面高程来源</label>
+              <input :value="featureForm.demGridTable || 'demgrid_17'" type="text" readonly />
+              <span class="field-hint">读取 L17 demgrid_17 表的 ST_Z(center)；请确保其与真高剖分使用的 sourceTable 和数据版本一致</span>
+            </div>
+            <div class="form-field" :class="{ 'has-error': errors.demNoDataPolicy }">
+              <label>地面高程缺测处理</label>
+              <select v-model="featureForm.demNoDataPolicy" @change="validateField('demNoDataPolicy')">
+                <option value="SKIP_CELL">跳过缺测网格（其余区域正常入库）</option>
+                <option value="ERROR">报错并停止整批</option>
+              </select>
+              <span v-if="errors.demNoDataPolicy" class="field-error">{{ errors.demNoDataPolicy }}</span>
+              <span v-else class="field-hint">跳过单位为 L17 水平格；缺少有效 ST_Z(center) 的格不入库，不用零高程填补</span>
+            </div>
+          </template>
         </div>
 
         <button class="advanced-toggle" type="button" @click="featureForm.showAdvanced = !featureForm.showAdvanced">
@@ -1882,7 +1965,7 @@ onBeforeUnmount(() => {
 
       <!-- 航图要素数据管理 -->
       <section v-show="activeTab === 'featureManage'" class="dataset-manager-shell">
-        <FeatureDatasetManager />
+        <FeatureDatasetManager @import-field="openManagedFieldImport" />
       </section>
 
       <!-- 空域网格入库 -->

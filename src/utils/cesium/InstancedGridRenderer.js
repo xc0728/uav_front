@@ -108,7 +108,8 @@ void main() {
 `
 
 function parseColor(value, cache) {
-  const key = typeof value === 'string' ? value : '#3b82f6'
+  //const key = typeof value === 'string' ? value : '#3b82f6'
+  const key = typeof value === 'string' ? value : '#87CEEB'
   if (cache.has(key)) return cache.get(key)
 
   let hex = key.startsWith('#') ? key.slice(1) : ''
@@ -116,7 +117,7 @@ function parseColor(value, cache) {
     hex = [...hex].map(char => char + char).join('')
   }
   const valid = /^(?:[0-9a-f]{6}|[0-9a-f]{8})$/i.test(hex)
-  const normalized = valid ? hex : '3b82f6'
+  const normalized = valid ? hex : '87CEEB'
   const color = [
     Number.parseInt(normalized.slice(0, 2), 16),
     Number.parseInt(normalized.slice(2, 4), 16),

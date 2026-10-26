@@ -14,12 +14,12 @@ import {
 } from '../../../utils/trueAltitudeGrid'
 import {
   GRID_ATTRIBUTE_TOPICS,
+  gridAttributeLegend,
   noiseGridColor,
 } from '../../../utils/noiseGrid'
 import {
-  CHART_DATASETS,
-  CHART_DATASET_TREE,
   LOD13_BUILDING_DATASET_ID,
+  buildChartDatasetTree,
   chartFeatureColor,
   chartFeatureDimensionLabel,
   chartFeatureDimensionMode,
@@ -27,6 +27,7 @@ import {
   chartThemeLabel,
   featuresByGrid,
   horizontalGridCode,
+  loadAvailableChartDatasets,
   queryChartFeatures,
   queryChartSourcePages,
 } from '../../../utils/staticFeatures'
@@ -107,6 +108,11 @@ const error = ref('')
 const result = ref(null)
 const queryStats = ref(null)
 const selectedGridAttributeCode = ref('')
+const selectedGridAttributeLegend = computed(() => gridAttributeLegend(selectedGridAttributeCode.value))
+const gridAttributeTopicGroups = [
+  { label: '噪声', topics: GRID_ATTRIBUTE_TOPICS.filter(item => item.kind === 'zone' || item.kind === 'margin') },
+  { label: '电磁场强', topics: GRID_ATTRIBUTE_TOPICS.filter(item => item.kind === 'emf') },
+]
 const attributeTopicMode = computed(() => chartMode.value && Boolean(selectedGridAttributeCode.value))
 const trueAltitudeQueryMode = computed(() => trueAltitudeMode.value || attributeTopicMode.value)
 const trueAltitudeResolutionMode = ref(TRUE_ALTITUDE_QUERY_MODE.LOD)
@@ -117,11 +123,16 @@ const trueAltitudeLodEnabled = computed(
 const experimentalMixedResolution = ref(false)
 const gridsData = ref([])
 const chartSummary = ref(null)
-const selectedDatasetIds = ref(CHART_DATASETS.slice(0, 4).map(dataset => dataset.id))
+const chartDatasets = ref([])
+const chartDatasetLoading = ref(false)
+const chartDatasetError = ref('')
+const chartDatasetTree = computed(() => buildChartDatasetTree(chartDatasets.value))
+const selectedDatasetIds = ref([])
+let chartDatasetRequest = null
 let totalCount = 0
 
 function selectAllDatasets() {
-  selectedDatasetIds.value = CHART_DATASETS.map(dataset => dataset.id)
+  selectedDatasetIds.value = chartDatasets.value.map(dataset => dataset.id)
 }
 
 function clearDatasetSelection() {
@@ -131,16 +142,47 @@ function clearDatasetSelection() {
 function setDatasetIdsSelected(ids, checked) {
   const selected = new Set(selectedDatasetIds.value)
   ids.forEach(id => checked ? selected.add(id) : selected.delete(id))
-  selectedDatasetIds.value = CHART_DATASETS.filter(dataset => selected.has(dataset.id)).map(dataset => dataset.id)
+  selectedDatasetIds.value = chartDatasets.value.filter(dataset => selected.has(dataset.id)).map(dataset => dataset.id)
+}
+
+async function loadChartDatasets() {
+  if (!chartMode.value) return
+  chartDatasetRequest?.abort()
+  const controller = new AbortController()
+  chartDatasetRequest = controller
+  chartDatasetLoading.value = true
+  chartDatasetError.value = ''
+  try {
+    const datasets = await loadAvailableChartDatasets({ signal: controller.signal })
+    if (controller.signal.aborted) return
+    const availableIds = new Set(datasets.map(dataset => dataset.id))
+    const retainedIds = selectedDatasetIds.value.filter(id => availableIds.has(id))
+    chartDatasets.value = datasets
+    selectedDatasetIds.value = retainedIds.length
+      ? retainedIds
+      : datasets.slice(0, 4).map(dataset => dataset.id)
+    if (datasets.length === 0) chartDatasetError.value = '当前没有已激活且可查询的航图要素'
+  } catch (err) {
+    if (err?.name === 'AbortError') return
+    chartDatasets.value = []
+    selectedDatasetIds.value = []
+    chartDatasetError.value = err?.message || '航图要素列表加载失败'
+  } finally {
+    if (chartDatasetRequest === controller) {
+      chartDatasetLoading.value = false
+      chartDatasetRequest = null
+    }
+  }
 }
 
 watch(chartMode, (active) => {
   if (!active) {
     selectedGridAttributeCode.value = ''
+    chartDatasetRequest?.abort()
     return
   }
   airspaceGridForm.level = 17
-  if (airspaceGridForm.top > 300) airspaceGridForm.top = 300
+  loadChartDatasets()
 }, { immediate: true })
 
 const selectedTrueAltitudeDataset = computed(() =>
@@ -348,6 +390,10 @@ async function queryAndRenderChartPages(basePayload, controller, options = {}) {
       const cells = await buildDisplayedCells(rawCells, controller.signal, {
         updateSummary: false,
         renderOnly: true,
+      })
+      cells.forEach((cell) => {
+        cell.datasetId ??= page?.data?.datasetId || basePayload.datasetId
+        cell.datasetVersion ??= page?.data?.datasetVersion
       })
       const pageFeatures = rawCells.flatMap(cell => cell.features || [])
       for (const feature of pageFeatures) {
@@ -633,7 +679,7 @@ async function onViewBoundsChanged(bounds) {
         : { airspaceId: airspaceGridForm.airspaceId.trim() }),
       polygon,
       bottom: chartMode.value ? Math.max(Number(airspaceGridForm.bottom) || 0, 0) : (Number(airspaceGridForm.bottom) || 0),
-      top: chartMode.value ? Math.min(Number(airspaceGridForm.top) || 300, 300) : (Number(airspaceGridForm.top) || 600),
+      top: Number(airspaceGridForm.top) || 600,
       level: queryLevel,
       maxCells: chartMode.value ? 50000 : 200000,
       query_concurrency: 4,
@@ -914,7 +960,7 @@ async function submitAirspaceGridQuery() {
         : { airspaceId: airspaceGridForm.airspaceId.trim() }),
       polygon: polygon,
       bottom: chartMode.value ? Math.max(Number(airspaceGridForm.bottom) || 0, 0) : (Number(airspaceGridForm.bottom) || 0),
-      top: chartMode.value ? Math.min(Number(airspaceGridForm.top) || 300, 300) : (Number(airspaceGridForm.top) || 600),
+      top: Number(airspaceGridForm.top) || 600,
       level: queryLevel,
       maxCells: chartMode.value ? 50000 : 200000,
       query_concurrency: 4,
@@ -1166,17 +1212,23 @@ function clearGrids() {
             <div class="group-title">查询内容</div>
           </div>
           <select v-model="selectedGridAttributeCode" class="level-select" :disabled="loading || dynamicZoomEnabled">
-            <option
-              v-for="attribute in GRID_ATTRIBUTE_TOPICS"
-              :key="attribute.code || 'base'"
-              :value="attribute.code"
-              :disabled="attribute.disabled === true"
-            >
-              {{ attribute.label }}
-            </option>
+            <option value="">航图实体要素</option>
+            <optgroup v-for="group in gridAttributeTopicGroups" :key="group.label" :label="group.label">
+              <option
+                v-for="attribute in group.topics"
+                :key="attribute.code"
+                :value="attribute.code"
+                :disabled="attribute.disabled === true"
+              >
+                {{ attribute.label }}
+              </option>
+            </optgroup>
           </select>
           <div v-if="selectedGridAttributeCode" class="noise-legend">
-            <template v-if="selectedGridAttributeCode.includes('_zone_')">
+            <template v-if="selectedGridAttributeLegend.length">
+              <span v-for="band in selectedGridAttributeLegend" :key="band.label"><i :style="{ background: band.color }" />{{ band.label }}</span>
+            </template>
+            <template v-else-if="selectedGridAttributeCode.includes('_zone_')">
               <span><i style="background:#ef4444" />不满足（0）</span>
               <span><i style="background:#f59e0b" />满足（1）</span>
               <span><i style="background:#22c55e" />优秀（2）</span>
@@ -1199,6 +1251,10 @@ function clearGrids() {
           </div>
           <div v-if="selectedGridAttributeCode" class="dataset-hint">
             专题属性按原始 L17 网格查询并逐页渲染，不使用粗层 LOD 聚合。
+          </div>
+          <div v-if="GRID_ATTRIBUTE_TOPICS.find(item => item.code === selectedGridAttributeCode)?.kind === 'emf'" class="dataset-hint">
+            颜色仅表示电磁场强数值，不代表通信服务质量、导航定位精度或监视探测能力。
+            请先完成对应属性的入库和激活；无结果时请核对场数据目录、空域绑定及查询范围。
           </div>
         </template>
         <label v-if="trueAltitudeMode && trueAltitudeLodEnabled" class="dataset-hint">
@@ -1229,20 +1285,23 @@ function clearGrids() {
         <div class="dataset-title-row">
           <div class="group-title">查询要素（已选 {{ selectedDatasetIds.length }}）</div>
           <div class="dataset-actions">
-            <button type="button" @click="selectAllDatasets">全选</button>
-            <button type="button" @click="clearDatasetSelection">清空</button>
+            <button type="button" :disabled="chartDatasetLoading" @click="loadChartDatasets">刷新</button>
+            <button type="button" :disabled="chartDatasetLoading || !chartDatasets.length" @click="selectAllDatasets">全选</button>
+            <button type="button" :disabled="chartDatasetLoading || !selectedDatasetIds.length" @click="clearDatasetSelection">清空</button>
           </div>
         </div>
-        <div class="dataset-tree">
+        <div v-if="chartDatasetLoading" class="dataset-hint">正在读取当前活动要素…</div>
+        <div v-else-if="chartDatasetError" class="dataset-hint dataset-error">{{ chartDatasetError }}</div>
+        <div v-else class="dataset-tree">
           <ChartDatasetTreeNode
-            v-for="node in CHART_DATASET_TREE"
+            v-for="node in chartDatasetTree"
             :key="node.id"
             :node="node"
             :selected-dataset-ids="selectedDatasetIds"
             @toggle="setDatasetIdsSelected"
           />
         </div>
-        <div class="dataset-hint">只会向后端查询已勾选的数据集。</div>
+        <div class="dataset-hint">列表来自当前活动 Dataset；仅显示已有 Feature 且存在网格映射的数据，并只查询已勾选项。</div>
       </div>
 
       <!-- 查询边界 -->
@@ -1516,6 +1575,11 @@ function clearGrids() {
   cursor: pointer;
 }
 
+.dataset-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .dataset-refresh {
   padding: 2px 7px;
   border: 1px solid #bae6fd;
@@ -1533,6 +1597,7 @@ function clearGrids() {
 .dataset-error {
   margin-top: 8px;
   margin-bottom: 0;
+  color: #dc2626;
 }
 
 .dataset-tree {

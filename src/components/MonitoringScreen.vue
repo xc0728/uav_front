@@ -1080,7 +1080,7 @@ defineExpose({
 
       <!-- 中间标题 -->
       <div class="topbar-center">
-        <h1 class="main-title">低空路径智绘平台</h1>
+        <h1 class="main-title">低空三维数据空间</h1>
       </div>
 
       <!-- 右侧状态和时间 -->

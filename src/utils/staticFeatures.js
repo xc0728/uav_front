@@ -41,20 +41,44 @@ export const CHART_DATASETS = [
   ['deqing_chart_l17_bare_surface', '裸露地表', 'landcover', '#a8a29e', '2D', 'bare_surface_area', ['环境要素', '地表覆盖与土地利用', '地表覆盖'], 39],
   ['deqing_chart_l17_forest_grass_cover', '林草覆盖', 'landcover', '#15803d', '2D', 'forest_grass_cover', ['环境要素', '地表覆盖与土地利用', '地表覆盖'], 37],
   ['deqing_chart_l17_wetlands', '湿地', 'landcover', '#14b8a6', '2D', 'wetland', ['环境要素', '水体', '滩涂湿地'], 52],
-  [LOD13_BUILDING_DATASET_ID, '建筑物（LOD1.3）', 'structure', '#fb7185', '3D', 'lod13_building', ['环境要素', '建构筑物'], 9, 'lod13'],
+  [LOD13_BUILDING_DATASET_ID, '建筑物（LOD1.3）', 'structure', '#2563eb', '3D', 'lod13_building', ['环境要素', '建构筑物'], 9, 'lod13'],
 ].map(([id, label, theme, color, dimensionMode, featureType, catalogPath, catalogOrder, sourceKind = 'static']) => ({
   id, label, theme, color, dimensionMode, featureType, catalogPath, catalogOrder, sourceKind,
 }))
 
-const DATASETS_BY_ID = Object.fromEntries(CHART_DATASETS.map(dataset => [dataset.id, dataset]))
+const DATASETS_BY_ID = new Map(CHART_DATASETS.map(dataset => [dataset.id, dataset]))
 
 const THEME_LABELS = {
   vertiport: '起降设施', navigation: '导航监测', surveillance: '监视设施', airspace: '空域安全',
   utility: '市政设施', transport: '交通设施', road: '道路', water: '水体',
-  landuse: '土地利用', landcover: '地表覆盖', structure: '构筑物',
+  landuse: '土地利用', landcover: '地表覆盖', structure: '构筑物', air_route: '航路',
+  sensitive: '敏感要素', communication: '通信设施', obstacle: '障碍物', terrain: '地形',
 }
 
-function buildDatasetTree(datasets) {
+const THEME_COLORS = {
+  vertiport: '#22c55e', navigation: '#8b5cf6', surveillance: '#f43f5e', airspace: '#dc2626',
+  utility: '#06b6d4', transport: '#d97706', road: '#f59e0b', water: '#0ea5e9',
+  landuse: '#65a30d', landcover: '#15803d', structure: '#64748b', air_route: '#fde047',
+  sensitive: '#ec4899', communication: '#14b8a6', obstacle: '#ef4444', terrain: '#78716c',
+}
+
+const FEATURE_TYPE_LABELS = Object.freeze({
+  privacy_sensitivity: '隐私敏感度',
+  population_concentration: '人口聚集度',
+  ground_crash_consequence: '地面坠毁后果',
+})
+
+const TRAILING_FEATURE_TYPES = new Set(Object.keys(FEATURE_TYPE_LABELS))
+
+function normalizedFeatureType(featureOrType) {
+  if (typeof featureOrType === 'string') return featureOrType.trim().toLowerCase()
+  const featureType = String(featureOrType?.featureType || '').trim().toLowerCase()
+  if (featureType) return featureType
+  const datasetId = String(featureOrType?.datasetId || '').trim().toLowerCase()
+  return [...TRAILING_FEATURE_TYPES].find(type => datasetId.endsWith(`_${type}`)) || ''
+}
+
+export function buildChartDatasetTree(datasets) {
   const roots = []
   for (const dataset of datasets) {
     let siblings = roots
@@ -88,37 +112,146 @@ function buildDatasetTree(datasets) {
   return roots
 }
 
-export const CHART_DATASET_TREE = buildDatasetTree(CHART_DATASETS)
+export const CHART_DATASET_TREE = buildChartDatasetTree(CHART_DATASETS)
+
+function fallbackCatalogPath(theme) {
+  if (theme === 'air_route') return ['功能要素', '飞行控制空间', '航路']
+  if (theme === 'airspace') return ['功能要素', '飞行控制空间', '空域管理单元']
+  if (theme === 'vertiport') return ['功能要素', '飞行控制空间', '起降设施']
+  return ['现有要素', chartThemeLabel(theme)]
+}
+
+function normalizeActiveDataset(item, index) {
+  const id = String(item?.datasetId || '').trim()
+  if (!id) return null
+  const known = DATASETS_BY_ID.get(id)
+  const featureTypes = Array.isArray(item.featureTypes)
+    ? item.featureTypes.map(value => String(value || '').trim()).filter(Boolean)
+    : []
+  const dataset = {
+    ...(known || {}),
+    id,
+    label: String(item.datasetName || known?.label || id),
+    theme: String(item.theme || known?.theme || ''),
+    color: known?.color || THEME_COLORS[item.theme] || '#38bdf8',
+    dimensionMode: item.dimensionMode === '3D' ? '3D' : '2D',
+    featureType: featureTypes.length === 1 ? featureTypes[0] : (known?.featureType || ''),
+    featureTypes,
+    count: Number(item.featureCount) || 0,
+    mappingCount: (Number(item.mapping2dCount) || 0) + (Number(item.mapping3dCount) || 0),
+    catalogPath: known?.catalogPath || fallbackCatalogPath(item.theme),
+    catalogOrder: known?.catalogOrder ?? (1000 + index),
+    sourceKind: 'static',
+    activeRevision: Number(item.activeRevision) || 0,
+    level: Number(item.level),
+  }
+  DATASETS_BY_ID.set(id, dataset)
+  return dataset
+}
+
+async function hasLod13Source(signal) {
+  try {
+    const response = await fetch('/lod13-datasets.json', { signal })
+    if (!response.ok) return false
+    const manifest = await response.json()
+    return Array.isArray(manifest) && manifest.length > 0
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error
+    return false
+  }
+}
+
+export async function loadAvailableChartDatasets({ signal, includeLod13 = true } = {}) {
+  const items = []
+  let offset = 0
+  let total = Infinity
+  while (offset < total) {
+    const response = await fetch(`/api/static-features/datasets?state=active&limit=200&offset=${offset}`, { signal })
+    if (!response.ok) {
+      throw new Error(await errorMessage(response, `航图要素列表加载失败（${response.status}）`))
+    }
+    const body = await response.json()
+    if (body?.status === 'error') throw new Error(body.message || '航图要素列表加载失败')
+    const page = Array.isArray(body?.data?.items) ? body.data.items : []
+    items.push(...page)
+    total = Number.isFinite(Number(body?.data?.total)) ? Number(body.data.total) : items.length
+    if (page.length === 0) break
+    offset += page.length
+  }
+  const datasets = items
+    .filter(item => item?.state === 'active' && Number(item.featureCount) > 0)
+    .filter(item => (Number(item.mapping2dCount) || 0) + (Number(item.mapping3dCount) || 0) > 0)
+    .map(normalizeActiveDataset)
+    .filter(Boolean)
+
+  if (includeLod13 && await hasLod13Source(signal)) {
+    const lod13 = CHART_DATASETS.find(dataset => dataset.id === LOD13_BUILDING_DATASET_ID)
+    if (lod13 && !datasets.some(dataset => dataset.id === lod13.id)) datasets.push(lod13)
+  }
+  return datasets
+}
 
 export function filterChartDatasetTree(datasetLayers) {
   const layersById = datasetLayers instanceof Map
     ? datasetLayers
     : new Map((datasetLayers || []).map(layer => [layer.type || layer.id, layer]))
-
-  function filterNodes(nodes) {
-    return nodes.flatMap(node => {
-      if (node.dataset) {
-        const layer = layersById.get(node.dataset.id)
-        return layer ? [{ ...node, dataset: { ...node.dataset, ...layer } }] : []
-      }
-      const children = filterNodes(node.children || [])
-      return children.length ? [{ ...node, children }] : []
-    })
-  }
-
-  return filterNodes(CHART_DATASET_TREE)
+  const datasets = [...layersById.entries()].map(([id, layer], index) => {
+    const known = DATASETS_BY_ID.get(id)
+    const theme = layer.theme || known?.theme || ''
+    return {
+      ...(known || {}),
+      ...layer,
+      id,
+      label: layer.label || known?.label || id,
+      theme,
+      color: layer.color || known?.color || THEME_COLORS[theme] || '#38bdf8',
+      dimensionMode: layer.dimensionMode === '3D' || known?.dimensionMode === '3D' ? '3D' : '2D',
+      catalogPath: known?.catalogPath || fallbackCatalogPath(theme),
+      catalogOrder: known?.catalogOrder ?? (1000 + index),
+    }
+  })
+  return buildChartDatasetTree(datasets)
 }
 
 export function chartFeatureLabel(feature) {
-  return DATASETS_BY_ID[feature.datasetId]?.label || feature.featureType || THEME_LABELS[feature.theme] || feature.datasetId || '未命名要素'
+  return DATASETS_BY_ID.get(feature.datasetId)?.label
+    || FEATURE_TYPE_LABELS[normalizedFeatureType(feature)]
+    || feature.featureType
+    || THEME_LABELS[feature.theme]
+    || feature.datasetId
+    || '未命名要素'
+}
+
+export function chartFeatureTypeLabel(featureType) {
+  return FEATURE_TYPE_LABELS[normalizedFeatureType(featureType)] || featureType || '—'
+}
+
+export function chartFeatureDatasetLabel(feature) {
+  return DATASETS_BY_ID.get(feature?.datasetId)?.label
+    || FEATURE_TYPE_LABELS[normalizedFeatureType(feature)]
+    || feature?.datasetId
+    || '—'
+}
+
+export function sortChartFeaturesForDisplay(features) {
+  const regularFeatures = []
+  const trailingFeatures = []
+  ;(features || []).forEach((feature) => {
+    if (TRAILING_FEATURE_TYPES.has(normalizedFeatureType(feature))) {
+      trailingFeatures.push(feature)
+    } else {
+      regularFeatures.push(feature)
+    }
+  })
+  return regularFeatures.concat(trailingFeatures)
 }
 
 export function chartFeatureColor(feature) {
-  return DATASETS_BY_ID[feature.datasetId]?.color || '#38bdf8'
+  return DATASETS_BY_ID.get(feature.datasetId)?.color || THEME_COLORS[feature?.theme] || '#38bdf8'
 }
 
 export function chartFeatureDimensionMode(feature) {
-  const mode = feature?.dimensionMode || DATASETS_BY_ID[feature?.datasetId]?.dimensionMode
+  const mode = feature?.dimensionMode || DATASETS_BY_ID.get(feature?.datasetId)?.dimensionMode
   return mode === '3D' ? '3D' : '2D'
 }
 

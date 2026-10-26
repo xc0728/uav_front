@@ -416,7 +416,7 @@ function handleViewBoundsChanged(bounds) {
           <!-- 标题外框 - 梯形 -->
           <div class="title-frame">
             <div class="title-frame-inner">
-              <h1 class="main-title">低空路径智绘平台</h1>
+              <h1 class="main-title">低空三维数据空间</h1>
             </div>
             <!-- 标题下方装饰线 -->
             <div class="title-underline">
