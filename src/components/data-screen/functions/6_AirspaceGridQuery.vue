@@ -112,6 +112,8 @@ const selectedGridAttributeLegend = computed(() => gridAttributeLegend(selectedG
 const gridAttributeTopicGroups = [
   { label: '噪声', topics: GRID_ATTRIBUTE_TOPICS.filter(item => item.kind === 'zone' || item.kind === 'margin') },
   { label: '电磁场强', topics: GRID_ATTRIBUTE_TOPICS.filter(item => item.kind === 'emf') },
+  { label: '气象', topics: GRID_ATTRIBUTE_TOPICS.filter(item => item.kind === 'weather') },
+  { label: '气象数据质量', topics: GRID_ATTRIBUTE_TOPICS.filter(item => item.kind === 'weather_quality') },
 ]
 const attributeTopicMode = computed(() => chartMode.value && Boolean(selectedGridAttributeCode.value))
 const trueAltitudeQueryMode = computed(() => trueAltitudeMode.value || attributeTopicMode.value)

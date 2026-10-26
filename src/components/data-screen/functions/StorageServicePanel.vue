@@ -239,14 +239,32 @@ function validateTrueAltitude(key) {
 }
 
 // ==================== Parquet 网格属性导入 ====================
+const WEATHER_ATTRIBUTE_MAPPINGS = [
+  { sourceField: 'wind_speed_m_s', attributeCode: 'wind_speed', attributeName: '风速', category: 'meteorology', valueType: 'float', unit: 'm/s' },
+  { sourceField: 'wind_from_direction_deg', attributeCode: 'wind_direction', attributeName: '风向', category: 'meteorology', valueType: 'float', unit: '°' },
+  { sourceField: 'u_m_s', attributeCode: 'wind_u', attributeName: '东西向风速分量', category: 'meteorology', valueType: 'float', unit: 'm/s' },
+  { sourceField: 'v_m_s', attributeCode: 'wind_v', attributeName: '南北向风速分量', category: 'meteorology', valueType: 'float', unit: 'm/s' },
+  { sourceField: 'nearest_station_distance_m', attributeCode: 'wind_nearest_station_distance', attributeName: '最近气象站距离', category: 'meteorology_quality', valueType: 'float', unit: 'm' },
+  { sourceField: 'support_station_count', attributeCode: 'wind_support_station_count', attributeName: '支持气象站数量', category: 'meteorology_quality', valueType: 'uint', unit: '个' },
+]
+
 const parquetAttributeForm = ref({
-  template: 'dqg_noise_v1',
+  importMode: 'generic_horizontal_agl',
   datasetId: '',
   datasetVersion: '',
-  input: 'data/dqg_noise/dqg_native_noise_l17.parquet',
+  input: 'data/deqing_map/deqing_dqg_L17_quasi2d_20250412_130000.parquet',
   level: 17,
   dryRun: true,
-  source: 'dqg_noise_simulation',
+  source: 'deqing_weather_static',
+  codeField: 'dqg_code_key',
+  codeTextField: 'dqg_horizontal_code',
+  levelField: 'dqg_level',
+  minAglField: 'min_height_agl_m',
+  maxAglField: 'max_height_agl_m',
+  validField: 'valid',
+  unmatchedCodePolicy: 'SKIP',
+  verifyCodeConsistency: true,
+  attributeMappingsText: JSON.stringify(WEATHER_ATTRIBUTE_MAPPINGS, null, 2),
   showAdvanced: false,
   batchSize: 100000,
   maxRows: 20000000,
@@ -257,7 +275,7 @@ const parquetAttributeForm = ref({
 function validateParquetAttribute(key) {
   const f = parquetAttributeForm.value
   const e = {}
-  if (f.template !== 'dqg_noise_v1') e.template = '当前仅支持 DQG 噪声模拟 v1 模板'
+  if (!['generic_horizontal_agl', 'dqg_noise_v1'].includes(f.importMode)) e.importMode = '请选择导入方式'
   if (isBlank(f.datasetId)) e.datasetId = '目标数据集标识不能为空'
   else {
     const value = String(f.datasetId).trim()
@@ -270,6 +288,27 @@ function validateParquetAttribute(key) {
   else if (!/\.parquet$/i.test(String(f.input).trim())) e.input = '输入文件必须为 .parquet'
   const level = intCheck(f.level, '网格层级', 17, 17)
   if (level) e.level = '当前模板固定使用 L17'
+  if (f.importMode === 'generic_horizontal_agl') {
+    for (const [field, label] of [
+      ['codeField', '压缩编码字段'], ['minAglField', '最小离地高度字段'], ['maxAglField', '最大离地高度字段'],
+    ]) {
+      if (isBlank(f[field])) e[field] = `${label}不能为空`
+      else if (!/^[A-Za-z0-9_]+$/.test(String(f[field]))) e[field] = `${label}只能包含字母、数字和下划线`
+    }
+    for (const field of ['codeTextField', 'levelField', 'validField']) {
+      if (!isBlank(f[field]) && !/^[A-Za-z0-9_]+$/.test(String(f[field]))) e[field] = '字段名只能包含字母、数字和下划线'
+    }
+    try {
+      const mappings = JSON.parse(f.attributeMappingsText)
+      if (!Array.isArray(mappings) || mappings.length < 1 || mappings.length > 64) {
+        e.attributeMappingsText = '属性映射必须是包含 1–64 项的 JSON 数组'
+      } else if (mappings.some(item => !item?.sourceField || !item?.attributeCode || !item?.attributeName || !item?.valueType)) {
+        e.attributeMappingsText = '每项必须包含源字段、属性编码、属性名称和数值类型'
+      }
+    } catch {
+      e.attributeMappingsText = '属性映射不是有效 JSON'
+    }
+  }
   if (f.showAdvanced) {
     if (isBlank(f.source)) e.source = '来源标识不能为空'
     else if (String(f.source).length > 128) e.source = '来源标识不能超过 128 个字符'
@@ -277,8 +316,10 @@ function validateParquetAttribute(key) {
     if (batchSize) e.batchSize = batchSize
     const maxRows = intCheck(f.maxRows, '最大源行数', 1, 100000000)
     if (maxRows) e.maxRows = maxRows
-    const tolerance = numCheck(f.heightTolerance, '高度容差', 0, 1)
-    if (tolerance) e.heightTolerance = tolerance
+    if (f.importMode === 'dqg_noise_v1') {
+      const tolerance = numCheck(f.heightTolerance, '高度容差', 0, 1)
+      if (tolerance) e.heightTolerance = tolerance
+    }
   }
   return key ? { [key]: e[key] || '' } : e
 }
@@ -970,20 +1011,33 @@ async function submitParquetAttribute() {
   const f = parquetAttributeForm.value
   try {
     const body = {
-      template: f.template,
       datasetId: String(f.datasetId).trim(),
       datasetVersion: Number(f.datasetVersion),
       input: String(f.input).trim(),
       level: Number(f.level),
       dryRun: Boolean(f.dryRun),
+      source: String(f.source).trim(),
+      batchSize: Number(f.batchSize),
+      maxRows: Number(f.maxRows),
+      registerMissingAttributes: Boolean(f.registerMissingAttributes),
     }
-    if (f.showAdvanced) {
-      body.source = String(f.source).trim()
-      body.batchSize = Number(f.batchSize)
-      body.maxRows = Number(f.maxRows)
-      body.heightTolerance = Number(f.heightTolerance)
-      body.registerMissingAttributes = Boolean(f.registerMissingAttributes)
+    if (f.importMode === 'dqg_noise_v1') {
+      body.template = 'dqg_noise_v1'
+    } else {
+      body.inputFormat = 'parquet'
+      body.gridKeyMode = 'HORIZONTAL_AGL_RANGE'
+      body.codeField = String(f.codeField).trim()
+      body.codeEncoding = 'PACKED_UINT64'
+      body.codeTextField = String(f.codeTextField || '').trim()
+      body.levelField = String(f.levelField || '').trim()
+      body.minAglField = String(f.minAglField).trim()
+      body.maxAglField = String(f.maxAglField).trim()
+      body.validField = String(f.validField || '').trim()
+      body.unmatchedCodePolicy = f.unmatchedCodePolicy
+      body.verifyCodeConsistency = Boolean(f.verifyCodeConsistency)
+      body.attributeMappings = JSON.parse(f.attributeMappingsText)
     }
+    if (f.importMode === 'dqg_noise_v1') body.heightTolerance = Number(f.heightTolerance)
     const data = await postJson('/api/grid-attributes/parquet-import-jobs', body)
     handleJobAccepted(data, f.dryRun ? 'Parquet 网格属性预检' : 'Parquet 网格属性导入')
   } catch (err) {
@@ -1569,16 +1623,17 @@ onBeforeUnmount(() => {
       <!-- Parquet 网格属性导入 -->
       <section v-show="activeTab === 'parquetAttribute'" class="storage-card">
         <div class="card-title">Parquet 网格属性批量导入</div>
-        <p class="card-desc">通过字段模板把 Parquet 中的批量属性挂载到已有网格。当前提供 DQG 噪声模拟 v1 模板；建议先执行只读预检，确认源文件与目标网格完全一致后再正式导入。</p>
+        <p class="card-desc">通过通用字段映射把 Parquet 属性挂载到已有网格。水平 L17 数据可按离地高度范围动态覆盖三维格元，不需要为每一种专题开发新模板；旧噪声数据仍可选择兼容预设。</p>
 
         <div class="form-grid">
-          <div class="form-field" :class="{ 'has-error': errors.template }">
-            <label>字段模板 <span class="req">*</span></label>
-            <select v-model="parquetAttributeForm.template" @change="validateField('template')">
-              <option value="dqg_noise_v1">DQG 噪声模拟 v1</option>
+          <div class="form-field" :class="{ 'has-error': errors.importMode }">
+            <label>导入方式 <span class="req">*</span></label>
+            <select v-model="parquetAttributeForm.importMode" @change="validateField('importMode')">
+              <option value="generic_horizontal_agl">通用：水平网格 + 离地高度范围</option>
+              <option value="dqg_noise_v1">兼容预设：DQG 噪声 v1</option>
             </select>
-            <span v-if="errors.template" class="field-error">{{ errors.template }}</span>
-            <span v-else class="field-hint">模板定义源字段、目标属性编码、数据类型和校验规则</span>
+            <span v-if="errors.importMode" class="field-error">{{ errors.importMode }}</span>
+            <span v-else class="field-hint">气象等准二维场选择通用方式；只有旧噪声文件选择兼容预设</span>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.level }">
             <label>网格层级</label>
@@ -1602,6 +1657,59 @@ onBeforeUnmount(() => {
             <span v-if="errors.input" class="field-error">{{ errors.input }}</span>
             <span v-else class="field-hint">项目根目录下的相对路径，不允许绝对路径、.. 或符号链接</span>
           </div>
+
+          <template v-if="parquetAttributeForm.importMode === 'generic_horizontal_agl'">
+            <div class="form-field" :class="{ 'has-error': errors.codeField }">
+              <label>水平格压缩编码字段 <span class="req">*</span></label>
+              <input v-model="parquetAttributeForm.codeField" type="text" @blur="validateField('codeField')" />
+              <span v-if="errors.codeField" class="field-error">{{ errors.codeField }}</span>
+            </div>
+            <div class="form-field" :class="{ 'has-error': errors.codeTextField }">
+              <label>水平格文本编码字段</label>
+              <input v-model="parquetAttributeForm.codeTextField" type="text" @blur="validateField('codeTextField')" />
+              <span v-if="errors.codeTextField" class="field-error">{{ errors.codeTextField }}</span>
+            </div>
+            <div class="form-field" :class="{ 'has-error': errors.minAglField }">
+              <label>最小离地高度字段 <span class="req">*</span></label>
+              <input v-model="parquetAttributeForm.minAglField" type="text" @blur="validateField('minAglField')" />
+              <span v-if="errors.minAglField" class="field-error">{{ errors.minAglField }}</span>
+            </div>
+            <div class="form-field" :class="{ 'has-error': errors.maxAglField }">
+              <label>最大离地高度字段 <span class="req">*</span></label>
+              <input v-model="parquetAttributeForm.maxAglField" type="text" @blur="validateField('maxAglField')" />
+              <span v-if="errors.maxAglField" class="field-error">{{ errors.maxAglField }}</span>
+            </div>
+            <div class="form-field" :class="{ 'has-error': errors.levelField }">
+              <label>层级字段（可选）</label>
+              <input v-model="parquetAttributeForm.levelField" type="text" @blur="validateField('levelField')" />
+              <span v-if="errors.levelField" class="field-error">{{ errors.levelField }}</span>
+            </div>
+            <div class="form-field" :class="{ 'has-error': errors.validField }">
+              <label>有效标记字段（可选）</label>
+              <input v-model="parquetAttributeForm.validField" type="text" @blur="validateField('validField')" />
+              <span v-if="errors.validField" class="field-error">{{ errors.validField }}</span>
+            </div>
+            <div class="form-field">
+              <label>目标空域外编码处理</label>
+              <select v-model="parquetAttributeForm.unmatchedCodePolicy">
+                <option value="SKIP">跳过，只导入与目标空域的交集（环境场推荐）</option>
+                <option value="REJECT">发现任一目标外编码即拒绝</option>
+              </select>
+              <span class="field-hint">跳过的数量会记录在任务结果中，不会生成属性事实</span>
+            </div>
+            <div class="form-field span-2" :class="{ 'has-error': errors.attributeMappingsText }">
+              <label>属性字段映射（JSON） <span class="req">*</span></label>
+              <textarea v-model="parquetAttributeForm.attributeMappingsText" rows="13" spellcheck="false" @blur="validateField('attributeMappingsText')"></textarea>
+              <span v-if="errors.attributeMappingsText" class="field-error">{{ errors.attributeMappingsText }}</span>
+              <span v-else class="field-hint">时间字段不在映射中，因此本次数据按静态属性导入</span>
+            </div>
+            <div class="form-field span-2">
+              <label class="checkbox-item">
+                <input v-model="parquetAttributeForm.verifyCodeConsistency" type="checkbox" />
+                <span>核验文本 DQG 编码与压缩编码完全一致</span>
+              </label>
+            </div>
+          </template>
         </div>
 
         <div class="check-group">
@@ -1632,7 +1740,7 @@ onBeforeUnmount(() => {
             <input v-model.number="parquetAttributeForm.maxRows" type="number" min="1" max="100000000" @blur="validateField('maxRows')" />
             <span v-if="errors.maxRows" class="field-error">{{ errors.maxRows }}</span>
           </div>
-          <div class="form-field" :class="{ 'has-error': errors.heightTolerance }">
+          <div v-if="parquetAttributeForm.importMode === 'dqg_noise_v1'" class="form-field" :class="{ 'has-error': errors.heightTolerance }">
             <label>高度边界容差（米）</label>
             <input v-model.number="parquetAttributeForm.heightTolerance" type="number" min="0" max="1" step="0.001" @blur="validateField('heightTolerance')" />
             <span v-if="errors.heightTolerance" class="field-error">{{ errors.heightTolerance }}</span>
@@ -1640,7 +1748,7 @@ onBeforeUnmount(() => {
           <div class="form-field span-2">
             <label class="checkbox-item">
               <input v-model="parquetAttributeForm.registerMissingAttributes" type="checkbox" />
-              <span>正式导入时自动注册模板中缺失的属性定义</span>
+              <span>正式导入时自动注册字段映射中缺失的属性定义</span>
             </label>
           </div>
         </div>

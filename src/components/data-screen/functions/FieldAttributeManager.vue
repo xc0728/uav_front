@@ -172,7 +172,7 @@ onUnmounted(() => { mounted = false })
       <aside v-if="selected" class="field-detail">
         <h3>{{ fieldName(selected) }}</h3>
         <p>{{ selected.description || '暂无说明' }}</p>
-        <dl><dt>分类</dt><dd>{{ ({ environment_field: '环境场', noise: '噪声', surveillance: '监视覆盖' })[selected.category] || selected.category || '未分类' }}</dd><dt>数值类型</dt><dd>{{ ({ float: '浮点数', int: '整数', uint: '非负整数', bool: '布尔值', string: '文本' })[selected.valueType] || selected.valueType }}</dd><dt>时间类型</dt><dd>{{ selected.temporalMode === 'interval' ? '时段场' : '静态场' }}</dd></dl>
+        <dl><dt>分类</dt><dd>{{ ({ environment_field: '环境场', noise: '噪声', surveillance: '监视覆盖', meteorology: '气象', meteorology_quality: '气象数据质量' })[selected.category] || selected.category || '未分类' }}</dd><dt>数值类型</dt><dd>{{ ({ float: '浮点数', int: '整数', uint: '非负整数', bool: '布尔值', string: '文本' })[selected.valueType] || selected.valueType }}</dd><dt>时间类型</dt><dd>{{ selected.temporalMode === 'interval' ? '时段场' : '静态场' }}</dd></dl>
         <h4>绑定空域及版本（{{ selected.bindings.length }}）</h4>
         <div v-for="binding in selected.bindings" :key="binding.bindingId" class="field-binding">
           <strong>{{ binding.datasetId }}</strong>

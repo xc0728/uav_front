@@ -118,7 +118,18 @@ function fallbackCatalogPath(theme) {
   if (theme === 'air_route') return ['功能要素', '飞行控制空间', '航路']
   if (theme === 'airspace') return ['功能要素', '飞行控制空间', '空域管理单元']
   if (theme === 'vertiport') return ['功能要素', '飞行控制空间', '起降设施']
-  return ['现有要素', chartThemeLabel(theme)]
+  if (theme === 'transport') return ['环境要素', '交通设施']
+  return ['扩展要素', chartThemeLabel(theme)]
+}
+
+// 交通设施按公共交通目录细分（轨道交通/道路交通/空运服务/公共交通服务）
+const CATALOG_PATH_OVERRIDES = {
+  deqing_chart_l17_railway_station_areas: ['环境要素', '交通设施', '轨道交通设施'],
+  deqing_chart_l17_rail_facility_lines: ['环境要素', '交通设施', '轨道交通设施'],
+  deqing_chart_l17_bus_station_areas: ['环境要素', '交通设施', '道路交通设施'],
+  deqing_chart_l17_road_facility_areas: ['环境要素', '交通设施', '道路交通设施'],
+  deqing_chart_l17_general_airport_areas: ['环境要素', '交通设施', '空运服务设施'],
+  deqing_chart_l17_fuel_station_areas: ['环境要素', '交通设施', '公共交通服务设施'],
 }
 
 function normalizeActiveDataset(item, index) {
@@ -139,7 +150,7 @@ function normalizeActiveDataset(item, index) {
     featureTypes,
     count: Number(item.featureCount) || 0,
     mappingCount: (Number(item.mapping2dCount) || 0) + (Number(item.mapping3dCount) || 0),
-    catalogPath: known?.catalogPath || fallbackCatalogPath(item.theme),
+    catalogPath: CATALOG_PATH_OVERRIDES[id] || known?.catalogPath || fallbackCatalogPath(item.theme),
     catalogOrder: known?.catalogOrder ?? (1000 + index),
     sourceKind: 'static',
     activeRevision: Number(item.activeRevision) || 0,
@@ -206,7 +217,7 @@ export function filterChartDatasetTree(datasetLayers) {
       theme,
       color: layer.color || known?.color || THEME_COLORS[theme] || '#38bdf8',
       dimensionMode: layer.dimensionMode === '3D' || known?.dimensionMode === '3D' ? '3D' : '2D',
-      catalogPath: known?.catalogPath || fallbackCatalogPath(theme),
+      catalogPath: CATALOG_PATH_OVERRIDES[id] || known?.catalogPath || fallbackCatalogPath(theme),
       catalogOrder: known?.catalogOrder ?? (1000 + index),
     }
   })

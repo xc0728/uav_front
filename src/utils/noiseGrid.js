@@ -34,6 +34,40 @@ const NAVIGATION_EMF_LEGEND = Object.freeze([
   { min: 135, label: '135–140', color: '#f97316' },
   { min: 140, label: '≥140 dBμV/m', color: '#dc2626' },
 ])
+const WIND_SPEED_LEGEND = Object.freeze([
+  { min: -Infinity, label: '<1.5', color: '#94a3b8' },
+  { min: 1.5, label: '1.5–3', color: '#38bdf8' },
+  { min: 3, label: '3–5', color: '#22c55e' },
+  { min: 5, label: '5–8', color: '#facc15' },
+  { min: 8, label: '8–12', color: '#f97316' },
+  { min: 12, label: '≥12 m/s', color: '#dc2626' },
+])
+const WIND_COMPONENT_LEGEND = Object.freeze([
+  { min: -Infinity, label: '<-8', color: '#312e81' },
+  { min: -8, label: '-8–-3', color: '#2563eb' },
+  { min: -3, label: '-3–3', color: '#94a3b8' },
+  { min: 3, label: '3–8', color: '#f97316' },
+  { min: 8, label: '≥8 m/s', color: '#b91c1c' },
+])
+const WIND_DIRECTION_LEGEND = Object.freeze([
+  { min: -Infinity, label: '北 0–45°', color: '#3b82f6' },
+  { min: 45, label: '东 45–135°', color: '#22c55e' },
+  { min: 135, label: '南 135–225°', color: '#f97316' },
+  { min: 225, label: '西 225–315°', color: '#a855f7' },
+  { min: 315, label: '北 315–360°', color: '#3b82f6' },
+])
+const QUALITY_DISTANCE_LEGEND = Object.freeze([
+  { min: -Infinity, label: '<2 km', color: '#16a34a' },
+  { min: 2000, label: '2–5 km', color: '#84cc16' },
+  { min: 5000, label: '5–10 km', color: '#f59e0b' },
+  { min: 10000, label: '≥10 km', color: '#ef4444' },
+])
+const SUPPORT_COUNT_LEGEND = Object.freeze([
+  { min: -Infinity, label: '0', color: '#ef4444' },
+  { min: 1, label: '1', color: '#f59e0b' },
+  { min: 2, label: '2', color: '#84cc16' },
+  { min: 3, label: '≥3 个', color: '#16a34a' },
+])
 
 export const GRID_ATTRIBUTE_TOPICS = Object.freeze([
   { code: '', label: '航图实体要素' },
@@ -44,6 +78,12 @@ export const GRID_ATTRIBUTE_TOPICS = Object.freeze([
   { code: 'emf_strength_dbuv_m', label: '通信设施电磁场强', kind: 'emf', unit: 'dBμV/m', legend: COMMUNICATION_EMF_LEGEND },
   { code: 'navigation_emf_dbuv_m', label: '导航设施电磁场强', kind: 'emf', unit: 'dBμV/m', legend: NAVIGATION_EMF_LEGEND },
   { code: 'surveillance_emf_dbuv_m', label: '监视设施电磁场强', kind: 'emf', unit: 'dBμV/m', legend: SURVEILLANCE_EMF_LEGEND },
+  { code: 'wind_speed', label: '风速', kind: 'weather', unit: 'm/s', legend: WIND_SPEED_LEGEND },
+  { code: 'wind_direction', label: '风向', kind: 'weather', unit: '°', legend: WIND_DIRECTION_LEGEND },
+  { code: 'wind_u', label: '东西向风速分量', kind: 'weather', unit: 'm/s', legend: WIND_COMPONENT_LEGEND },
+  { code: 'wind_v', label: '南北向风速分量', kind: 'weather', unit: 'm/s', legend: WIND_COMPONENT_LEGEND },
+  { code: 'wind_nearest_station_distance', label: '最近气象站距离', kind: 'weather_quality', unit: 'm', legend: QUALITY_DISTANCE_LEGEND },
+  { code: 'wind_support_station_count', label: '支持气象站数量', kind: 'weather_quality', unit: '个', legend: SUPPORT_COUNT_LEGEND },
 ])
 
 const ATTRIBUTE_BY_CODE = new Map(GRID_ATTRIBUTE_TOPICS.map(item => [item.code, item]))
@@ -70,6 +110,9 @@ export function formatNoiseAttribute(code, value) {
   if (definition?.kind === 'zone') return `${noiseZoneLabel(value)}（${value}）`
   if (definition?.kind === 'margin') return `${Number(value).toFixed(2)} ${definition.unit}`
   if (definition?.kind === 'emf') return `${Number(value).toFixed(2)} ${definition.unit}`
+  if (definition?.kind === 'weather' || definition?.kind === 'weather_quality') {
+    return `${Number(value).toFixed(2)} ${definition.unit}`
+  }
   return String(value)
 }
 
