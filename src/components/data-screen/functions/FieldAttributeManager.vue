@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { errorMessage } from '../../../utils/http.js'
 import { noiseAttributeLabel } from '../../../utils/noiseGrid.js'
+import { notifyGridAttributeCatalogChanged } from '../../../utils/gridAttributeCatalog.js'
 
 const emit = defineEmits(['import-field'])
 const items = ref([])
@@ -120,6 +121,7 @@ async function changeState(dryRun) {
       } else {
         notice.value = `${fieldName(item)}目录记录已删除，编码与版本身份不再保留在目录中。`
         operation.value = null
+        notifyGridAttributeCatalogChanged()
         await load()
       }
       return
@@ -143,6 +145,7 @@ async function changeState(dryRun) {
       } else {
         notice.value = `${fieldName(item)}事实数据及绑定已物理清理，停用目录保留；旧数据部件占用空间由数据库后台回收。`
         operation.value = null
+        notifyGridAttributeCatalogChanged()
         await load()
       }
       return
@@ -156,6 +159,7 @@ async function changeState(dryRun) {
     else {
       notice.value = `${fieldName(item)}已${item.targetState === 'active' ? '恢复' : '停用'}`
       operation.value = null
+      notifyGridAttributeCatalogChanged()
       await load()
     }
   } catch (e) {

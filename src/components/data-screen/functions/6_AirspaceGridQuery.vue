@@ -1,5 +1,7 @@
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { isDailyWeatherField } from '../../../utils/weatherField.js'
+import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { availableGridAttributeGroups, loadGridAttributeCatalog as fetchGridAttributeCatalog, loadActiveAttributeDatasets, GRID_ATTRIBUTE_CATALOG_CHANGED } from '../../../utils/gridAttributeCatalog.js'
 import { ZoomIn, Loader2 } from 'lucide-vue-next'
 import ChartDatasetTreeNode from './ChartDatasetTreeNode.vue'
 import { errorMessage } from '../../../utils/http'
@@ -137,11 +139,71 @@ const selectedGridAttributeCode = ref('')
 const selectedGridAttributeLegend = computed(() => gridAttributeLegend(selectedGridAttributeCode.value))
 const selectedAttributeLodAggregation = computed(() => gridAttributeLodAggregation(selectedGridAttributeCode.value))
 const selectedAttributeLodAggregationLabel = computed(() => gridAttributeLodAggregationLabel(selectedGridAttributeCode.value))
-const gridAttributeTopicGroups = [
-  { label: '噪声', topics: GRID_ATTRIBUTE_TOPICS.filter(item => item.kind === 'zone' || item.kind === 'margin') },
-  { label: '电磁场强', topics: GRID_ATTRIBUTE_TOPICS.filter(item => item.kind === 'emf') },
-  { label: '气象数据', topics: GRID_ATTRIBUTE_TOPICS.filter(item => item.kind === 'weather') },
-]
+const attributeCatalogItems = ref([])
+const attributeCatalogLoading = ref(false)
+const attributeCatalogError = ref('')
+const attributeCatalogNotice = ref('')
+let attributeCatalogController = null
+let attributeCatalogPromise = null
+const gridAttributeTopicGroups = computed(() => availableGridAttributeGroups(
+  attributeCatalogItems.value, selectedTrueAltitudeDataset.value,
+))
+
+function stopAttributeCatalogLoad() {
+  attributeCatalogController?.abort()
+  attributeCatalogController = null
+  attributeCatalogPromise = null
+  attributeCatalogLoading.value = false
+}
+
+async function refreshQueryCatalog() {
+  if (!chartMode.value) return false
+  if (attributeCatalogPromise) return attributeCatalogPromise
+  const controller = new AbortController()
+  attributeCatalogController = controller
+  attributeCatalogLoading.value = true
+  attributeCatalogError.value = ''
+  attributeCatalogPromise = (async () => {
+    try {
+      const [items, datasets] = await Promise.all([
+        fetchGridAttributeCatalog({ signal: controller.signal }),
+        loadActiveAttributeDatasets({ signal: controller.signal }),
+      ])
+      if (controller.signal.aborted || attributeCatalogController !== controller) return false
+      attributeCatalogItems.value = items
+      // 同步活动版本信息，保留用户已经填写的查询高度范围。
+      trueAltitudeDatasets.value = datasets
+      return true
+    } catch (err) {
+      if (err?.name === 'AbortError' || attributeCatalogController !== controller) return false
+      attributeCatalogItems.value = []
+      attributeCatalogError.value = err?.message || '查询内容目录加载失败'
+      return false
+    } finally {
+      if (attributeCatalogController === controller) {
+        attributeCatalogLoading.value = false
+        attributeCatalogController = null
+        attributeCatalogPromise = null
+      }
+    }
+  })()
+  return attributeCatalogPromise
+}
+
+onMounted(() => {
+  window.addEventListener('focus', refreshQueryCatalog)
+  window.addEventListener(GRID_ATTRIBUTE_CATALOG_CHANGED, refreshQueryCatalog)
+})
+onBeforeUnmount(() => {
+  stopAttributeCatalogLoad()
+  chartDatasetRequest?.abort()
+  cancelManualQuery()
+  abortController?.abort()
+  window.removeEventListener('focus', refreshQueryCatalog)
+  window.removeEventListener(GRID_ATTRIBUTE_CATALOG_CHANGED, refreshQueryCatalog)
+})
+const weatherSurfaceTopic = computed(() => isDailyWeatherField(selectedGridAttributeCode.value))
+const projectWeatherToAllHeights = ref(false)
 const attributeTopicMode = computed(() => chartMode.value && Boolean(selectedGridAttributeCode.value))
 const trueAltitudeQueryMode = computed(() => trueAltitudeMode.value || attributeTopicMode.value)
 const trueAltitudeResolutionMode = ref(TRUE_ALTITUDE_QUERY_MODE.LOD)
@@ -154,6 +216,7 @@ const experimentalMixedResolution = ref(false)
 const attributeLodEnabled = ref(false)
 const attributeLodActive = computed(() => attributeTopicMode.value
   && attributeLodEnabled.value
+  && !weatherSurfaceTopic.value
   && Boolean(selectedAttributeLodAggregation.value))
 const gridsData = ref([])
 const chartSummary = ref(null)
@@ -211,12 +274,17 @@ async function loadChartDatasets() {
 
 watch(chartMode, (active) => {
   if (!active) {
+    stopAttributeCatalogLoad()
+    attributeCatalogItems.value = []
+    attributeCatalogError.value = ''
+    attributeCatalogNotice.value = ''
     selectedGridAttributeCode.value = ''
     chartDatasetRequest?.abort()
     return
   }
   airspaceGridForm.level = 17
   loadChartDatasets()
+  refreshQueryCatalog()
 }, { immediate: true })
 
 const selectedTrueAltitudeDataset = computed(() =>
@@ -266,7 +334,9 @@ watch(() => airspaceGridForm.datasetId, () => {
 })
 
 watch(selectedGridAttributeCode, code => {
-  attributeLodEnabled.value = keepGridAttributeLodEnabled(attributeLodEnabled.value, code)
+  attributeLodEnabled.value = !isDailyWeatherField(code) && keepGridAttributeLodEnabled(attributeLodEnabled.value, code)
+  projectWeatherToAllHeights.value = false
+  if (code) attributeCatalogNotice.value = ''
   if (code) experimentalMixedResolution.value = false
 })
 
@@ -392,6 +462,15 @@ let manualTimeoutId = null               // 手动查询：超时定时器
 let manualTimedOut = false               // 手动查询：是否因超时而中止
 const TRUE_ALTITUDE_PAGE_SIZE = 50000
 const TRUE_ALTITUDE_RENDER_TARGET = 100000
+
+watch(gridAttributeTopicGroups, groups => {
+  const selected = selectedGridAttributeCode.value
+  if (!selected || groups.some(group => group.topics.some(item => item.code === selected))) return
+  selectedGridAttributeCode.value = ''
+  resetForm()
+  attributeCatalogNotice.value = '原选中属性已停用、删除或未绑定当前活动版本，请重新选择查询内容。'
+  emit('showGrid', { cells: [], level: Number(airspaceGridForm.level) })
+}, { flush: 'sync' })
 
 async function queryAndRenderChartPages(basePayload, controller, options = {}) {
   const startedAt = performance.now()
@@ -534,6 +613,7 @@ async function queryAndRenderTrueAltitudePages(basePayload, controller, options 
   let lastData = null
   let datasetVersion = basePayload.datasetVersion
   const attributeCode = attributeTopicMode.value ? selectedGridAttributeCode.value : ''
+  const attributeHasStyle = GRID_ATTRIBUTE_TOPICS.some(item => item.code === attributeCode)
   const attributeLodAggregation = attributeCode ? basePayload.attributeLodAggregation : ''
   const requestedLod = basePayload.renderTargetCells != null
   const mixed = !attributeCode && basePayload.experimentalMixedResolution === true
@@ -572,7 +652,7 @@ async function queryAndRenderTrueAltitudePages(basePayload, controller, options 
     const rawCells = Array.isArray(data?.data?.cells) ? data.data.cells : []
     const pageCells = toMapCells(rawCells).map(cell => attributeCode ? {
       ...cell,
-      color: noiseGridColor(attributeCode, cell.attributeValue),
+      color: attributeHasStyle ? noiseGridColor(attributeCode, cell.attributeValue) : '#64748b',
       attributeGrid: true,
     } : cell)
     let cells = pageCells
@@ -613,6 +693,8 @@ async function queryAndRenderTrueAltitudePages(basePayload, controller, options 
       status: data?.success === true ? 'success' : (data?.status || 'unknown'),
       attributeCode: data?.data?.attributeCode,
       attributeAggregation: data?.data?.attributeAggregation,
+      sourceMetadata: data?.data?.sourceMetadata,
+      dimensionMode: data?.data?.dimensionMode,
     }
 
     if (cells.length > 0) {
@@ -711,6 +793,7 @@ async function onViewBoundsChanged(bounds) {
       maxAgl: Number(airspaceGridForm.maxAgl),
       level: queryLevel,
       attributeCode: attributeTopicMode.value ? selectedGridAttributeCode.value : '',
+      ...(weatherSurfaceTopic.value ? { project2DToAllHeights: projectWeatherToAllHeights.value } : {}),
       ...(attributeLodActive.value ? {
         renderTargetCells: TRUE_ALTITUDE_RENDER_TARGET,
         attributeLodAggregation: selectedAttributeLodAggregation.value,
@@ -911,6 +994,20 @@ async function submitAirspaceGridQuery() {
   error.value = ''
   result.value = null
   queryStats.value = null
+  if (chartMode.value && selectedGridAttributeCode.value) {
+    const selected = selectedGridAttributeCode.value
+    const datasetId = airspaceGridForm.datasetId
+    const refreshed = await refreshQueryCatalog()
+    if (!chartMode.value || airspaceGridForm.datasetId !== datasetId) return
+    if (!refreshed) {
+      error.value = attributeCatalogError.value || '查询内容目录尚未加载成功，请刷新后重试'
+      return
+    }
+    if (selectedGridAttributeCode.value !== selected) {
+      error.value = attributeCatalogNotice.value || '所选属性已不可用，请重新选择'
+      return
+    }
+  }
 
   // 验证层级
   if (!Number.isInteger(Number(airspaceGridForm.level)) || airspaceGridForm.level < 0) {
@@ -1004,6 +1101,7 @@ async function submitAirspaceGridQuery() {
       maxAgl: Number(airspaceGridForm.maxAgl),
       level: queryLevel,
       attributeCode: attributeTopicMode.value ? selectedGridAttributeCode.value : '',
+      ...(weatherSurfaceTopic.value ? { project2DToAllHeights: projectWeatherToAllHeights.value } : {}),
       ...(attributeLodActive.value ? {
         renderTargetCells: TRUE_ALTITUDE_RENDER_TARGET,
         attributeLodAggregation: selectedAttributeLodAggregation.value,
@@ -1268,8 +1366,11 @@ function clearGrids() {
         <template v-if="chartMode">
           <div class="dataset-title-row attribute-layer-row">
             <div class="group-title">查询内容</div>
+            <button type="button" class="dataset-refresh" :disabled="attributeCatalogLoading" @click="refreshQueryCatalog">
+              {{ attributeCatalogLoading ? '加载中...' : '刷新目录' }}
+            </button>
           </div>
-          <select v-model="selectedGridAttributeCode" class="level-select" :disabled="loading || dynamicZoomEnabled">
+          <select v-model="selectedGridAttributeCode" class="level-select" :disabled="loading || dynamicZoomEnabled || attributeCatalogLoading">
             <option value="">航图实体要素</option>
             <optgroup v-for="group in gridAttributeTopicGroups" :key="group.label" :label="group.label">
               <option
@@ -1282,6 +1383,11 @@ function clearGrids() {
               </option>
             </optgroup>
           </select>
+          <div v-if="attributeCatalogError" class="error-box dataset-error">{{ attributeCatalogError }}</div>
+          <div v-else-if="attributeCatalogNotice" class="dataset-hint">{{ attributeCatalogNotice }}</div>
+          <div v-else-if="!attributeCatalogLoading && !gridAttributeTopicGroups.length" class="dataset-hint">
+            {{ selectedTrueAltitudeDataset ? '当前活动空域版本暂无已启用并绑定的场属性。' : '选择已激活的空域数据集后显示可用场属性。' }}
+          </div>
           <div v-if="selectedGridAttributeCode" class="noise-legend">
             <template v-if="selectedGridAttributeLegend.length">
               <span v-for="band in selectedGridAttributeLegend" :key="band.label"><i :style="{ background: band.color }" />{{ band.label }}</span>
@@ -1298,13 +1404,7 @@ function clearGrids() {
               <span><i style="background:#16a34a" />≤ -10 dB(A)</span>
             </template>
             <template v-else>
-              <span><i style="background:#64748b" />&lt;120</span>
-              <span><i style="background:#3b82f6" />120–124</span>
-              <span><i style="background:#06b6d4" />124–128</span>
-              <span><i style="background:#22c55e" />128–132</span>
-              <span><i style="background:#facc15" />132–136</span>
-              <span><i style="background:#f97316" />136–140</span>
-              <span><i style="background:#dc2626" />≥140 dBμV/m</span>
+              <span><i style="background:#64748b" />该属性尚未配置分档图例</span>
             </template>
           </div>
           <div v-if="selectedGridAttributeCode" class="dataset-hint">
@@ -1315,12 +1415,17 @@ function clearGrids() {
               专题属性按原始 L17 网格查询并逐页渲染，不使用粗层 LOD 聚合。
             </template>
           </div>
-          <label v-if="selectedGridAttributeCode && selectedAttributeLodAggregation" class="dataset-hint">
+          <label v-if="selectedGridAttributeCode && selectedAttributeLodAggregation && !weatherSurfaceTopic" class="dataset-hint">
             <input v-model="attributeLodEnabled" type="checkbox" :disabled="loading || dynamicZoomEnabled" />
             LOD 聚合网格显示（试验，默认关闭）
           </label>
-          <div v-else-if="selectedGridAttributeCode" class="dataset-hint">
+          <div v-else-if="selectedGridAttributeCode && !weatherSurfaceTopic" class="dataset-hint">
             当前属性尚未定义安全的 LOD 聚合策略，只能显示原始格元。
+          </div>
+          <div v-if="weatherSurfaceTopic" class="dataset-hint">
+            <label><input v-model="projectWeatherToAllHeights" type="checkbox" :disabled="loading || dynamicZoomEnabled" />将二维气象参考值关联到全部高度</label>
+            <div>默认显示最低离地带；全高度关联仍是同一地表日统计量，不代表各飞行高度实况。</div>
+            <div v-if="chartSummary?.sourceMetadata">源日期：{{ chartSummary.sourceMetadata.sourceDate }}；源变量：{{ chartSummary.sourceMetadata.sourceVariable }}；单位：{{ chartSummary.sourceMetadata.unit }}</div>
           </div>
           <div v-if="GRID_ATTRIBUTE_TOPICS.find(item => item.code === selectedGridAttributeCode)?.kind === 'emf'" class="dataset-hint">
             颜色仅表示电磁场强数值，不代表通信服务质量、导航定位精度或监视探测能力。

@@ -2,6 +2,8 @@
 import { ref, reactive, computed, onBeforeUnmount } from 'vue'
 import { Loader2, RefreshCw, ChevronDown, ChevronUp, Box, Building2, Mountain, Cloud, Search, Layers, Waypoints, Radar, Wrench, FileSpreadsheet } from 'lucide-vue-next'
 import FeatureDatasetManager from './FeatureDatasetManager.vue'
+import { GRID_ATTRIBUTE_TOPICS } from '../../../utils/noiseGrid.js'
+import { isDailyWeatherField, weatherFieldPreset, surfaceFieldParameters } from '../../../utils/weatherField.js'
 
 // ==================== Tab 状态 ====================
 const TABS = [
@@ -331,17 +333,25 @@ const FIELD_VALUE_PRESETS = {
   emfAmplitude: { valueTransform: 'log10', transformScale: 20, transformOffset: 120 },
 }
 const fieldValuePreset = ref('emfSquared')
+// 二维气象场可选的目标属性，直接复用网格专题目录，保证导入后前端图例能识别同一编码。
+const WEATHER_ATTRIBUTE_PRESETS = GRID_ATTRIBUTE_TOPICS.filter(item => isDailyWeatherField(item.code))
 const fieldResampleForm = ref({
   datasetId: '',
   datasetVersion: '',
   input: 'data/deqing_map/emf_deqing_v4/emf_deqing_v4.nc',
   inputFormat: 'netcdf',
+  dimensionMode: '3D',
   gridLayout: 'POINT_PROFILE',
   sourceCrs: 'EPSG:4549',
   xVariable: 'x',
   yVariable: 'y',
   timeVariable: 'time',
   selectionDate: '2026-08-15',
+  sourceDate: '',
+  timeIndex: 0,
+  minAgl: 0,
+  maxAgl: 600,
+  weatherPreset: '',
   verticalCoverage: 'TARGET_DATASET',
   groundVariable: 'ground_height',
   verticalVariable: 'height_agl',
@@ -388,6 +398,43 @@ function applyFieldLayoutPreset() {
   applyFieldValuePreset()
 }
 
+// 按模式保存草稿，切回三维时恢复原参数，不混用二维的变量和单位。
+let previousFieldDimension = '3D'
+const fieldModeDrafts = {}
+function applyDimensionModePreset() {
+  const form = fieldResampleForm.value
+  const mode = form.dimensionMode
+  fieldModeDrafts[previousFieldDimension] = { form: { ...form }, valuePreset: fieldValuePreset.value }
+  const draft = fieldModeDrafts[mode]
+  if (draft) {
+    Object.assign(form, draft.form, { dimensionMode: mode })
+    fieldValuePreset.value = draft.valuePreset
+  } else if (mode === '2D') {
+    Object.assign(form, {
+      input: 'data/deqing_map/deqing_weather.nc',
+      gridLayout: 'STRUCTURED_LAT_LON_SNAPSHOT',
+      sourceCrs: 'EPSG:4326', xVariable: 'lon', yVariable: 'lat', timeVariable: 'time',
+      timeIndex: 0, sourceDate: '2025-08-05', minAgl: 0, maxAgl: 600,
+      source: 'deqing_weather_daily_20250805', weatherPreset: 'weather_daily_mean_temperature',
+    })
+    applyWeatherPreset()
+  }
+  previousFieldDimension = mode
+  errors.value = {}
+}
+
+function applyWeatherPreset() {
+  const preset = weatherFieldPreset(fieldResampleForm.value.weatherPreset)
+  if (!preset) return
+  Object.assign(fieldResampleForm.value, preset)
+  fieldValuePreset.value = 'original'
+  for (const key of ['attributeCode', 'attributeName', 'valueVariable', 'transformScale', 'transformOffset']) delete errors.value[key]
+}
+
+const isSurfaceField = computed(() => fieldResampleForm.value.dimensionMode === '2D')
+const isPointProfile = computed(() => !isSurfaceField.value && fieldResampleForm.value.gridLayout === 'POINT_PROFILE')
+const isStructuredSnapshot3D = computed(() => !isSurfaceField.value && fieldResampleForm.value.gridLayout === 'STRUCTURED_LAT_LON_SNAPSHOT')
+
 function openManagedFieldImport({ type, attribute, binding }) {
   switchTab(type)
   const form = type === 'fieldResample' ? fieldResampleForm.value : parquetAttributeForm.value
@@ -413,7 +460,8 @@ function validateFieldResample(key) {
   if (isBlank(f.input)) e.input = 'NetCDF 文件路径不能为空'
   else if (!/\.nc4?$/i.test(String(f.input).trim())) e.input = '输入文件必须为 .nc 或 .nc4'
   if (isBlank(f.sourceCrs)) e.sourceCrs = '源坐标系不能为空'
-  const structuredSnapshot = f.gridLayout === 'STRUCTURED_LAT_LON_SNAPSHOT'
+  const surface = f.dimensionMode === '2D'
+  const structuredSnapshot = surface || f.gridLayout === 'STRUCTURED_LAT_LON_SNAPSHOT'
   const requiredVariables = [
     ['xVariable', structuredSnapshot ? '经度变量' : 'X 坐标变量'],
     ['yVariable', structuredSnapshot ? '纬度变量' : 'Y 坐标变量'],
@@ -425,7 +473,20 @@ function validateFieldResample(key) {
     if (isBlank(f[name])) e[name] = `${label}不能为空`
     else if (!FIELD_VARIABLE_RE.test(String(f[name]).trim())) e[name] = `${label}名称格式不正确`
   }
-  if (structuredSnapshot) {
+  if (surface) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(f.sourceDate || '').trim())) {
+      e.sourceDate = '源统计日期必须采用 YYYY-MM-DD 格式'
+    }
+    const timeIndex = intCheck(f.timeIndex, '时间切片索引', 0, 1000000000)
+    if (timeIndex) e.timeIndex = timeIndex
+    const minAgl = numCheck(f.minAgl, '关联离地高度下限', 0, 100000)
+    if (minAgl) e.minAgl = minAgl
+    const maxAgl = numCheck(f.maxAgl, '关联离地高度上限', 0, 100000)
+    if (maxAgl) e.maxAgl = maxAgl
+    if (!e.minAgl && !e.maxAgl && Number(f.maxAgl) <= Number(f.minAgl)) {
+      e.maxAgl = '关联离地高度上限必须大于下限'
+    }
+  } else if (structuredSnapshot) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(f.selectionDate || ''))) {
       e.selectionDate = '日期必须采用 YYYY-MM-DD 格式'
     }
@@ -1084,12 +1145,13 @@ async function submitFieldResample() {
   feedback.value = null
   const f = fieldResampleForm.value
   try {
+    const surface = f.dimensionMode === '2D'
     const body = {
       datasetId: String(f.datasetId).trim(),
       datasetVersion: Number(f.datasetVersion),
       input: String(f.input).trim(),
       inputFormat: f.inputFormat,
-      gridLayout: f.gridLayout,
+      dimensionMode: f.dimensionMode,
       sourceCrs: String(f.sourceCrs).trim(),
       xVariable: String(f.xVariable).trim(),
       yVariable: String(f.yVariable).trim(),
@@ -1102,17 +1164,22 @@ async function submitFieldResample() {
       valueTransform: f.valueTransform,
       transformScale: Number(f.transformScale),
       transformOffset: Number(f.transformOffset),
-      horizontalInterpolation: 'delaunay_linear',
+      horizontalInterpolation: surface ? 'bilinear' : 'delaunay_linear',
       outsidePolicy: 'skip',
       dryRun: Boolean(f.dryRun),
     }
-    if (f.gridLayout === 'STRUCTURED_LAT_LON_SNAPSHOT') {
+    if (surface) {
+      // 二维模式不得携带任何垂直场参数，后端会直接拒绝。
+      Object.assign(body, surfaceFieldParameters(f))
+    } else if (f.gridLayout === 'STRUCTURED_LAT_LON_SNAPSHOT') {
+      body.gridLayout = f.gridLayout
       body.timeVariable = String(f.timeVariable).trim()
       body.selectionDate = String(f.selectionDate).trim()
       body.verticalReference = 'TARGET_DATASET'
       body.verticalCoverage = 'TARGET_DATASET'
       body.candidateMode = 'target_cells'
     } else {
+      body.gridLayout = f.gridLayout
       body.groundVariable = String(f.groundVariable || '').trim()
       body.verticalVariable = String(f.verticalVariable).trim()
       body.verticalReference = f.verticalReference
@@ -1127,7 +1194,9 @@ async function submitFieldResample() {
       body.registerMissingAttribute = Boolean(f.registerMissingAttribute)
     }
     const data = await postJson('/api/grid-attributes/field-resample-import-jobs', body)
-    handleJobAccepted(data, f.dryRun ? '多维场重采样预检' : '多维场重采样挂载')
+    handleJobAccepted(data, surface
+      ? (f.dryRun ? '二维气象场重采样预检' : '二维气象场重采样挂载')
+      : (f.dryRun ? '多维场重采样预检' : '多维场重采样挂载'))
   } catch (err) {
     feedback.value = {
       type: 'error',
@@ -1799,7 +1868,7 @@ onBeforeUnmount(() => {
       <!-- 多维场重采样 -->
       <section v-show="activeTab === 'fieldResample'" class="storage-card">
         <div class="card-title">多维场数据重采样与网格属性挂载</div>
-        <p class="card-desc">支持 NetCDF 三维点剖面和经纬度规则网格静态切片。按编码游标读取目标 L17 权威网格；二维切片默认覆盖目标活动版本中实际存在的全部真高空域。</p>
+        <p class="card-desc">三维场支持 NetCDF 点剖面和经纬度规则网格静态切片；二维气象场按规则经纬网读取单日切片，在权威 L17 水平中心双线性取样，每个水平码只存一份值，查询时再投影到三维空域。</p>
 
         <div class="form-grid">
           <div class="form-field" :class="{ 'has-error': errors.datasetId }">
@@ -1819,6 +1888,14 @@ onBeforeUnmount(() => {
             <span v-else class="field-hint">项目根目录下的 .nc/.nc4 相对路径</span>
           </div>
           <div class="form-field span-2">
+            <label>维度模式</label>
+            <select v-model="fieldResampleForm.dimensionMode" @change="applyDimensionModePreset">
+              <option value="3D">三维场（多高度，挂到格元属性）</option>
+              <option value="2D">二维气象场（近地面日尺度，水平值只存一次）</option>
+            </select>
+            <span v-if="isSurfaceField" class="field-hint">二维模式不使用垂直场参数；关联离地范围只决定查询作用域，不是气象垂直观测层。</span>
+          </div>
+          <div v-if="!isSurfaceField" class="form-field span-2">
             <label>源数据布局</label>
             <select v-model="fieldResampleForm.gridLayout" @change="applyFieldLayoutPreset">
               <option value="POINT_PROFILE">三维点剖面（location × height）</option>
@@ -1830,7 +1907,7 @@ onBeforeUnmount(() => {
             <input v-model="fieldResampleForm.sourceCrs" type="text" placeholder="EPSG:4549" @blur="validateField('sourceCrs')" />
             <span v-if="errors.sourceCrs" class="field-error">{{ errors.sourceCrs }}</span>
           </div>
-          <div v-if="fieldResampleForm.gridLayout === 'POINT_PROFILE'" class="form-field">
+          <div v-if="isPointProfile" class="form-field">
             <label>垂直坐标基准</label>
             <select v-model="fieldResampleForm.verticalReference" @change="validateField('groundVariable')">
               <option value="AGL">AGL（离地高度）</option>
@@ -1838,40 +1915,73 @@ onBeforeUnmount(() => {
             </select>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.xVariable }">
-            <label>{{ fieldResampleForm.gridLayout === 'STRUCTURED_LAT_LON_SNAPSHOT' ? '经度变量' : 'X 坐标变量' }} <span class="req">*</span></label>
+            <label>{{ isPointProfile ? 'X 坐标变量' : '经度变量' }} <span class="req">*</span></label>
             <input v-model="fieldResampleForm.xVariable" type="text" @blur="validateField('xVariable')" />
             <span v-if="errors.xVariable" class="field-error">{{ errors.xVariable }}</span>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.yVariable }">
-            <label>{{ fieldResampleForm.gridLayout === 'STRUCTURED_LAT_LON_SNAPSHOT' ? '纬度变量' : 'Y 坐标变量' }} <span class="req">*</span></label>
+            <label>{{ isPointProfile ? 'Y 坐标变量' : '纬度变量' }} <span class="req">*</span></label>
             <input v-model="fieldResampleForm.yVariable" type="text" @blur="validateField('yVariable')" />
             <span v-if="errors.yVariable" class="field-error">{{ errors.yVariable }}</span>
           </div>
-          <div v-if="fieldResampleForm.gridLayout === 'POINT_PROFILE'" class="form-field" :class="{ 'has-error': errors.groundVariable }">
+          <div v-if="isPointProfile" class="form-field" :class="{ 'has-error': errors.groundVariable }">
             <label>地面高程变量</label>
             <input v-model="fieldResampleForm.groundVariable" type="text" :disabled="fieldResampleForm.verticalReference !== 'AGL'" @blur="validateField('groundVariable')" />
             <span v-if="errors.groundVariable" class="field-error">{{ errors.groundVariable }}</span>
           </div>
-          <div v-if="fieldResampleForm.gridLayout === 'POINT_PROFILE'" class="form-field" :class="{ 'has-error': errors.verticalVariable }">
+          <div v-if="isPointProfile" class="form-field" :class="{ 'has-error': errors.verticalVariable }">
             <label>垂直坐标变量 <span class="req">*</span></label>
             <input v-model="fieldResampleForm.verticalVariable" type="text" @blur="validateField('verticalVariable')" />
             <span v-if="errors.verticalVariable" class="field-error">{{ errors.verticalVariable }}</span>
           </div>
-          <div v-if="fieldResampleForm.gridLayout === 'STRUCTURED_LAT_LON_SNAPSHOT'" class="form-field" :class="{ 'has-error': errors.timeVariable }">
+          <div v-if="!isPointProfile" class="form-field" :class="{ 'has-error': errors.timeVariable }">
             <label>时间变量 <span class="req">*</span></label>
             <input v-model="fieldResampleForm.timeVariable" type="text" @blur="validateField('timeVariable')" />
             <span v-if="errors.timeVariable" class="field-error">{{ errors.timeVariable }}</span>
           </div>
-          <div v-if="fieldResampleForm.gridLayout === 'STRUCTURED_LAT_LON_SNAPSHOT'" class="form-field" :class="{ 'has-error': errors.selectionDate }">
+          <div v-if="isStructuredSnapshot3D" class="form-field" :class="{ 'has-error': errors.selectionDate }">
             <label>选取日期（北京时间） <span class="req">*</span></label>
             <input v-model="fieldResampleForm.selectionDate" type="date" @blur="validateField('selectionDate')" />
             <span v-if="errors.selectionDate" class="field-error">{{ errors.selectionDate }}</span>
           </div>
-          <div v-if="fieldResampleForm.gridLayout === 'STRUCTURED_LAT_LON_SNAPSHOT'" class="form-field span-2">
+          <div v-if="isStructuredSnapshot3D" class="form-field span-2">
             <label>垂直覆盖方式</label>
             <input value="覆盖目标活动版本中实际存在的全部真高空域" type="text" disabled />
             <span class="field-hint">高度上下限从目标 L17 网格逐水平列聚合，不需要手工输入，也不会生成目标库中不存在的格元。</span>
           </div>
+          <template v-if="isSurfaceField">
+            <div class="form-field span-2">
+              <label>气象要素预设</label>
+              <select v-model="fieldResampleForm.weatherPreset" @change="applyWeatherPreset">
+                <option value="">不套用（手工填写属性编码）</option>
+                <option v-for="item in WEATHER_ATTRIBUTE_PRESETS" :key="item.code" :value="item.code">{{ item.label }}（{{ item.code }}）</option>
+              </select>
+              <span class="field-hint">套用后写入前端图例已识别的属性编码，导入完成即可直接着色；同步填写 deqing_weather.nc 对应源变量，五项需分别提交任务。</span>
+            </div>
+            <div class="form-field" :class="{ 'has-error': errors.sourceDate }">
+              <label>源统计日期 <span class="req">*</span></label>
+              <input v-model="fieldResampleForm.sourceDate" type="date" @blur="validateField('sourceDate')" />
+              <span v-if="errors.sourceDate" class="field-error">{{ errors.sourceDate }}</span>
+              <span v-else class="field-hint">必须与所选时间切片按源时间基准解码出的日期一致，是日尺度统计标签而非瞬时实况。</span>
+            </div>
+            <div class="form-field" :class="{ 'has-error': errors.timeIndex }">
+              <label>时间切片索引 <span class="req">*</span></label>
+              <input v-model.number="fieldResampleForm.timeIndex" type="number" min="0" step="1" @blur="validateField('timeIndex')" />
+              <span v-if="errors.timeIndex" class="field-error">{{ errors.timeIndex }}</span>
+              <span v-else class="field-hint">零起始。单日文件填 0；多日文件需填该日期在时间轴上的实际序号。</span>
+            </div>
+            <div class="form-field" :class="{ 'has-error': errors.minAgl }">
+              <label>关联离地下限（米） <span class="req">*</span></label>
+              <input v-model.number="fieldResampleForm.minAgl" type="number" min="0" max="100000" step="any" @blur="validateField('minAgl')" />
+              <span v-if="errors.minAgl" class="field-error">{{ errors.minAgl }}</span>
+            </div>
+            <div class="form-field" :class="{ 'has-error': errors.maxAgl }">
+              <label>关联离地上限（米） <span class="req">*</span></label>
+              <input v-model.number="fieldResampleForm.maxAgl" type="number" min="0" max="100000" step="any" @blur="validateField('maxAgl')" />
+              <span v-if="errors.maxAgl" class="field-error">{{ errors.maxAgl }}</span>
+              <span v-else class="field-hint">必须大于下限。只界定查询关联作用域，不表示该高度上真有气象观测。</span>
+            </div>
+          </template>
           <div class="form-field" :class="{ 'has-error': errors.valueVariable }">
             <label>原始数值变量 <span class="req">*</span></label>
             <input v-model="fieldResampleForm.valueVariable" type="text" @blur="validateField('valueVariable')" />
@@ -1889,7 +1999,8 @@ onBeforeUnmount(() => {
           </div>
           <div class="form-field">
             <label>单位</label>
-            <input v-model="fieldResampleForm.unit" type="text" placeholder="dBμV/m" />
+            <input v-model="fieldResampleForm.unit" type="text" :placeholder="isSurfaceField ? '留空采用源文件单位' : 'dBμV/m'" />
+            <span v-if="isSurfaceField" class="field-hint">留空即采用源文件单位。填写与源不一致的单位而又未配置数值换算会被后端拒绝，不能只改单位标签。</span>
           </div>
           <div class="form-field span-2">
             <label>数值保存方式</label>
@@ -1901,7 +2012,7 @@ onBeforeUnmount(() => {
             </select>
             <span v-if="fieldValuePreset === 'emfSquared'" class="field-hint">适用于本次 *_profiles.nc 的 field_total（单位为 (V/m)²），自动使用 log10、10、120。</span>
             <span v-else-if="fieldValuePreset === 'emfAmplitude'" class="field-hint">适用于单位为 V/m 的场强值，例如原文件的 E_V_M，自动使用 log10、20、120。</span>
-            <span v-else-if="fieldValuePreset === 'original'" class="field-hint">插值结果直接保存，自动使用 identity、1、0；请填写源数值对应的单位。</span>
+            <span v-else-if="fieldValuePreset === 'original'" class="field-hint">插值结果直接保存，自动使用 identity、1、0；二维场单位可留空，由后端读取源单位。</span>
           </div>
           <div v-if="fieldValuePreset === 'custom'" class="form-field">
             <label>数值变换</label>
@@ -1927,6 +2038,7 @@ onBeforeUnmount(() => {
             <input v-model="fieldResampleForm.dryRun" type="checkbox" />
             <span>只执行重采样和权威网格成员校验，不激活属性（推荐先勾选）</span>
           </label>
+          <p class="card-desc">预检仍会创建、写入并清理 ClickHouse 暂存表，不注册属性、不建投影元数据、不切换活动绑定。确认结果和容量后再取消勾选正式发布。</p>
         </div>
 
         <button class="advanced-toggle" type="button" @click="fieldResampleForm.showAdvanced = !fieldResampleForm.showAdvanced">
@@ -1967,6 +2079,7 @@ onBeforeUnmount(() => {
             <label>最大有效目标格元数</label>
             <input v-model.number="fieldResampleForm.maxTargetCells" type="number" min="1" max="1000000000" @blur="validateField('maxTargetCells')" />
             <span v-if="errors.maxTargetCells" class="field-error">{{ errors.maxTargetCells }}</span>
+            <span v-else-if="isSurfaceField" class="field-hint">二维模式限制关联离地范围内去重后的权威水平格数；超限会拒绝入库并清理临时数据，需收窄范围或调高上限。</span>
             <span v-else class="field-hint">限制插值有效且属于目标空域的输出数量，不限制读取批次数；超限会报错，不会截断入库。</span>
           </div>
           <div class="form-field">
@@ -1982,7 +2095,8 @@ onBeforeUnmount(() => {
             <Loader2 v-if="submittingMap.fieldResample" :size="14" class="spin" />
             <span>{{ submittingMap.fieldResample ? '提交中...' : (fieldResampleForm.dryRun ? '提交重采样预检' : '提交重采样挂载') }}</span>
           </button>
-          <span class="submit-hint">L17 权威格元分批重采样，按批次限制内存，保留最终成员校验和属性写入计数核验。</span>
+          <span v-if="isSurfaceField" class="submit-hint">二维水平值只写一次；发布先写水平事实并核验行数，再在事务内复核目标活动版本后切换绑定。</span>
+          <span v-else class="submit-hint">L17 权威格元分批重采样，按批次限制内存，保留最终成员校验和属性写入计数核验。</span>
         </div>
       </section>
 
