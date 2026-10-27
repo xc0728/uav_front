@@ -41,3 +41,7 @@ __screenshots__/
 /public/
 
 /test/
+
+# 浙江 DEM 源数据：473 MB，超出 GitHub 100 MB 单文件限制，只保留在本地磁盘
+# 同目录下的 .aux.xml / .vrt 仍纳入版本控制
+zhejiangDEM/*.tif
