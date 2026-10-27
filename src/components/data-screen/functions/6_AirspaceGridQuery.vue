@@ -14,6 +14,8 @@ import {
 } from '../../../utils/trueAltitudeGrid'
 import {
   GRID_ATTRIBUTE_TOPICS,
+  gridAttributeLodAggregation,
+  gridAttributeLodAggregationLabel,
   gridAttributeLegend,
   noiseGridColor,
 } from '../../../utils/noiseGrid'
@@ -56,6 +58,29 @@ const airspaceOptions = [
   'Zhuzhou_AIRSPACE',
   'ZheJiang_AIRSPACE',
   'Deqing_Airspace',
+]
+
+const boundaryPresets = [
+  {
+    id: 'deqing-county',
+    label: '德清县全县',
+    bounds: {
+      minLon: 119.75647058,
+      maxLon: 120.33912664,
+      minLat: 30.42811742,
+      maxLat: 30.69754115,
+    },
+  },
+  {
+    id: 'core-area',
+    label: '核心区',
+    bounds: {
+      minLon: 119.93881443,
+      maxLon: 119.99562059,
+      minLat: 30.50793512,
+      maxLat: 30.55905185,
+    },
+  },
 ]
 
 function onBottomPresetChange(event) {
@@ -109,11 +134,12 @@ const result = ref(null)
 const queryStats = ref(null)
 const selectedGridAttributeCode = ref('')
 const selectedGridAttributeLegend = computed(() => gridAttributeLegend(selectedGridAttributeCode.value))
+const selectedAttributeLodAggregation = computed(() => gridAttributeLodAggregation(selectedGridAttributeCode.value))
+const selectedAttributeLodAggregationLabel = computed(() => gridAttributeLodAggregationLabel(selectedGridAttributeCode.value))
 const gridAttributeTopicGroups = [
   { label: '噪声', topics: GRID_ATTRIBUTE_TOPICS.filter(item => item.kind === 'zone' || item.kind === 'margin') },
   { label: '电磁场强', topics: GRID_ATTRIBUTE_TOPICS.filter(item => item.kind === 'emf') },
-  { label: '气象', topics: GRID_ATTRIBUTE_TOPICS.filter(item => item.kind === 'weather') },
-  { label: '气象数据质量', topics: GRID_ATTRIBUTE_TOPICS.filter(item => item.kind === 'weather_quality') },
+  { label: '气象数据', topics: GRID_ATTRIBUTE_TOPICS.filter(item => item.kind === 'weather') },
 ]
 const attributeTopicMode = computed(() => chartMode.value && Boolean(selectedGridAttributeCode.value))
 const trueAltitudeQueryMode = computed(() => trueAltitudeMode.value || attributeTopicMode.value)
@@ -123,6 +149,8 @@ const trueAltitudeLodEnabled = computed(
 )
 // 试验开关默认关闭；整个分页查询固定一次选择，避免中途改变算法。
 const experimentalMixedResolution = ref(false)
+// 属性 LOD 聚合是独立试验路径，默认关闭并保留权威层原值查询。
+const attributeLodEnabled = ref(false)
 const gridsData = ref([])
 const chartSummary = ref(null)
 const chartDatasets = ref([])
@@ -234,6 +262,7 @@ watch(() => airspaceGridForm.datasetId, () => {
 })
 
 watch(selectedGridAttributeCode, code => {
+  attributeLodEnabled.value = false
   if (code) experimentalMixedResolution.value = false
 })
 
@@ -501,6 +530,7 @@ async function queryAndRenderTrueAltitudePages(basePayload, controller, options 
   let lastData = null
   let datasetVersion = basePayload.datasetVersion
   const attributeCode = attributeTopicMode.value ? selectedGridAttributeCode.value : ''
+  const attributeLodAggregation = attributeCode ? basePayload.attributeLodAggregation : ''
   const requestedLod = basePayload.renderTargetCells != null
   const mixed = !attributeCode && basePayload.experimentalMixedResolution === true
   const levels = new Set()
@@ -513,6 +543,7 @@ async function queryAndRenderTrueAltitudePages(basePayload, controller, options 
       pageSize: TRUE_ALTITUDE_PAGE_SIZE,
       renderTargetCells: basePayload.renderTargetCells,
       attributeCode,
+      attributeLodAggregation,
       experimentalMixedResolution: mixed,
       cursor,
     })
@@ -527,6 +558,10 @@ async function queryAndRenderTrueAltitudePages(basePayload, controller, options 
     if (controller.signal.aborted) return null
     if (mixed && (data?.data?.mixedResolution !== true || data?.data?.countExact !== true)) {
       throw new Error('当前后端不支持混合多粒度试验，请更新后端或关闭试验开关')
+    }
+    if (attributeLodAggregation && data?.data?.lod === true
+      && data?.data?.attributeAggregation !== attributeLodAggregation) {
+      throw new Error('当前后端未按请求策略返回属性 LOD 聚合结果，请更新后端或关闭聚合开关')
     }
     datasetVersion ??= data?.data?.datasetVersion
 
@@ -573,6 +608,7 @@ async function queryAndRenderTrueAltitudePages(basePayload, controller, options 
       complete: data?.data?.hasMore !== true,
       status: data?.success === true ? 'success' : (data?.status || 'unknown'),
       attributeCode: data?.data?.attributeCode,
+      attributeAggregation: data?.data?.attributeAggregation,
     }
 
     if (cells.length > 0) {
@@ -671,6 +707,10 @@ async function onViewBoundsChanged(bounds) {
       maxAgl: Number(airspaceGridForm.maxAgl),
       level: queryLevel,
       attributeCode: attributeTopicMode.value ? selectedGridAttributeCode.value : '',
+      ...(attributeTopicMode.value && attributeLodEnabled.value ? {
+        renderTargetCells: TRUE_ALTITUDE_RENDER_TARGET,
+        attributeLodAggregation: selectedAttributeLodAggregation.value,
+      } : {}),
       ...(trueAltitudeMode.value ? trueAltitudeQueryOptions(trueAltitudeResolutionMode.value, {
         renderTargetCells: TRUE_ALTITUDE_RENDER_TARGET,
         experimentalMixedResolution: experimentalMixedResolution.value,
@@ -818,6 +858,14 @@ function requestViewBounds() {
   emit('get-view-bounds')
 }
 
+function applyBoundaryPreset(bounds) {
+  airspaceGridForm.minLon = bounds.minLon
+  airspaceGridForm.maxLon = bounds.maxLon
+  airspaceGridForm.minLat = bounds.minLat
+  airspaceGridForm.maxLat = bounds.maxLat
+  error.value = ''
+}
+
 /**
  * 估算查询区域在指定层级下的格网数量（用于提前预警）
  * GeoSOT level n 格子边长 ≈ 360° / 2^n
@@ -952,6 +1000,10 @@ async function submitAirspaceGridQuery() {
       maxAgl: Number(airspaceGridForm.maxAgl),
       level: queryLevel,
       attributeCode: attributeTopicMode.value ? selectedGridAttributeCode.value : '',
+      ...(attributeTopicMode.value && attributeLodEnabled.value ? {
+        renderTargetCells: TRUE_ALTITUDE_RENDER_TARGET,
+        attributeLodAggregation: selectedAttributeLodAggregation.value,
+      } : {}),
       ...(trueAltitudeMode.value ? trueAltitudeQueryOptions(trueAltitudeResolutionMode.value, {
         renderTargetCells: TRUE_ALTITUDE_RENDER_TARGET,
         experimentalMixedResolution: experimentalMixedResolution.value,
@@ -1252,7 +1304,19 @@ function clearGrids() {
             </template>
           </div>
           <div v-if="selectedGridAttributeCode" class="dataset-hint">
-            专题属性按原始 L17 网格查询并逐页渲染，不使用粗层 LOD 聚合。
+            <template v-if="attributeLodEnabled">
+              按显示预算选择预生成 LOD 网格，属性采用“{{ selectedAttributeLodAggregationLabel }}”聚合；边界覆盖及命中数是概略值。
+            </template>
+            <template v-else>
+              专题属性按原始 L17 网格查询并逐页渲染，不使用粗层 LOD 聚合。
+            </template>
+          </div>
+          <label v-if="selectedGridAttributeCode && selectedAttributeLodAggregation" class="dataset-hint">
+            <input v-model="attributeLodEnabled" type="checkbox" :disabled="loading || dynamicZoomEnabled" />
+            LOD 聚合网格显示（试验，默认关闭）
+          </label>
+          <div v-else-if="selectedGridAttributeCode" class="dataset-hint">
+            当前属性尚未定义安全的 LOD 聚合策略，只能显示原始格元。
           </div>
           <div v-if="GRID_ATTRIBUTE_TOPICS.find(item => item.code === selectedGridAttributeCode)?.kind === 'emf'" class="dataset-hint">
             颜色仅表示电磁场强数值，不代表通信服务质量、导航定位精度或监视探测能力。
@@ -1309,6 +1373,17 @@ function clearGrids() {
       <!-- 查询边界 -->
       <div class="form-group">
         <div class="group-title">查询边界</div>
+        <div class="boundary-presets" aria-label="查询边界预设">
+          <button
+            v-for="preset in boundaryPresets"
+            :key="preset.id"
+            type="button"
+            :disabled="loading"
+            @click="applyBoundaryPreset(preset.bounds)"
+          >
+            {{ preset.label }}
+          </button>
+        </div>
         <div class="coord-grid">
           <div class="coord-line">
             <span class="coord-label">西</span>
@@ -1743,6 +1818,35 @@ function clearGrids() {
 }
 
 /* 坐标网格 */
+.boundary-presets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.boundary-presets button {
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid #bae6fd;
+  border-radius: 6px;
+  background: #f0f9ff;
+  color: #0369a1;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.boundary-presets button:hover:not(:disabled) {
+  border-color: #7dd3fc;
+  background: #e0f2fe;
+}
+
+.boundary-presets button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .coord-grid {
   display: flex;
   flex-direction: column;

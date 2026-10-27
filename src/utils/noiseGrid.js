@@ -56,34 +56,56 @@ const WIND_DIRECTION_LEGEND = Object.freeze([
   { min: 225, label: '西 225–315°', color: '#a855f7' },
   { min: 315, label: '北 315–360°', color: '#3b82f6' },
 ])
-const QUALITY_DISTANCE_LEGEND = Object.freeze([
-  { min: -Infinity, label: '<2 km', color: '#16a34a' },
-  { min: 2000, label: '2–5 km', color: '#84cc16' },
-  { min: 5000, label: '5–10 km', color: '#f59e0b' },
-  { min: 10000, label: '≥10 km', color: '#ef4444' },
+const TEMPERATURE_LEGEND = Object.freeze([
+  { min: -Infinity, label: '<0 ℃', color: '#4338ca' },
+  { min: 0, label: '0–10 ℃', color: '#2563eb' },
+  { min: 10, label: '10–20 ℃', color: '#06b6d4' },
+  { min: 20, label: '20–30 ℃', color: '#22c55e' },
+  { min: 30, label: '30–35 ℃', color: '#f97316' },
+  { min: 35, label: '≥35 ℃', color: '#dc2626' },
 ])
-const SUPPORT_COUNT_LEGEND = Object.freeze([
-  { min: -Infinity, label: '0', color: '#ef4444' },
-  { min: 1, label: '1', color: '#f59e0b' },
-  { min: 2, label: '2', color: '#84cc16' },
-  { min: 3, label: '≥3 个', color: '#16a34a' },
+const HUMIDITY_LEGEND = Object.freeze([
+  { min: -Infinity, label: '<20%', color: '#d97706' },
+  { min: 20, label: '20–40%', color: '#facc15' },
+  { min: 40, label: '40–60%', color: '#84cc16' },
+  { min: 60, label: '60–80%', color: '#06b6d4' },
+  { min: 80, label: '≥80%', color: '#2563eb' },
+])
+const PRECIPITATION_LEGEND = Object.freeze([
+  { min: -Infinity, label: '0 mm', color: '#e2e8f0' },
+  { min: 0.1, label: '0.1–10 mm', color: '#7dd3fc' },
+  { min: 10, label: '10–25 mm', color: '#38bdf8' },
+  { min: 25, label: '25–50 mm', color: '#2563eb' },
+  { min: 50, label: '50–100 mm', color: '#7c3aed' },
+  { min: 100, label: '≥100 mm', color: '#be123c' },
+])
+const STATION_PRESSURE_LEGEND = Object.freeze([
+  { min: -Infinity, label: '<940 hPa', color: '#4338ca' },
+  { min: 940, label: '940–960 hPa', color: '#2563eb' },
+  { min: 960, label: '960–980 hPa', color: '#06b6d4' },
+  { min: 980, label: '980–1000 hPa', color: '#22c55e' },
+  { min: 1000, label: '1000–1020 hPa', color: '#facc15' },
+  { min: 1020, label: '≥1020 hPa', color: '#f97316' },
 ])
 
 export const GRID_ATTRIBUTE_TOPICS = Object.freeze([
   { code: '', label: '航图实体要素' },
-  { code: 'noise_zone_day', label: '昼间噪声分区', kind: 'zone' },
-  { code: 'noise_margin_day', label: '昼间噪声裕度', kind: 'margin', unit: 'dB(A)' },
-  { code: 'noise_zone_night', label: '夜间噪声分区', kind: 'zone' },
-  { code: 'noise_margin_night', label: '夜间噪声裕度', kind: 'margin', unit: 'dB(A)' },
-  { code: 'emf_strength_dbuv_m', label: '通信设施电磁场强', kind: 'emf', unit: 'dBμV/m', legend: COMMUNICATION_EMF_LEGEND },
-  { code: 'navigation_emf_dbuv_m', label: '导航设施电磁场强', kind: 'emf', unit: 'dBμV/m', legend: NAVIGATION_EMF_LEGEND },
-  { code: 'surveillance_emf_dbuv_m', label: '监视设施电磁场强', kind: 'emf', unit: 'dBμV/m', legend: SURVEILLANCE_EMF_LEGEND },
-  { code: 'wind_speed', label: '风速', kind: 'weather', unit: 'm/s', legend: WIND_SPEED_LEGEND },
+  { code: 'noise_zone_day', label: '昼间噪声分区', kind: 'zone', lodAggregation: 'min', lodAggregationLabel: '最不利分区' },
+  { code: 'noise_margin_day', label: '昼间噪声裕度', kind: 'margin', unit: 'dB(A)', lodAggregation: 'max', lodAggregationLabel: '最大超标裕度' },
+  { code: 'noise_zone_night', label: '夜间噪声分区', kind: 'zone', lodAggregation: 'min', lodAggregationLabel: '最不利分区' },
+  { code: 'noise_margin_night', label: '夜间噪声裕度', kind: 'margin', unit: 'dB(A)', lodAggregation: 'max', lodAggregationLabel: '最大超标裕度' },
+  { code: 'emf_strength_dbuv_m', label: '通信设施电磁场强', kind: 'emf', unit: 'dBμV/m', legend: COMMUNICATION_EMF_LEGEND, lodAggregation: 'avg', lodAggregationLabel: '源格元平均值' },
+  { code: 'navigation_emf_dbuv_m', label: '导航设施电磁场强', kind: 'emf', unit: 'dBμV/m', legend: NAVIGATION_EMF_LEGEND, lodAggregation: 'avg', lodAggregationLabel: '源格元平均值' },
+  { code: 'surveillance_emf_dbuv_m', label: '监视设施电磁场强', kind: 'emf', unit: 'dBμV/m', legend: SURVEILLANCE_EMF_LEGEND, lodAggregation: 'avg', lodAggregationLabel: '源格元平均值' },
+  { code: 'wind_speed', label: '风速', kind: 'weather', unit: 'm/s', legend: WIND_SPEED_LEGEND, lodAggregation: 'avg', lodAggregationLabel: '源格元平均值' },
   { code: 'wind_direction', label: '风向', kind: 'weather', unit: '°', legend: WIND_DIRECTION_LEGEND },
-  { code: 'wind_u', label: '东西向风速分量', kind: 'weather', unit: 'm/s', legend: WIND_COMPONENT_LEGEND },
-  { code: 'wind_v', label: '南北向风速分量', kind: 'weather', unit: 'm/s', legend: WIND_COMPONENT_LEGEND },
-  { code: 'wind_nearest_station_distance', label: '最近气象站距离', kind: 'weather_quality', unit: 'm', legend: QUALITY_DISTANCE_LEGEND },
-  { code: 'wind_support_station_count', label: '支持气象站数量', kind: 'weather_quality', unit: '个', legend: SUPPORT_COUNT_LEGEND },
+  { code: 'wind_u', label: '东西向风速分量', kind: 'weather', unit: 'm/s', legend: WIND_COMPONENT_LEGEND, lodAggregation: 'avg', lodAggregationLabel: '源格元平均值' },
+  { code: 'wind_v', label: '南北向风速分量', kind: 'weather', unit: 'm/s', legend: WIND_COMPONENT_LEGEND, lodAggregation: 'avg', lodAggregationLabel: '源格元平均值' },
+  { code: 'weather_daily_mean_temperature', label: '日平均气温', kind: 'weather', unit: '℃', legend: TEMPERATURE_LEGEND, lodAggregation: 'avg', lodAggregationLabel: '源格元平均值' },
+  { code: 'weather_daily_mean_humidity', label: '日平均相对湿度', kind: 'weather', unit: '%', legend: HUMIDITY_LEGEND, lodAggregation: 'avg', lodAggregationLabel: '源格元平均值' },
+  { code: 'weather_daily_precipitation', label: '日累计降水量', kind: 'weather', unit: 'mm', legend: PRECIPITATION_LEGEND, lodAggregation: 'avg', lodAggregationLabel: '源格元平均值' },
+  { code: 'weather_daily_mean_wind_speed', label: '日平均风速', kind: 'weather', unit: 'm/s', legend: WIND_SPEED_LEGEND, lodAggregation: 'avg', lodAggregationLabel: '源格元平均值' },
+  { code: 'weather_daily_mean_station_pressure', label: '日均本站气压', kind: 'weather', unit: 'hPa', legend: STATION_PRESSURE_LEGEND, lodAggregation: 'avg', lodAggregationLabel: '源格元平均值' },
 ])
 
 const ATTRIBUTE_BY_CODE = new Map(GRID_ATTRIBUTE_TOPICS.map(item => [item.code, item]))
@@ -94,6 +116,14 @@ export function noiseAttributeLabel(code) {
 
 export function gridAttributeLegend(code) {
   return ATTRIBUTE_BY_CODE.get(code)?.legend || []
+}
+
+export function gridAttributeLodAggregation(code) {
+  return ATTRIBUTE_BY_CODE.get(code)?.lodAggregation || ''
+}
+
+export function gridAttributeLodAggregationLabel(code) {
+  return ATTRIBUTE_BY_CODE.get(code)?.lodAggregationLabel || ''
 }
 
 export function noiseZoneLabel(value) {
@@ -110,7 +140,7 @@ export function formatNoiseAttribute(code, value) {
   if (definition?.kind === 'zone') return `${noiseZoneLabel(value)}（${value}）`
   if (definition?.kind === 'margin') return `${Number(value).toFixed(2)} ${definition.unit}`
   if (definition?.kind === 'emf') return `${Number(value).toFixed(2)} ${definition.unit}`
-  if (definition?.kind === 'weather' || definition?.kind === 'weather_quality') {
+  if (definition?.kind === 'weather') {
     return `${Number(value).toFixed(2)} ${definition.unit}`
   }
   return String(value)

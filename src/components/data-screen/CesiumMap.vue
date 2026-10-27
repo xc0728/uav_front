@@ -191,6 +191,8 @@ async function selectGridDetail(detail) {
   gridFeatureRequest = request
   const attributesTask = (async () => {
     if (!selected.datasetId) return
+    // LOD 属性格元代表多个 L17 源格元，不能用粗层编码冒充单个权威格元查询详情。
+    if (selected.attributeAggregation && selected.attributeAggregation !== 'none') return
     selected.attributesLoading = true
     try {
       const response = await fetch('/api/true-altitude-airspace/grid/cell', {
@@ -280,6 +282,10 @@ function formatPropertyValue(value) {
   return String(value)
 }
 
+function attributeAggregationLabel(aggregation) {
+  return ({ avg: '平均值', min: '最小值', max: '最大值' })[aggregation] || aggregation || ''
+}
+
 function toGridDetail(cell, bounds, fallbackLevel) {
   return {
     code: cell?.code || cell?.gridCode || cell?.grid_code || '—',
@@ -304,6 +310,8 @@ function toGridDetail(cell, bounds, fallbackLevel) {
     chartSourceMask: cell?.chartSourceMask,
     attributeCode: cell?.attributeCode,
     attributeValue: cell?.attributeValue,
+    attributeAggregation: cell?.attributeAggregation,
+    lodSourceCellCount: cell?.lodSourceCellCount,
     attributeGrid: cell?.attributeGrid === true,
     attributes: cell?.attributes || {},
     bounds,
@@ -4911,6 +4919,11 @@ onBeforeUnmount(() => {
           <div v-if="selectedGrid.attributeGrid" class="selected-attribute-current">
             当前专题：{{ noiseAttributeLabel(selectedGrid.attributeCode) }} ·
             {{ formatNoiseAttribute(selectedGrid.attributeCode, selectedGrid.attributeValue) }}
+          </div>
+          <div v-if="selectedGrid.attributeAggregation && selectedGrid.attributeAggregation !== 'none'" class="selected-attribute-current">
+            LOD 聚合：{{ attributeAggregationLabel(selectedGrid.attributeAggregation) }} ·
+            {{ Number(selectedGrid.sourceCellCount || 0).toLocaleString() }} 个属性源格元
+            <span v-if="selectedGrid.lodSourceCellCount"> / {{ Number(selectedGrid.lodSourceCellCount).toLocaleString() }} 个基础格元</span>
           </div>
           <div v-if="selectedGrid.attributesLoading">正在加载完整网格属性…</div>
           <div v-else-if="selectedGrid.attributesError" role="alert">

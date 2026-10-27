@@ -244,8 +244,6 @@ const WEATHER_ATTRIBUTE_MAPPINGS = [
   { sourceField: 'wind_from_direction_deg', attributeCode: 'wind_direction', attributeName: '风向', category: 'meteorology', valueType: 'float', unit: '°' },
   { sourceField: 'u_m_s', attributeCode: 'wind_u', attributeName: '东西向风速分量', category: 'meteorology', valueType: 'float', unit: 'm/s' },
   { sourceField: 'v_m_s', attributeCode: 'wind_v', attributeName: '南北向风速分量', category: 'meteorology', valueType: 'float', unit: 'm/s' },
-  { sourceField: 'nearest_station_distance_m', attributeCode: 'wind_nearest_station_distance', attributeName: '最近气象站距离', category: 'meteorology_quality', valueType: 'float', unit: 'm' },
-  { sourceField: 'support_station_count', attributeCode: 'wind_support_station_count', attributeName: '支持气象站数量', category: 'meteorology_quality', valueType: 'uint', unit: '个' },
 ]
 
 const parquetAttributeForm = ref({
@@ -338,9 +336,13 @@ const fieldResampleForm = ref({
   datasetVersion: '',
   input: 'data/deqing_map/emf_deqing_v4/emf_deqing_v4.nc',
   inputFormat: 'netcdf',
+  gridLayout: 'POINT_PROFILE',
   sourceCrs: 'EPSG:4549',
   xVariable: 'x',
   yVariable: 'y',
+  timeVariable: 'time',
+  selectionDate: '2026-08-15',
+  verticalCoverage: 'TARGET_DATASET',
   groundVariable: 'ground_height',
   verticalVariable: 'height_agl',
   valueVariable: 'field_total',
@@ -372,6 +374,20 @@ function applyFieldValuePreset() {
   delete errors.value.transformOffset
 }
 
+function applyFieldLayoutPreset() {
+  if (fieldResampleForm.value.gridLayout !== 'STRUCTURED_LAT_LON_SNAPSHOT') return
+  Object.assign(fieldResampleForm.value, {
+    sourceCrs: 'EPSG:4326',
+    xVariable: 'lon',
+    yVariable: 'lat',
+    timeVariable: 'time',
+    verticalCoverage: 'TARGET_DATASET',
+    source: 'structured_netcdf_snapshot',
+  })
+  fieldValuePreset.value = 'original'
+  applyFieldValuePreset()
+}
+
 function openManagedFieldImport({ type, attribute, binding }) {
   switchTab(type)
   const form = type === 'fieldResample' ? fieldResampleForm.value : parquetAttributeForm.value
@@ -397,14 +413,23 @@ function validateFieldResample(key) {
   if (isBlank(f.input)) e.input = 'NetCDF 文件路径不能为空'
   else if (!/\.nc4?$/i.test(String(f.input).trim())) e.input = '输入文件必须为 .nc 或 .nc4'
   if (isBlank(f.sourceCrs)) e.sourceCrs = '源坐标系不能为空'
-  for (const [name, label] of [
-    ['xVariable', 'X 坐标变量'], ['yVariable', 'Y 坐标变量'],
-    ['verticalVariable', '垂直坐标变量'], ['valueVariable', '数值变量'],
-  ]) {
+  const structuredSnapshot = f.gridLayout === 'STRUCTURED_LAT_LON_SNAPSHOT'
+  const requiredVariables = [
+    ['xVariable', structuredSnapshot ? '经度变量' : 'X 坐标变量'],
+    ['yVariable', structuredSnapshot ? '纬度变量' : 'Y 坐标变量'],
+    ['valueVariable', '数值变量'],
+  ]
+  if (structuredSnapshot) requiredVariables.push(['timeVariable', '时间变量'])
+  else requiredVariables.push(['verticalVariable', '垂直坐标变量'])
+  for (const [name, label] of requiredVariables) {
     if (isBlank(f[name])) e[name] = `${label}不能为空`
     else if (!FIELD_VARIABLE_RE.test(String(f[name]).trim())) e[name] = `${label}名称格式不正确`
   }
-  if (f.verticalReference === 'AGL') {
+  if (structuredSnapshot) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(f.selectionDate || ''))) {
+      e.selectionDate = '日期必须采用 YYYY-MM-DD 格式'
+    }
+  } else if (f.verticalReference === 'AGL') {
     if (isBlank(f.groundVariable)) e.groundVariable = 'AGL 模式必须指定地面高程变量'
     else if (!FIELD_VARIABLE_RE.test(String(f.groundVariable).trim())) e.groundVariable = '地面高程变量名称格式不正确'
   }
@@ -1064,13 +1089,11 @@ async function submitFieldResample() {
       datasetVersion: Number(f.datasetVersion),
       input: String(f.input).trim(),
       inputFormat: f.inputFormat,
+      gridLayout: f.gridLayout,
       sourceCrs: String(f.sourceCrs).trim(),
       xVariable: String(f.xVariable).trim(),
       yVariable: String(f.yVariable).trim(),
-      groundVariable: String(f.groundVariable || '').trim(),
-      verticalVariable: String(f.verticalVariable).trim(),
       valueVariable: String(f.valueVariable).trim(),
-      verticalReference: f.verticalReference,
       attributeCode: String(f.attributeCode).trim(),
       attributeName: String(f.attributeName).trim(),
       category: String(f.category).trim(),
@@ -1080,9 +1103,20 @@ async function submitFieldResample() {
       transformScale: Number(f.transformScale),
       transformOffset: Number(f.transformOffset),
       horizontalInterpolation: 'delaunay_linear',
-      verticalInterpolation: 'linear',
       outsidePolicy: 'skip',
       dryRun: Boolean(f.dryRun),
+    }
+    if (f.gridLayout === 'STRUCTURED_LAT_LON_SNAPSHOT') {
+      body.timeVariable = String(f.timeVariable).trim()
+      body.selectionDate = String(f.selectionDate).trim()
+      body.verticalReference = 'TARGET_DATASET'
+      body.verticalCoverage = 'TARGET_DATASET'
+      body.candidateMode = 'target_cells'
+    } else {
+      body.groundVariable = String(f.groundVariable || '').trim()
+      body.verticalVariable = String(f.verticalVariable).trim()
+      body.verticalReference = f.verticalReference
+      body.verticalInterpolation = 'linear'
     }
     if (f.showAdvanced) {
       body.source = String(f.source).trim()
@@ -1765,7 +1799,7 @@ onBeforeUnmount(() => {
       <!-- 多维场重采样 -->
       <section v-show="activeTab === 'fieldResample'" class="storage-card">
         <div class="card-title">多维场数据重采样与网格属性挂载</div>
-        <p class="card-desc">读取 NetCDF 点剖面数据，按编码游标分批读取目标空域的 L17 权威格元，仅对这些格元执行水平 Delaunay、垂直线性插值；不再先生成源场范围内的全部三维候选。</p>
+        <p class="card-desc">支持 NetCDF 三维点剖面和经纬度规则网格静态切片。按编码游标读取目标 L17 权威网格；二维切片默认覆盖目标活动版本中实际存在的全部真高空域。</p>
 
         <div class="form-grid">
           <div class="form-field" :class="{ 'has-error': errors.datasetId }">
@@ -1784,12 +1818,19 @@ onBeforeUnmount(() => {
             <span v-if="errors.input" class="field-error">{{ errors.input }}</span>
             <span v-else class="field-hint">项目根目录下的 .nc/.nc4 相对路径</span>
           </div>
+          <div class="form-field span-2">
+            <label>源数据布局</label>
+            <select v-model="fieldResampleForm.gridLayout" @change="applyFieldLayoutPreset">
+              <option value="POINT_PROFILE">三维点剖面（location × height）</option>
+              <option value="STRUCTURED_LAT_LON_SNAPSHOT">经纬度规则网格静态切片（time × lat × lon）</option>
+            </select>
+          </div>
           <div class="form-field" :class="{ 'has-error': errors.sourceCrs }">
             <label>源水平坐标系 <span class="req">*</span></label>
             <input v-model="fieldResampleForm.sourceCrs" type="text" placeholder="EPSG:4549" @blur="validateField('sourceCrs')" />
             <span v-if="errors.sourceCrs" class="field-error">{{ errors.sourceCrs }}</span>
           </div>
-          <div class="form-field">
+          <div v-if="fieldResampleForm.gridLayout === 'POINT_PROFILE'" class="form-field">
             <label>垂直坐标基准</label>
             <select v-model="fieldResampleForm.verticalReference" @change="validateField('groundVariable')">
               <option value="AGL">AGL（离地高度）</option>
@@ -1797,24 +1838,39 @@ onBeforeUnmount(() => {
             </select>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.xVariable }">
-            <label>X 坐标变量 <span class="req">*</span></label>
+            <label>{{ fieldResampleForm.gridLayout === 'STRUCTURED_LAT_LON_SNAPSHOT' ? '经度变量' : 'X 坐标变量' }} <span class="req">*</span></label>
             <input v-model="fieldResampleForm.xVariable" type="text" @blur="validateField('xVariable')" />
             <span v-if="errors.xVariable" class="field-error">{{ errors.xVariable }}</span>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.yVariable }">
-            <label>Y 坐标变量 <span class="req">*</span></label>
+            <label>{{ fieldResampleForm.gridLayout === 'STRUCTURED_LAT_LON_SNAPSHOT' ? '纬度变量' : 'Y 坐标变量' }} <span class="req">*</span></label>
             <input v-model="fieldResampleForm.yVariable" type="text" @blur="validateField('yVariable')" />
             <span v-if="errors.yVariable" class="field-error">{{ errors.yVariable }}</span>
           </div>
-          <div class="form-field" :class="{ 'has-error': errors.groundVariable }">
+          <div v-if="fieldResampleForm.gridLayout === 'POINT_PROFILE'" class="form-field" :class="{ 'has-error': errors.groundVariable }">
             <label>地面高程变量</label>
             <input v-model="fieldResampleForm.groundVariable" type="text" :disabled="fieldResampleForm.verticalReference !== 'AGL'" @blur="validateField('groundVariable')" />
             <span v-if="errors.groundVariable" class="field-error">{{ errors.groundVariable }}</span>
           </div>
-          <div class="form-field" :class="{ 'has-error': errors.verticalVariable }">
+          <div v-if="fieldResampleForm.gridLayout === 'POINT_PROFILE'" class="form-field" :class="{ 'has-error': errors.verticalVariable }">
             <label>垂直坐标变量 <span class="req">*</span></label>
             <input v-model="fieldResampleForm.verticalVariable" type="text" @blur="validateField('verticalVariable')" />
             <span v-if="errors.verticalVariable" class="field-error">{{ errors.verticalVariable }}</span>
+          </div>
+          <div v-if="fieldResampleForm.gridLayout === 'STRUCTURED_LAT_LON_SNAPSHOT'" class="form-field" :class="{ 'has-error': errors.timeVariable }">
+            <label>时间变量 <span class="req">*</span></label>
+            <input v-model="fieldResampleForm.timeVariable" type="text" @blur="validateField('timeVariable')" />
+            <span v-if="errors.timeVariable" class="field-error">{{ errors.timeVariable }}</span>
+          </div>
+          <div v-if="fieldResampleForm.gridLayout === 'STRUCTURED_LAT_LON_SNAPSHOT'" class="form-field" :class="{ 'has-error': errors.selectionDate }">
+            <label>选取日期（北京时间） <span class="req">*</span></label>
+            <input v-model="fieldResampleForm.selectionDate" type="date" @blur="validateField('selectionDate')" />
+            <span v-if="errors.selectionDate" class="field-error">{{ errors.selectionDate }}</span>
+          </div>
+          <div v-if="fieldResampleForm.gridLayout === 'STRUCTURED_LAT_LON_SNAPSHOT'" class="form-field span-2">
+            <label>垂直覆盖方式</label>
+            <input value="覆盖目标活动版本中实际存在的全部真高空域" type="text" disabled />
+            <span class="field-hint">高度上下限从目标 L17 网格逐水平列聚合，不需要手工输入，也不会生成目标库中不存在的格元。</span>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.valueVariable }">
             <label>原始数值变量 <span class="req">*</span></label>

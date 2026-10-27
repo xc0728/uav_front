@@ -47,6 +47,7 @@ export function buildTrueAltitudeRegionPayload({
   cursor,
   renderTargetCells,
   attributeCode,
+  attributeLodAggregation,
   experimentalMixedResolution = false,
 }) {
   const payload = {
@@ -61,6 +62,7 @@ export function buildTrueAltitudeRegionPayload({
   if (cursor) payload.cursor = cursor
   if (renderTargetCells != null) payload.renderTargetCells = Number(renderTargetCells)
   if (attributeCode) payload.attributeCode = attributeCode
+  if (attributeCode && attributeLodAggregation) payload.attributeLodAggregation = attributeLodAggregation
   if (experimentalMixedResolution) payload.experimentalMixedResolution = true
   return payload
 }
@@ -111,6 +113,8 @@ export function toAirspaceMapCells(rawGrids) {
         sourceCellCount: Number(grid.source_cell_count ?? 1),
         attributeCode: grid.attributeCode ?? grid.attribute_code ?? null,
         attributeValue: grid.attributeValue ?? grid.attribute_value ?? null,
+        attributeAggregation: grid.attributeAggregation ?? grid.attribute_aggregation ?? null,
+        lodSourceCellCount: Number(grid.lod_source_cell_count ?? 0),
         attributeGrid: Boolean(grid.attributeCode ?? grid.attribute_code),
         features: Array.isArray(cell.features) ? cell.features : null,
       }
