@@ -122,6 +122,11 @@ export function gridAttributeLodAggregation(code) {
   return ATTRIBUTE_BY_CODE.get(code)?.lodAggregation || ''
 }
 
+/// 只在用户已经显式开启且新专题支持安全聚合策略时保留 LOD 状态。
+export function keepGridAttributeLodEnabled(enabled, code) {
+  return Boolean(enabled && gridAttributeLodAggregation(code))
+}
+
 export function gridAttributeLodAggregationLabel(code) {
   return ATTRIBUTE_BY_CODE.get(code)?.lodAggregationLabel || ''
 }

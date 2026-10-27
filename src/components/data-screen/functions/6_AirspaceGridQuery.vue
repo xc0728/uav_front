@@ -17,6 +17,7 @@ import {
   gridAttributeLodAggregation,
   gridAttributeLodAggregationLabel,
   gridAttributeLegend,
+  keepGridAttributeLodEnabled,
   noiseGridColor,
 } from '../../../utils/noiseGrid'
 import {
@@ -151,6 +152,9 @@ const trueAltitudeLodEnabled = computed(
 const experimentalMixedResolution = ref(false)
 // 属性 LOD 聚合是独立试验路径，默认关闭并保留权威层原值查询。
 const attributeLodEnabled = ref(false)
+const attributeLodActive = computed(() => attributeTopicMode.value
+  && attributeLodEnabled.value
+  && Boolean(selectedAttributeLodAggregation.value))
 const gridsData = ref([])
 const chartSummary = ref(null)
 const chartDatasets = ref([])
@@ -262,7 +266,7 @@ watch(() => airspaceGridForm.datasetId, () => {
 })
 
 watch(selectedGridAttributeCode, code => {
-  attributeLodEnabled.value = false
+  attributeLodEnabled.value = keepGridAttributeLodEnabled(attributeLodEnabled.value, code)
   if (code) experimentalMixedResolution.value = false
 })
 
@@ -707,7 +711,7 @@ async function onViewBoundsChanged(bounds) {
       maxAgl: Number(airspaceGridForm.maxAgl),
       level: queryLevel,
       attributeCode: attributeTopicMode.value ? selectedGridAttributeCode.value : '',
-      ...(attributeTopicMode.value && attributeLodEnabled.value ? {
+      ...(attributeLodActive.value ? {
         renderTargetCells: TRUE_ALTITUDE_RENDER_TARGET,
         attributeLodAggregation: selectedAttributeLodAggregation.value,
       } : {}),
@@ -1000,7 +1004,7 @@ async function submitAirspaceGridQuery() {
       maxAgl: Number(airspaceGridForm.maxAgl),
       level: queryLevel,
       attributeCode: attributeTopicMode.value ? selectedGridAttributeCode.value : '',
-      ...(attributeTopicMode.value && attributeLodEnabled.value ? {
+      ...(attributeLodActive.value ? {
         renderTargetCells: TRUE_ALTITUDE_RENDER_TARGET,
         attributeLodAggregation: selectedAttributeLodAggregation.value,
       } : {}),
@@ -1304,7 +1308,7 @@ function clearGrids() {
             </template>
           </div>
           <div v-if="selectedGridAttributeCode" class="dataset-hint">
-            <template v-if="attributeLodEnabled">
+            <template v-if="attributeLodActive">
               按显示预算选择预生成 LOD 网格，属性采用“{{ selectedAttributeLodAggregationLabel }}”聚合；边界覆盖及命中数是概略值。
             </template>
             <template v-else>

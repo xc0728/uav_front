@@ -69,6 +69,12 @@ function openPurge(item) {
   confirmation.value = ''
 }
 
+function openCatalogDelete(item) {
+  openStateChange(item)
+  operation.value = { ...item, catalogDelete: true }
+  confirmation.value = ''
+}
+
 async function pollPurge(jobId) {
   purgeJob.value = { jobId, status: 'queued' }
   for (let attempt = 0; attempt < 1800 && mounted; attempt++) {
@@ -86,18 +92,38 @@ async function changeState(dryRun) {
     actionError.value = '请填写操作原因和管理员令牌。'
     return
   }
-  if (operation.value.purge && confirmation.value !== operation.value.code) {
-    actionError.value = '请完整输入属性编码确认清理范围。'
+  if ((operation.value.purge || operation.value.catalogDelete) && confirmation.value !== operation.value.code) {
+    actionError.value = '请完整输入属性编码确认操作范围。'
     return
   }
   if (operation.value.purge && !dryRun && !purgePreview.value) {
     actionError.value = '请先执行物理清理预检。'
     return
   }
+  if (operation.value.catalogDelete && !dryRun && !purgePreview.value) {
+    actionError.value = '请先执行目录删除预检。'
+    return
+  }
   busy.value = true
   actionError.value = ''
   try {
     const item = operation.value
+    if (item.catalogDelete) {
+      const body = await jsonResponse(await fetch(`/api/grid-attributes/catalog/${encodeURIComponent(item.attributeId)}/catalog-record-delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Static-Feature-Admin-Token': token.value.trim() },
+        body: JSON.stringify({ confirmAttributeCode: confirmation.value, reason: reason.value.trim(), dryRun }),
+      }), '目录记录删除失败')
+      if (dryRun) {
+        purgePreview.value = body.data
+        previewed.value = body.data?.deletable === true
+      } else {
+        notice.value = `${fieldName(item)}目录记录已删除，编码与版本身份不再保留在目录中。`
+        operation.value = null
+        await load()
+      }
+      return
+    }
     if (item.purge) {
       const payload = { confirmAttributeCode: confirmation.value, reason: reason.value.trim(), dryRun }
       if (!dryRun) {
@@ -184,23 +210,28 @@ onUnmounted(() => { mounted = false })
         <p v-if="!selected.bindings.length" class="field-note">尚未绑定真高空域，注册属性不代表已有覆盖数据。</p>
         <button class="field-state-button" @click="openStateChange(selected)">{{ selected.state === 'active' ? '停用此属性' : '恢复此属性' }}</button>
         <button v-if="selected.state === 'retired'" class="field-state-button field-error" @click="openPurge(selected)">永久清理事实数据</button>
+        <button v-if="selected.state === 'retired'" class="field-state-button field-error" @click="openCatalogDelete(selected)">删除目录记录</button>
         <p class="field-note">状态操作影响此属性定义绑定的全部空域；事实数据保留，恢复后可继续查询。</p>
         <p class="field-note">永久清理需先停用，将删除该属性全部版本的事实数据和绑定，不删除基础空域网格；仅恢复目录不能找回已清理数据。</p>
+        <p class="field-note">删除目录记录需先停用并完成永久清理（绑定与事实均为 0）；删除后编码与版本身份从目录消失，重新导入同名属性将获得新编号。</p>
       </aside>
     </div>
     <div v-if="operation" class="field-modal">
       <section role="dialog" aria-modal="true" aria-label="场数据管理">
-        <h3>{{ operation.purge ? '永久清理' : operation.targetState === 'active' ? '恢复' : '停用' }}{{ fieldName(operation) }}</h3>
+        <h3>{{ operation.catalogDelete ? '删除目录记录' : operation.purge ? '永久清理' : operation.targetState === 'active' ? '恢复' : '停用' }}{{ fieldName(operation) }}</h3>
         <p v-if="operation.purge" class="field-error">不可恢复：清理该属性全部绑定、全部历史投影的事实数据。请先备份；不会删除其他属性及共用空域网格。</p>
+        <p v-else-if="operation.catalogDelete" class="field-error">不可恢复：删除后该属性编码与版本身份从目录消失，未来重新导入同名属性将获得新编号；需先完成永久清理（绑定与事实均为 0）。</p>
         <p v-else>影响此定义的 {{ operation.bindings.length }} 个空域绑定。{{ operation.targetState === 'retired' ? '停用后不再参与在线场属性查询，数据仍保留。' : '恢复后重新参与在线场属性查询。' }}</p>
-        <label v-if="operation.purge">输入属性编码：{{ operation.code }}<input v-model="confirmation" :disabled="busy" @input="previewed = false" /></label>
+        <label v-if="operation.purge || operation.catalogDelete">输入属性编码：{{ operation.code }}<input v-model="confirmation" :disabled="busy" @input="previewed = false" /></label>
         <label>操作原因<textarea v-model="reason" :disabled="busy" maxlength="500" @input="previewed = false" /></label>
         <label>管理员令牌（与实体要素管理相同）<input v-model="token" :disabled="busy" type="password" autocomplete="off" @input="previewed = false" /></label>
         <p v-if="actionError" class="field-error" role="alert">{{ actionError }}</p>
         <p v-if="purgeJob">任务 {{ purgeJob.jobId }}：{{ purgeJob.progress?.stage || purgeJob.status }}</p>
-        <div v-if="operation.purge && purgePreview">
-          <p>待删除 {{ Number(purgePreview.factRows).toLocaleString('zh-CN') }} 条事实数据、{{ purgePreview.bindingCount }} 个绑定。</p>
+        <div v-if="(operation.purge || operation.catalogDelete) && purgePreview">
+          <p v-if="operation.purge">待删除 {{ Number(purgePreview.factRows).toLocaleString('zh-CN') }} 条事实数据、{{ purgePreview.bindingCount }} 个绑定。</p>
+          <p v-else>当前 {{ Number(purgePreview.factRows).toLocaleString('zh-CN') }} 条事实数据、{{ purgePreview.bindingCount }} 个绑定；待删除 1 条目录记录。</p>
           <p v-for="(count, table) in purgePreview.tables" :key="table">{{ table }}：{{ Number(count).toLocaleString('zh-CN') }} 条</p>
+          <p v-for="blocker in purgePreview.blockers || []" :key="blocker" class="field-error">{{ blocker }}</p>
         </div>
         <p v-if="previewed">预检通过，可确认执行。</p>
         <footer><button :disabled="busy" @click="operation = null">取消</button><button :disabled="busy" @click="changeState(true)">预检</button><button :disabled="busy || !previewed" @click="changeState(false)">{{ busy ? '处理中…' : '确认执行' }}</button></footer>
