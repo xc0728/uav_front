@@ -44,6 +44,7 @@ import {
   toggleAllLod13ModelIds,
   toggleLod13ModelId,
 } from '../../utils/lod13ModelLayers.js'
+import { LEGACY_BUILDING_MODEL_SOURCE } from '../../utils/modelGridSources.js'
 
 // 模块级别的存储（持久化，不随组件销毁而丢失）
 const routeGridEntities = {}
@@ -5024,7 +5025,7 @@ onBeforeUnmount(() => {
         :class="{ 'toggle-loading': lod13Loading }"
         @click.stop="toggleLod13"
       >
-        <span class="layer-label">{{ lod13Loading ? 'LOD1.3 加载中...' : 'LOD1.3 建筑' }}</span>
+        <span class="layer-label">{{ lod13Loading ? '建筑物加载中...' : LEGACY_BUILDING_MODEL_SOURCE.label }}</span>
         <div class="toggle-switch" :class="{ active: showLod13 }">
           <div class="toggle-slider" />
         </div>
@@ -5032,7 +5033,7 @@ onBeforeUnmount(() => {
         <svg class="base-layer-chevron" :class="{ open: showLod13Panel }" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" @click.stop="showLod13Panel = !showLod13Panel">
           <polyline points="6 9 12 15 18 9" />
         </svg>
-        <button class="locate-btn" type="button" title="聚焦到 LOD1.3 建筑模型" :disabled="lod13Loading" @click.stop="focusLod13">
+        <button class="locate-btn" type="button" :title="`聚焦到${LEGACY_BUILDING_MODEL_SOURCE.label}`" :disabled="lod13Loading" @click.stop="focusLod13">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="7" />
             <line x1="12" y1="1" x2="12" y2="5" />

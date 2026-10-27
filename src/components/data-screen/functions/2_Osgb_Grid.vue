@@ -1,6 +1,7 @@
 <script setup>
 import { reactive, ref } from 'vue'
 import { errorMessage } from '../../../utils/http'
+import { MODEL_GRID_SOURCES } from '../../../utils/modelGridSources.js'
 
 const props = defineProps({
   serviceName: {
@@ -28,6 +29,8 @@ const osgbResult = ref(null)
 
 // ==================== OSGB 网格化聚合入库 ====================
 const aggregationForm = reactive({
+  source: 'osgb',
+  format: 'auto',
   osgbFolder: '/app/data/osgbData',
   level: 9,
   minLevel: 0,
@@ -205,6 +208,8 @@ async function submitAggregation() {
 
     const payload = {
       osgbFolder: String(aggregationForm.osgbFolder || '').trim(),
+      source: aggregationForm.source,
+      format: aggregationForm.format,
       level: Number(aggregationForm.level),
       minLevel: Number(aggregationForm.minLevel) || 0,
     }
@@ -390,8 +395,7 @@ function clearGrids() {
       <div class="form-group">
         <div class="group-title">业务来源</div>
         <select v-model="osgbForm.source" class="level-select full-input">
-          <option value="osgb">倾斜摄影</option>
-          <option value="lod13">LOD1.3 建筑</option>
+          <option v-for="source in MODEL_GRID_SOURCES" :key="source.value" :value="source.value">{{ source.label }}</option>
         </select>
       </div>
 
@@ -442,6 +446,20 @@ function clearGrids() {
 
     <!-- ==================== osgb网格化聚合入库 ==================== -->
     <template v-if="functionName === 'osgb网格化聚合入库'">
+      <div class="form-group">
+        <div class="group-title">业务来源</div>
+        <select v-model="aggregationForm.source" class="level-select full-input">
+          <option v-for="source in MODEL_GRID_SOURCES" :key="source.value" :value="source.value">{{ source.label }}</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <div class="group-title">输入格式</div>
+        <select v-model="aggregationForm.format" class="level-select full-input">
+          <option value="auto">自动识别</option>
+          <option value="3dtiles">3D Tiles</option>
+          <option value="osgb">OSGB</option>
+        </select>
+      </div>
       <!-- OSGB目录 -->
       <div class="form-group">
         <div class="group-title">OSGB目录</div>
@@ -535,8 +553,7 @@ function clearGrids() {
       <div class="form-group">
         <div class="group-title">数据来源</div>
         <select v-model="triangleGridForm.source" class="level-select full-input">
-          <option value="osgb">倾斜摄影（osgb）</option>
-          <option value="lod13">LOD1.3 建筑（lod13）</option>
+          <option v-for="source in MODEL_GRID_SOURCES" :key="source.value" :value="source.value">{{ source.label }}（{{ source.value }}）</option>
         </select>
       </div>
 

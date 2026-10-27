@@ -1,4 +1,5 @@
 import { errorMessage } from './http.js'
+import { LEGACY_BUILDING_MODEL_SOURCE } from './modelGridSources.js'
 
 export const CHART_THEMES = [
   'vertiport',
@@ -41,7 +42,7 @@ export const CHART_DATASETS = [
   ['deqing_chart_l17_bare_surface', '裸露地表', 'landcover', '#a8a29e', '2D', 'bare_surface_area', ['环境要素', '地表覆盖与土地利用', '地表覆盖'], 39],
   ['deqing_chart_l17_forest_grass_cover', '林草覆盖', 'landcover', '#15803d', '2D', 'forest_grass_cover', ['环境要素', '地表覆盖与土地利用', '地表覆盖'], 37],
   ['deqing_chart_l17_wetlands', '湿地', 'landcover', '#14b8a6', '2D', 'wetland', ['环境要素', '水体', '滩涂湿地'], 52],
-  [LOD13_BUILDING_DATASET_ID, '建筑物（LOD1.3）', 'structure', '#2563eb', '3D', 'lod13_building', ['环境要素', '建构筑物'], 9, 'lod13'],
+  [LOD13_BUILDING_DATASET_ID, LEGACY_BUILDING_MODEL_SOURCE.label, LEGACY_BUILDING_MODEL_SOURCE.theme, '#2563eb', '3D', LEGACY_BUILDING_MODEL_SOURCE.featureType, ['环境要素', '建构筑物'], 9, 'lod13'],
 ].map(([id, label, theme, color, dimensionMode, featureType, catalogPath, catalogOrder, sourceKind = 'static']) => ({
   id, label, theme, color, dimensionMode, featureType, catalogPath, catalogOrder, sourceKind,
 }))
@@ -342,8 +343,8 @@ function lod13Feature(cell, properties, index) {
     code: cell.code,
     datasetId: LOD13_BUILDING_DATASET_ID,
     featureUid: String(featureUid),
-    featureType: 'lod13_building',
-    theme: 'structure',
+    featureType: LEGACY_BUILDING_MODEL_SOURCE.featureType,
+    theme: LEGACY_BUILDING_MODEL_SOURCE.theme,
     dimensionMode: '3D',
     verticalMode: 'RANGE',
     minHeight: Number(cell.bottom),
@@ -359,7 +360,7 @@ export async function queryLod13BuildingGrids(payload, { signal, cursor } = {}) 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       level: Number(payload.level),
-      source: 'lod13',
+      source: LEGACY_BUILDING_MODEL_SOURCE.value,
       maxCells: Math.min(Number(payload.maxCells) || 50000, 50000),
       ...(payload.renderOnly === true ? { renderOnly: true } : {}),
       ...(cursor ? { cursor } : {}),
@@ -413,7 +414,7 @@ export async function queryLod13GridFeatures(cell, { signal } = {}) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       level,
-      source: 'lod13',
+      source: LEGACY_BUILDING_MODEL_SOURCE.value,
       code,
       minLon: west,
       maxLon: east,

@@ -2,6 +2,7 @@
 import { ref, reactive, computed, onBeforeUnmount } from 'vue'
 import { Loader2, RefreshCw, ChevronDown, ChevronUp, Box, Building2, Mountain, Cloud, Search, Layers, Waypoints, Radar, Wrench, FileSpreadsheet } from 'lucide-vue-next'
 import FeatureDatasetManager from './FeatureDatasetManager.vue'
+import { MODEL_GRID_SOURCES } from '../../../utils/modelGridSources.js'
 import { GRID_ATTRIBUTE_TOPICS } from '../../../utils/noiseGrid.js'
 import { isDailyWeatherField, weatherFieldPreset, surfaceFieldParameters } from '../../../utils/weatherField.js'
 
@@ -88,7 +89,7 @@ function setErrors(e) {
 const osgbForm = ref({
   mode: 'sync', // sync | aggregation
   format: 'osgb', // osgb | 3dtiles | auto
-  source: 'osgb', // osgb | lod13
+  source: 'osgb', // 受控模型业务来源
   inputFolder: '',
   level: 8,
   minLevel: 0,
@@ -1412,13 +1413,9 @@ onBeforeUnmount(() => {
 
         <div class="mode-row">
           <span class="mode-label">数据来源</span>
-          <label class="radio-item">
-            <input v-model="osgbForm.source" type="radio" value="osgb" />
-            <span>倾斜摄影（osgbgrid 表）</span>
-          </label>
-          <label class="radio-item">
-            <input v-model="osgbForm.source" type="radio" value="lod13" />
-            <span>LOD1.3 建筑（lod13grid 表）</span>
+          <label v-for="source in MODEL_GRID_SOURCES" :key="source.value" class="radio-item">
+            <input v-model="osgbForm.source" type="radio" :value="source.value" />
+            <span>{{ source.label }}（{{ source.tablePrefix }} 表）</span>
           </label>
         </div>
 
@@ -2330,7 +2327,7 @@ onBeforeUnmount(() => {
 
         <div class="maintain-block">
           <div class="maintain-title">导入 OSGB 稀疏映射（推荐）</div>
-          <p class="maintain-desc">从 PG osgbgrid_/lod13grid_ 表全量导入 ClickHouse osgb_grid_chunk_map 的 (level, source) 分区，不修改 grid_current。</p>
+          <p class="maintain-desc">从所选来源的 PG 模型网格表全量导入 ClickHouse osgb_grid_chunk_map 的 (level, source) 分区，不修改 grid_current。</p>
           <div class="maintain-row">
             <div class="form-field">
               <label>网格层级</label>
@@ -2347,8 +2344,7 @@ onBeforeUnmount(() => {
             <div class="form-field">
               <label>数据来源</label>
               <select v-model="maintainState.mapImport.source">
-                <option value="osgb">osgb（倾斜摄影）</option>
-                <option value="lod13">lod13（LOD1.3 建筑）</option>
+                <option v-for="source in MODEL_GRID_SOURCES" :key="source.value" :value="source.value">{{ source.label }}（{{ source.value }}）</option>
               </select>
             </div>
             <button class="btn-primary" type="button" :disabled="maintainState.mapImport.busy" @click="runMapImport">
