@@ -58,7 +58,7 @@ function toggleNode(checked) {
       @change="emit('toggle', [node.dataset.id], $event.target.checked)"
     >
     <i :style="{ background: node.dataset.color }" />
-    <span>{{ node.label }}</span>
+    <span :title="node.label">{{ node.label }}</span>
     <small class="dataset-dimension" :class="`is-${node.dataset.dimensionMode.toLowerCase()}`">
       {{ node.dataset.dimensionMode }}<template v-if="Number.isFinite(node.dataset.count)"> · {{ node.dataset.count }}</template>
     </small>
@@ -157,18 +157,18 @@ function toggleNode(checked) {
 }
 
 .catalog-dataset i {
-  width: 10px;
-  height: 10px;
-  flex: 0 0 10px;
-  border-radius: 2px;
+  width: 22px;
+  height: 16px;
+  flex: 0 0 22px;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  border-radius: 4px;
 }
 
 .catalog-dataset span {
   min-width: 0;
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
 }
 
 .dataset-dimension {

@@ -27,6 +27,7 @@ import {
   sortChartFeaturesForDisplay,
 } from '../../utils/staticFeatures.js'
 import ChartDatasetTreeNode from './functions/ChartDatasetTreeNode.vue'
+import ChartLegend from './functions/ChartLegend.vue'
 import InstancedGridRenderer from '../../utils/cesium/InstancedGridRenderer.js'
 import GridRendererManager, { GRID_RENDERER } from '../../utils/cesium/GridRendererManager.js'
 import { buildGridHighlightPaths } from '../../utils/cesium/gridHighlight.js'
@@ -314,6 +315,8 @@ function toGridDetail(cell, bounds, fallbackLevel) {
     attributeAggregation: cell?.attributeAggregation,
     lodSourceCellCount: cell?.lodSourceCellCount,
     attributeGrid: cell?.attributeGrid === true,
+    modelSource: cell?.modelSource,
+    modelSourceLabel: cell?.modelSourceLabel,
     attributes: cell?.attributes || {},
     bounds,
     features: cell?.features || cell?.chartFeatures || [],
@@ -384,6 +387,7 @@ function setChartFeatureIdsEnabled(ids, enabled) {
 // ==================== 查询结果图例 + 比例尺（仅在查询出网格后显示） ====================
 const gridResultState = reactive({
   visible: false,
+  title: '查询网格',
   attributeCode: '',
   levels: [],        // 多层级数组: [{ level, count, color, sizeLabel }]
   total: 0,          // 网格总数
@@ -391,6 +395,8 @@ const gridResultState = reactive({
   scalePixels: 120,
   scaleLabel: '',
 })
+// 只有多层级同时存在时才展示层级颜色，避免与专题属性色混淆。
+const showGridLevelColors = computed(() => gridResultState.levels.length > 1)
 let scaleBarTimer = null
 
 // ==================== 底图图源切换 ====================
@@ -710,6 +716,7 @@ function drawGridBoundary(gridInfo, options = {}) {
     gridResultState.total = coloredGridInfo.cells.length
     gridResultState.runtime = formatRuntime(coloredGridInfo.runtime)
     gridResultState.visible = true
+    applyGridResultMetadata(coloredGridInfo)
     updateChartFeatureVisibility()
     updateScaleBar()
     return
@@ -786,6 +793,7 @@ function drawGridBoundary(gridInfo, options = {}) {
   gridResultState.total = 1
   gridResultState.runtime = formatRuntime(gridInfo.runtime)
   gridResultState.visible = true
+  applyGridResultMetadata(gridInfo)
   updateScaleBar()
 }
 
@@ -1376,10 +1384,15 @@ function clearGridVisual() {
 
   // 隐藏查询结果图例 + 比例尺
   gridResultState.visible = false
+  gridResultState.title = '查询网格'
   gridResultState.attributeCode = ''
   gridResultState.levels = []
   gridResultState.total = 0
   gridResultState.runtime = ''
+}
+
+function applyGridResultMetadata(gridInfo) {
+  gridResultState.title = gridInfo?.legendTitle || '查询网格'
 }
 
 // 百万级静态网格使用共享立方体模板 + GPU 实例属性，避免逐格 GeometryInstance。
@@ -1442,6 +1455,7 @@ function drawGridInstanced(gridInfo, options = {}) {
   }
   gridResultState.runtime = formatRuntime(gridInfo.runtime)
   gridResultState.visible = true
+  applyGridResultMetadata(gridInfo)
   updateScaleBar()
 }
 
@@ -1561,6 +1575,7 @@ function drawGridPrimitives(gridInfo, options = {}) {
   }
   gridResultState.runtime = formatRuntime(gridInfo.runtime)
   gridResultState.visible = true
+  applyGridResultMetadata(gridInfo)
   updateScaleBar()
 }
 
@@ -4871,11 +4886,11 @@ onBeforeUnmount(() => {
 
     <aside v-if="isMapReady" class="chart-feature-panel">
       <div class="chart-feature-panel-title">
-        <span>航图要素</span>
+        <span>航图要素 · 图例</span>
         <small>{{ gridResultState.attributeCode ? '已加载专题' : (chartFeatureLayers.length ? `${chartFeatureLayers.length} 类` : '未加载') }}</small>
       </div>
       <div v-if="gridResultState.attributeCode" class="chart-feature-empty">
-        <div>{{ noiseAttributeLabel(gridResultState.attributeCode) }}</div>
+        <ChartLegend :attribute-code="gridResultState.attributeCode" variant="dark" />
         <div>已渲染 {{ Number(gridResultState.total).toLocaleString() }} 个网格</div>
         <div>点击网格查看场值与高度属性。</div>
       </div>
@@ -4901,6 +4916,7 @@ onBeforeUnmount(() => {
           <button type="button" aria-label="关闭网格详情" @click="clearSelectedGridSelection">×</button>
         </div>
         <div>编码：{{ selectedGrid.code }}{{ selectedGrid.overviewColumn ? '（代表网格）' : '' }}</div>
+        <div v-if="selectedGrid.modelSourceLabel">模型来源：{{ selectedGrid.modelSourceLabel }}</div>
         <div>层级：{{ selectedGrid.level }}</div>
         <div v-if="selectedGrid.overviewColumn">垂直概览：整列合并 {{ Number(selectedGrid.overviewCellCount).toLocaleString() }} 个显示节点<span v-if="selectedGrid.overviewSegmentCount"> · 当前第 {{ selectedGrid.overviewSegmentIndex }}/{{ selectedGrid.overviewSegmentCount }} 段</span></div>
         <div v-if="selectedGrid.datasetId">数据集：{{ selectedGrid.datasetId }} · v{{ selectedGrid.datasetVersion }}</div>
@@ -5145,18 +5161,18 @@ onBeforeUnmount(() => {
       <div v-if="showBaseLayerPanel || showTerrainPanel" class="base-layer-mask" @click="showBaseLayerPanel = false; showTerrainPanel = false" />
     </div>
 
-    <!-- 查询网格图例（右下角，支持多层级：层级+颜色+尺寸、运行时间） -->
-    <div class="grid-result-legend" v-if="gridResultState.visible">
-      <div class="legend-title">查询网格</div>
+    <!-- 查询网格图例：单层级仅显示层级和尺寸，多层级时显示对应颜色。 -->
+    <div class="grid-result-legend" :class="{ 'is-single-level': !showGridLevelColors }" v-if="gridResultState.visible">
+      <div class="legend-title">{{ gridResultState.title }}</div>
       <!-- 表头 -->
       <div class="legend-row legend-head">
-        <span class="legend-swatch-col"></span>
+        <span v-if="showGridLevelColors" class="legend-swatch-col"></span>
         <span class="legend-level-col">层级</span>
         <span class="legend-size-col">格网尺寸</span>
       </div>
       <!-- 各级网格行 -->
       <div v-for="item in gridResultState.levels" :key="item.level" class="legend-row">
-        <span class="legend-swatch legend-swatch-col" :style="{ background: item.color }" />
+        <span v-if="showGridLevelColors" class="legend-swatch legend-swatch-col" :style="{ background: item.color }" />
         <span class="legend-label legend-level-col">L{{ item.level }}</span>
         <span class="legend-size legend-size-col">{{ item.sizeLabel || '—' }}</span>
       </div>
@@ -6539,6 +6555,9 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
   margin: 4px 0;
+}
+.grid-result-legend.is-single-level .legend-row {
+  grid-template-columns: 46px 1fr;
 }
 .legend-swatch {
   width: 16px;

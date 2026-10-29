@@ -1,7 +1,7 @@
 <script setup>
 import { reactive, ref } from 'vue'
 import { errorMessage } from '../../../utils/http'
-import { MODEL_GRID_SOURCES } from '../../../utils/modelGridSources.js'
+import { getModelGridSource, MODEL_GRID_SOURCES } from '../../../utils/modelGridSources.js'
 
 const props = defineProps({
   serviceName: {
@@ -98,6 +98,10 @@ function onLevelQuickSelect(event) {
   if (!isNaN(value)) {
     triangleGridForm.level = value
   }
+}
+
+function onModelSourceChange() {
+  triangleGridForm.level = getModelGridSource(triangleGridForm.source).queryLevel
 }
 
 // osgb网格化层级选择
@@ -282,7 +286,8 @@ async function submitTriangleGridQuery() {
 
     const data = await resp.json()
     const runtime = performance.now() - t0
-        console.log('[模型网格查询] 原始返回:', data)
+    console.log('[模型网格查询] 原始返回:', data)
+    if (data?.status === 'error') throw new Error(data.message || '模型网格查询失败')
     triangleGridResult.value = data
 
     // 解析返回数据
@@ -317,9 +322,13 @@ async function submitTriangleGridQuery() {
 
     console.log('[模型网格查询] 最终解析的 gridsData 长度:', parsedCount)
 
+    const sourceConfig = getModelGridSource(triangleGridForm.source)
     queryStats.value = {
-      total: parsedCount,
+      total: Number(data?.data?.count ?? parsedCount),
       status: data?.status || 'unknown',
+      sourceLabel: sourceConfig.label,
+      dataSource: data?.data?.data_source || data?.data_source || '',
+      hasMore: data?.data?.hasMore === true,
     }
 
     // 如果返回了格网数据，通知地图组件显示
@@ -345,13 +354,24 @@ async function submitTriangleGridQuery() {
           column: cell.column,
           layer: cell.layer,
           center: cell.center,
+          color: sourceConfig.color,
+          modelSource: sourceConfig.value,
+          modelSourceLabel: sourceConfig.label,
         }
       })
 
       console.log('[模型网格查询] 转换后的 cells 前3条:', JSON.stringify(cells.slice(0, 3)))
-      emit('showGrid', { cells, level: Number(triangleGridForm.level), runtime })
+      emit('showGrid', {
+        cells,
+        level: Number(triangleGridForm.level),
+        runtime,
+        modelSource: sourceConfig.value,
+        modelSourceLabel: sourceConfig.label,
+        legendTitle: `${sourceConfig.label}网格`,
+      })
     } else {
       console.log('[模型网格查询] gridsData 为空，不发送 showGrid 事件')
+      emit('showGrid', { cells: [] })
     }
   } catch (err) {
     console.error('[模型网格查询] 请求错误:', err)
@@ -552,7 +572,7 @@ function clearGrids() {
       <!-- 数据来源 -->
       <div class="form-group">
         <div class="group-title">数据来源</div>
-        <select v-model="triangleGridForm.source" class="level-select full-input">
+        <select v-model="triangleGridForm.source" class="level-select full-input" @change="onModelSourceChange">
           <option v-for="source in MODEL_GRID_SOURCES" :key="source.value" :value="source.value">{{ source.label }}（{{ source.value }}）</option>
         </select>
       </div>
@@ -589,6 +609,10 @@ function clearGrids() {
       <!-- 查询结果统计 -->
       <div v-if="queryStats" class="result-box">
         <div class="result-row">
+          <span class="result-label">设施来源</span>
+          <span class="result-status success">{{ queryStats.sourceLabel }}</span>
+        </div>
+        <div class="result-row">
           <span class="result-label">网格数量</span>
           <span class="result-num">{{ queryStats.total }}</span>
         </div>
@@ -597,6 +621,13 @@ function clearGrids() {
           <span class="result-status" :class="queryStats.status">
             {{ queryStats.status === 'success' ? '成功' : queryStats.status }}
           </span>
+        </div>
+        <div v-if="queryStats.dataSource" class="result-row">
+          <span class="result-label">查询存储</span>
+          <span class="result-status success">{{ queryStats.dataSource === 'clickhouse' ? 'ClickHouse' : queryStats.dataSource }}</span>
+        </div>
+        <div v-if="queryStats.hasMore" class="query-warning">
+          当前视野命中数量超过单次返回上限，仅渲染本次返回的网格，请缩小地图范围后重试。
         </div>
       </div>
 
@@ -746,6 +777,15 @@ function clearGrids() {
 
 .result-status.success {
   color: #060;
+}
+
+.query-warning {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #fff7ed;
+  color: #c2410c;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .result-status:not(.success) {

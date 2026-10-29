@@ -4,6 +4,7 @@ import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { availableGridAttributeGroups, loadGridAttributeCatalog as fetchGridAttributeCatalog, loadActiveAttributeDatasets, GRID_ATTRIBUTE_CATALOG_CHANGED } from '../../../utils/gridAttributeCatalog.js'
 import { ZoomIn, Loader2 } from 'lucide-vue-next'
 import ChartDatasetTreeNode from './ChartDatasetTreeNode.vue'
+import ChartLegend from './ChartLegend.vue'
 import { errorMessage } from '../../../utils/http'
 import { getGridVisualStyle } from '../../../utils/cesium/gridVisualStyle'
 import {
@@ -18,7 +19,6 @@ import {
   GRID_ATTRIBUTE_TOPICS,
   gridAttributeLodAggregation,
   gridAttributeLodAggregationLabel,
-  gridAttributeLegend,
   keepGridAttributeLodEnabled,
   noiseGridColor,
 } from '../../../utils/noiseGrid'
@@ -136,7 +136,6 @@ const error = ref('')
 const result = ref(null)
 const queryStats = ref(null)
 const selectedGridAttributeCode = ref('')
-const selectedGridAttributeLegend = computed(() => gridAttributeLegend(selectedGridAttributeCode.value))
 const selectedAttributeLodAggregation = computed(() => gridAttributeLodAggregation(selectedGridAttributeCode.value))
 const selectedAttributeLodAggregationLabel = computed(() => gridAttributeLodAggregationLabel(selectedGridAttributeCode.value))
 const attributeCatalogItems = ref([])
@@ -1388,25 +1387,7 @@ function clearGrids() {
           <div v-else-if="!attributeCatalogLoading && !gridAttributeTopicGroups.length" class="dataset-hint">
             {{ selectedTrueAltitudeDataset ? '当前活动空域版本暂无已启用并绑定的场属性。' : '选择已激活的空域数据集后显示可用场属性。' }}
           </div>
-          <div v-if="selectedGridAttributeCode" class="noise-legend">
-            <template v-if="selectedGridAttributeLegend.length">
-              <span v-for="band in selectedGridAttributeLegend" :key="band.label"><i :style="{ background: band.color }" />{{ band.label }}</span>
-            </template>
-            <template v-else-if="selectedGridAttributeCode.includes('_zone_')">
-              <span><i style="background:#ef4444" />不满足（0）</span>
-              <span><i style="background:#f59e0b" />满足（1）</span>
-              <span><i style="background:#22c55e" />优秀（2）</span>
-            </template>
-            <template v-else-if="selectedGridAttributeCode.includes('_margin_')">
-              <span><i style="background:#ef4444" />超标 &gt; 0</span>
-              <span><i style="background:#f59e0b" />0 ～ -5</span>
-              <span><i style="background:#84cc16" />-5 ～ -10</span>
-              <span><i style="background:#16a34a" />≤ -10 dB(A)</span>
-            </template>
-            <template v-else>
-              <span><i style="background:#64748b" />该属性尚未配置分档图例</span>
-            </template>
-          </div>
+          <ChartLegend v-if="selectedGridAttributeCode" :attribute-code="selectedGridAttributeCode" />
           <div v-if="selectedGridAttributeCode" class="dataset-hint">
             <template v-if="attributeLodActive">
               按显示预算选择预生成 LOD 网格，属性采用“{{ selectedAttributeLodAggregationLabel }}”聚合；边界覆盖及命中数是概略值。
@@ -1692,11 +1673,7 @@ function clearGrids() {
           <span>关联映射 <b>{{ chartSummary.mappings }}</b></span>
         </div>
         <div v-if="chartSummary.truncated" class="chart-warning">航图数据未完整返回，请检查分批查询异常。</div>
-        <div v-if="chartSummary.datasets.length" class="theme-legend">
-          <span v-for="dataset in chartSummary.datasets" :key="dataset.id">
-            <i :style="{ background: dataset.color }" />{{ dataset.label }} · {{ dataset.dimensionMode }}
-          </span>
-        </div>
+        <ChartLegend v-if="chartSummary.datasets.length" :items="chartSummary.datasets" />
       </div>
 
       <!-- 动态缩放提示 -->
@@ -2326,8 +2303,7 @@ function clearGrids() {
   line-height: 1.5;
 }
 
-.chart-summary-counts,
-.theme-legend {
+.chart-summary-counts {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 12px;
@@ -2335,45 +2311,8 @@ function clearGrids() {
   font-size: 12px;
 }
 
-.theme-legend {
-  margin-top: 8px;
-}
-
-.theme-legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.theme-legend i {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-}
-
 .attribute-layer-row {
   margin-top: 12px;
-}
-
-.noise-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 10px;
-  margin-top: 8px;
-  color: #475569;
-  font-size: 12px;
-}
-
-.noise-legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.noise-legend i {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
 }
 
 /* 空状态 */

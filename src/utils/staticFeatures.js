@@ -1,5 +1,5 @@
 import { errorMessage } from './http.js'
-import { LEGACY_BUILDING_MODEL_SOURCE } from './modelGridSources.js'
+import { getModelGridSource, LEGACY_BUILDING_MODEL_SOURCE, MODEL_GRID_SOURCES } from './modelGridSources.js'
 
 export const CHART_THEMES = [
   'vertiport',
@@ -16,6 +16,16 @@ export const CHART_THEMES = [
 ]
 
 export const LOD13_BUILDING_DATASET_ID = 'deqing_lod13_buildings'
+export const MODEL_GRID_DATASET_IDS = Object.freeze({
+  lod13: LOD13_BUILDING_DATASET_ID,
+  communication: 'deqing_model_grid_communication',
+  navigation: 'deqing_model_grid_navigation',
+  surveillance: 'deqing_model_grid_surveillance',
+})
+
+const MODEL_GRID_SOURCE_BY_DATASET_ID = new Map(
+  Object.entries(MODEL_GRID_DATASET_IDS).map(([source, datasetId]) => [datasetId, source]),
+)
 
 export const CHART_DATASETS = [
   ['deqing_chart_l17_takeoff_points', '起降点', 'vertiport', '#22c55e', '2D', 'takeoff_point', ['功能要素'], 81],
@@ -42,9 +52,12 @@ export const CHART_DATASETS = [
   ['deqing_chart_l17_bare_surface', '裸露地表', 'landcover', '#a8a29e', '2D', 'bare_surface_area', ['环境要素', '地表覆盖与土地利用', '地表覆盖'], 39],
   ['deqing_chart_l17_forest_grass_cover', '林草覆盖', 'landcover', '#15803d', '2D', 'forest_grass_cover', ['环境要素', '地表覆盖与土地利用', '地表覆盖'], 37],
   ['deqing_chart_l17_wetlands', '湿地', 'landcover', '#14b8a6', '2D', 'wetland', ['环境要素', '水体', '滩涂湿地'], 52],
-  [LOD13_BUILDING_DATASET_ID, LEGACY_BUILDING_MODEL_SOURCE.label, LEGACY_BUILDING_MODEL_SOURCE.theme, '#2563eb', '3D', LEGACY_BUILDING_MODEL_SOURCE.featureType, ['环境要素', '建构筑物'], 9, 'lod13'],
-].map(([id, label, theme, color, dimensionMode, featureType, catalogPath, catalogOrder, sourceKind = 'static']) => ({
-  id, label, theme, color, dimensionMode, featureType, catalogPath, catalogOrder, sourceKind,
+  [LOD13_BUILDING_DATASET_ID, LEGACY_BUILDING_MODEL_SOURCE.label, LEGACY_BUILDING_MODEL_SOURCE.theme, LEGACY_BUILDING_MODEL_SOURCE.color, '3D', LEGACY_BUILDING_MODEL_SOURCE.featureType, ['环境要素', '建构筑物'], 9, 'model_grid', 'lod13'],
+  [MODEL_GRID_DATASET_IDS.surveillance, '监视设施模型网格', 'surveillance', '#f43f5e', '3D', 'surveillance_facility', ['环境要素', '建构筑物', '人工构筑物'], 13.1, 'model_grid', 'surveillance'],
+  [MODEL_GRID_DATASET_IDS.communication, '通信设施模型网格', 'communication', '#14b8a6', '3D', 'communication_facility', ['环境要素', '建构筑物', '人工构筑物'], 14, 'model_grid', 'communication'],
+  [MODEL_GRID_DATASET_IDS.navigation, '导航设施模型网格', 'navigation', '#8b5cf6', '3D', 'navigation_facility', ['功能要素', '飞行控制空间', '飞行信息控制要素'], 78.1, 'model_grid', 'navigation'],
+].map(([id, label, theme, color, dimensionMode, featureType, catalogPath, catalogOrder, sourceKind = 'static', modelSource]) => ({
+  id, label, theme, color, dimensionMode, featureType, catalogPath, catalogOrder, sourceKind, modelSource,
 }))
 
 const DATASETS_BY_ID = new Map(CHART_DATASETS.map(dataset => [dataset.id, dataset]))
@@ -196,6 +209,13 @@ export async function loadAvailableChartDatasets({ signal, includeLod13 = true }
     .map(normalizeActiveDataset)
     .filter(Boolean)
 
+  if (includeLod13) {
+    CHART_DATASETS
+      .filter(dataset => dataset.sourceKind === 'model_grid' && dataset.modelSource !== 'lod13')
+      .forEach(dataset => {
+        if (!datasets.some(item => item.id === dataset.id)) datasets.push(dataset)
+      })
+  }
   if (includeLod13 && await hasLod13Source(signal)) {
     const lod13 = CHART_DATASETS.find(dataset => dataset.id === LOD13_BUILDING_DATASET_ID)
     if (lod13 && !datasets.some(dataset => dataset.id === lod13.id)) datasets.push(lod13)
@@ -336,15 +356,22 @@ function polygonBounds(polygon) {
   }
 }
 
-function lod13Feature(cell, properties, index) {
+function modelGridDataset(source) {
+  const datasetId = MODEL_GRID_DATASET_IDS[source]
+  return CHART_DATASETS.find(dataset => dataset.id === datasetId)
+}
+
+function modelGridFeature(cell, properties, index, source) {
+  const sourceConfig = getModelGridSource(source)
+  const dataset = modelGridDataset(source)
   const featureUid = properties?.tjh_featur || properties?.modelid || properties?.ID
     || properties?.OID || `${cell.code}-${index}`
   return {
     code: cell.code,
-    datasetId: LOD13_BUILDING_DATASET_ID,
+    datasetId: dataset?.id || MODEL_GRID_DATASET_IDS[source],
     featureUid: String(featureUid),
-    featureType: LEGACY_BUILDING_MODEL_SOURCE.featureType,
-    theme: LEGACY_BUILDING_MODEL_SOURCE.theme,
+    featureType: dataset?.featureType || sourceConfig.featureType,
+    theme: dataset?.theme || sourceConfig.theme,
     dimensionMode: '3D',
     verticalMode: 'RANGE',
     minHeight: Number(cell.bottom),
@@ -353,14 +380,18 @@ function lod13Feature(cell, properties, index) {
   }
 }
 
-export async function queryLod13BuildingGrids(payload, { signal, cursor } = {}) {
+export async function queryModelGridCells(payload, source, { signal, cursor } = {}) {
+  const sourceConfig = getModelGridSource(source)
+  if (!MODEL_GRID_SOURCES.some(item => item.value === source) || !MODEL_GRID_DATASET_IDS[source]) {
+    throw new Error(`不支持的模型网格来源：${source}`)
+  }
   const bounds = polygonBounds(payload.polygon)
   const response = await fetch('/api/multiSource/triangleGrid/queryOsgbGrid', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       level: Number(payload.level),
-      source: LEGACY_BUILDING_MODEL_SOURCE.value,
+      source,
       maxCells: Math.min(Number(payload.maxCells) || 50000, 50000),
       ...(payload.renderOnly === true ? { renderOnly: true } : {}),
       ...(cursor ? { cursor } : {}),
@@ -369,11 +400,11 @@ export async function queryLod13BuildingGrids(payload, { signal, cursor } = {}) 
     signal,
   })
   if (!response.ok) {
-    throw new Error(await errorMessage(response, `LOD1.3 建筑网格查询失败（${response.status}）`))
+    throw new Error(await errorMessage(response, `${sourceConfig.label}网格查询失败（${response.status}）`))
   }
   const body = await response.json()
   if (body?.data?.data_source !== 'clickhouse') {
-    throw new Error('LOD1.3 建筑网格查询未使用 ClickHouse，已拒绝混用 PostgreSQL 结果')
+    throw new Error(`${sourceConfig.label}网格查询未使用 ClickHouse，已拒绝混用 PostgreSQL 结果`)
   }
   const scannedCursor = lastGridCode(body?.data?.cells || [])
   const bottom = Number(payload.bottom)
@@ -388,7 +419,9 @@ export async function queryLod13BuildingGrids(payload, { signal, cursor } = {}) 
       return {
         ...cell,
         level: Number(payload.level),
-        features: properties.map((item, index) => lod13Feature(cell, item, index)),
+        modelSource: source,
+        modelSourceLabel: sourceConfig.label,
+        features: properties.map((item, index) => modelGridFeature(cell, item, index, source)),
       }
     })
   return {
@@ -398,7 +431,12 @@ export async function queryLod13BuildingGrids(payload, { signal, cursor } = {}) 
   }
 }
 
-export async function queryLod13GridFeatures(cell, { signal } = {}) {
+export function queryLod13BuildingGrids(payload, options = {}) {
+  return queryModelGridCells(payload, LEGACY_BUILDING_MODEL_SOURCE.value, options)
+}
+
+export async function queryModelGridFeatures(cell, source, { signal } = {}) {
+  const sourceConfig = getModelGridSource(source)
   const code = String(cell?.code || '')
   const level = Number(cell?.level ?? code.replace(/^dqg/, '').length)
   const bounds = cell?.bounds || {}
@@ -407,14 +445,14 @@ export async function queryLod13GridFeatures(cell, { signal } = {}) {
   const south = Number(bounds.south)
   const north = Number(bounds.north)
   if (!code || !Number.isInteger(level) || ![west, east, south, north].every(Number.isFinite)) {
-    throw new Error('LOD1.3 网格详情参数无效')
+    throw new Error(`${sourceConfig.label}网格详情参数无效`)
   }
   const response = await fetch('/api/multiSource/triangleGrid/queryOsgbGrid', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       level,
-      source: LEGACY_BUILDING_MODEL_SOURCE.value,
+      source,
       code,
       minLon: west,
       maxLon: east,
@@ -425,17 +463,21 @@ export async function queryLod13GridFeatures(cell, { signal } = {}) {
     signal,
   })
   if (!response.ok) {
-    throw new Error(await errorMessage(response, `LOD1.3 建筑属性查询失败（${response.status}）`))
+    throw new Error(await errorMessage(response, `${sourceConfig.label}属性查询失败（${response.status}）`))
   }
   const body = await response.json()
   if (body?.data?.data_source !== 'clickhouse') {
-    throw new Error('LOD1.3 建筑属性查询未使用 ClickHouse')
+    throw new Error(`${sourceConfig.label}属性查询未使用 ClickHouse`)
   }
   const rows = (body?.data?.cells || []).filter(row => String(row?.code || '') === code.replace(/^dqg/, ''))
   return rows.flatMap(row => {
     const properties = Array.isArray(row.properties) && row.properties.length ? row.properties : [{}]
-    return properties.map((item, index) => lod13Feature(row, item, index))
+    return properties.map((item, index) => modelGridFeature(row, item, index, source))
   })
+}
+
+export function queryLod13GridFeatures(cell, options = {}) {
+  return queryModelGridFeatures(cell, LEGACY_BUILDING_MODEL_SOURCE.value, options)
 }
 
 function lastGridCode(cells) {
@@ -444,19 +486,21 @@ function lastGridCode(cells) {
 
 export async function queryChartSourcePages(payload, { signal, onPage } = {}) {
   const requestedIds = payload.datasetIds || []
-  const staticIds = requestedIds.filter(id => id !== LOD13_BUILDING_DATASET_ID)
-  const includeLod13 = requestedIds.includes(LOD13_BUILDING_DATASET_ID)
+  const requestedModelSources = requestedIds
+    .map(id => MODEL_GRID_SOURCE_BY_DATASET_ID.get(id))
+    .filter(Boolean)
+  const staticIds = requestedIds.filter(id => !MODEL_GRID_SOURCE_BY_DATASET_ID.has(id))
   const states = [
     ...(staticIds.length ? [{
       name: 'static', cursor: undefined, watermark: undefined, hasMore: true,
       done: false, initialized: false, buffer: [], response: null,
       query: cursor => queryChartRegion({ ...payload, datasetIds: staticIds }, { signal, cursor }),
     }] : []),
-    ...(includeLod13 ? [{
-      name: 'lod13', cursor: undefined, watermark: undefined, hasMore: true,
+    ...requestedModelSources.map(source => ({
+      name: `model_grid_${source}`, cursor: undefined, watermark: undefined, hasMore: true,
       done: false, initialized: false, buffer: [], response: null,
-      query: cursor => queryLod13BuildingGrids(payload, { signal, cursor }),
-    }] : []),
+      query: cursor => queryModelGridCells(payload, source, { signal, cursor }),
+    })),
   ]
   let pageIndex = 0
   let committedCursor
@@ -509,15 +553,18 @@ export async function queryChartSourcePages(payload, { signal, onPage } = {}) {
     const pending = states.some(state => !state.done || state.buffer.length > 0)
     const features = cells.flatMap(cell => cell.features || [])
     const staticResponse = states.find(state => state.name === 'static')?.response
-    const lod13Response = states.find(state => state.name === 'lod13')?.response
+    const modelGridResponse = states.find(state => state.name.startsWith('model_grid_'))?.response
     const data = {
-      ...(staticResponse?.data || lod13Response?.data || {}),
+      ...(staticResponse?.data || modelGridResponse?.data || {}),
       cells,
       matchedCount: cells.length,
       mappingCount: features.length,
       lod13Count: new Set(features
         .filter(feature => feature.datasetId === LOD13_BUILDING_DATASET_ID)
         .map(feature => feature.code)).size,
+      modelGridCount: new Set(features
+        .filter(feature => MODEL_GRID_SOURCE_BY_DATASET_ID.has(feature.datasetId))
+        .map(feature => `${feature.datasetId}\u0000${feature.code}`)).size,
       hasMore: pending,
       nextCursor: pending ? (boundary || committedCursor) : null,
       dataSource: 'clickhouse',
@@ -553,6 +600,9 @@ export async function queryChartSources(payload, { signal } = {}) {
       lod13Count: new Set(features
         .filter(feature => feature.datasetId === LOD13_BUILDING_DATASET_ID)
         .map(feature => feature.code)).size,
+      modelGridCount: new Set(features
+        .filter(feature => MODEL_GRID_SOURCE_BY_DATASET_ID.has(feature.datasetId))
+        .map(feature => `${feature.datasetId}\u0000${feature.code}`)).size,
       hasMore: false,
       nextCursor: null,
       truncated: false,
