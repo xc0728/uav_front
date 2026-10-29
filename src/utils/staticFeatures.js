@@ -174,19 +174,15 @@ function normalizeActiveDataset(item, index) {
   return dataset
 }
 
-async function hasLod13Source(signal) {
-  try {
-    const response = await fetch('/lod13-datasets.json', { signal })
-    if (!response.ok) return false
-    const manifest = await response.json()
-    return Array.isArray(manifest) && manifest.length > 0
-  } catch (error) {
-    if (error?.name === 'AbortError') throw error
-    return false
-  }
+async function loadModelGridSources(signal) {
+  const response = await fetch('/api/multiSource/triangleGrid/modelGridSources', { signal })
+  if (!response.ok) throw new Error(await errorMessage(response, `模型格网目录读取失败（${response.status}）`))
+  const body = await response.json()
+  if (body.status !== 'success' || !Array.isArray(body.data?.items)) throw new Error(body.message || '模型格网目录响应无效')
+  return body.data.items
 }
 
-export async function loadAvailableChartDatasets({ signal, includeLod13 = true } = {}) {
+export async function loadAvailableChartDatasets({ signal, includeLod13 = true, onModelSourceError } = {}) {
   const items = []
   let offset = 0
   let total = Infinity
@@ -216,9 +212,18 @@ export async function loadAvailableChartDatasets({ signal, includeLod13 = true }
         if (!datasets.some(item => item.id === dataset.id)) datasets.push(dataset)
       })
   }
-  if (includeLod13 && await hasLod13Source(signal)) {
-    const lod13 = CHART_DATASETS.find(dataset => dataset.id === LOD13_BUILDING_DATASET_ID)
-    if (lod13 && !datasets.some(dataset => dataset.id === lod13.id)) datasets.push(lod13)
+  if (includeLod13) {
+    try {
+      const sources = await loadModelGridSources(signal)
+      const building = sources.find(item => item.source === 'lod13' && Number(item.gridCount) > 0)
+      const lod13 = CHART_DATASETS.find(dataset => dataset.id === LOD13_BUILDING_DATASET_ID)
+      if (building && lod13 && !datasets.some(dataset => dataset.id === lod13.id)) {
+        datasets.push({ ...lod13, mappingCount: Number(building.gridCount), levels: building.levels || [] })
+      }
+    } catch (error) {
+      if (error?.name === 'AbortError') throw error
+      onModelSourceError?.(error)
+    }
   }
   return datasets
 }

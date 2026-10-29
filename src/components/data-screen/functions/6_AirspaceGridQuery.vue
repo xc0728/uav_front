@@ -249,7 +249,9 @@ async function loadChartDatasets() {
   chartDatasetLoading.value = true
   chartDatasetError.value = ''
   try {
-    const datasets = await loadAvailableChartDatasets({ signal: controller.signal })
+    const datasets = await loadAvailableChartDatasets({ signal: controller.signal, onModelSourceError: error => {
+      if (!controller.signal.aborted) chartDatasetError.value = `静态要素目录仍可使用；建筑物查询可用性未确认：${error.message}`
+    } })
     if (controller.signal.aborted) return
     const availableIds = new Set(datasets.map(dataset => dataset.id))
     const retainedIds = selectedDatasetIds.value.filter(id => availableIds.has(id))
@@ -1448,7 +1450,7 @@ function clearGrids() {
         </div>
         <div v-if="chartDatasetLoading" class="dataset-hint">正在读取当前活动要素…</div>
         <div v-else-if="chartDatasetError" class="dataset-hint dataset-error">{{ chartDatasetError }}</div>
-        <div v-else class="dataset-tree">
+        <div v-if="!chartDatasetLoading && chartDatasets.length" class="dataset-tree">
           <ChartDatasetTreeNode
             v-for="node in chartDatasetTree"
             :key="node.id"
@@ -1457,7 +1459,7 @@ function clearGrids() {
             @toggle="setDatasetIdsSelected"
           />
         </div>
-        <div class="dataset-hint">列表来自当前活动 Dataset；仅显示已有 Feature 且存在网格映射的数据，并只查询已勾选项。</div>
+        <div class="dataset-hint">静态要素来自已有 Feature 和网格映射的活动 Dataset；建筑物来自后端已入库模型格网，不依赖本地模型文件。仅查询已勾选项。</div>
       </div>
 
       <!-- 查询边界 -->

@@ -17,6 +17,7 @@ import {
 } from '../../utils/tdtBaseLayers.js'
 import { createZhejiangTerrainProvider } from '../../utils/zhejiangTerrain.js'
 import {
+  LOD13_BUILDING_DATASET_ID,
   chartFeatureDimensionLabel,
   chartFeatureDatasetLabel,
   chartFeatureLabel,
@@ -46,6 +47,7 @@ import {
   toggleLod13ModelId,
 } from '../../utils/lod13ModelLayers.js'
 import { LEGACY_BUILDING_MODEL_SOURCE } from '../../utils/modelGridSources.js'
+import { attributeRequest, modelAttributeKey } from '../../utils/objectAttributes.js'
 
 // 模块级别的存储（持久化，不随组件销毁而丢失）
 const routeGridEntities = {}
@@ -230,14 +232,16 @@ async function selectGridDetail(detail) {
       if (selectedGrid.value === selected) selected.attributesLoading = false
     }
   })()
-  if (selected.attributeGrid || selected.features.length) {
+  if (selected.attributeGrid) {
     await attributesTask
     if (gridFeatureRequest === request) gridFeatureRequest = null
     return
   }
   selected.featuresLoading = true
   try {
-    const sourceMask = Number(selected.chartSourceMask) || 0
+    const cachedSourceMask = selected.features.reduce((mask, feature) =>
+      mask | (feature.datasetId === LOD13_BUILDING_DATASET_ID ? 2 : 1), 0)
+    const sourceMask = Number(selected.chartSourceMask) || cachedSourceMask
     const [staticData, lod13Features] = await Promise.all([
       sourceMask === 0 || (sourceMask & 1) !== 0
         ? queryChartFeatures([selected], {
@@ -1765,7 +1769,31 @@ function pickedLod13Attributes(picked, dataset, tilesetInstance) {
   }) || dataset.attributes?.[0]
 
   const properties = { ...(externalAttributes || {}), ...pickedProperties }
-  return Object.keys(properties).length ? { title: dataset.label, properties } : null
+  return Object.keys(properties).length ? { title: dataset.label, properties, source: dataset.source || 'lod13' } : null
+}
+
+async function refreshModelProperties(detail) {
+  const key = modelAttributeKey(detail.properties)
+  if (!key) return
+  detail.propertiesLoading = true
+  try {
+    const result = await attributeRequest('model-properties', {
+      method: 'POST', body: { scopeId: detail.source, externalKey: key },
+    })
+    if (selectedLod13Feature.value !== detail) return
+    if (result.enabled) detail.properties = result.properties
+    detail.propertiesError = ''
+  } catch (error) {
+    if (selectedLod13Feature.value === detail) detail.propertiesError = `最新属性读取失败；下方为模型文件原属性：${error.message}`
+  } finally { detail.propertiesLoading = false }
+}
+
+function refreshEditedObjectAttributes() {
+  if (selectedGrid.value && !selectedGrid.value.attributeGrid) {
+    void selectGridDetail(selectedGrid.value)
+  } else if (selectedLod13Feature.value) {
+    void refreshModelProperties(selectedLod13Feature.value)
+  }
 }
 
 // 加载指定 LOD1.3 tileset（幂等）：成功返回实例，失败返回 null
@@ -4645,6 +4673,7 @@ defineExpose({
 })
 
 onMounted(async () => {
+  window.addEventListener('object-attributes-updated', refreshEditedObjectAttributes)
   try {
     try {
       const manifestResponse = await fetch('/lod13-datasets.json')
@@ -4685,9 +4714,9 @@ onMounted(async () => {
     // 隐藏 Cesium 标志
     viewer.cesiumWidget.creditContainer.style.display = 'none'
 
-    // 设置初始视角（中国区域）
+    // 设置初始视角到本地导入的德清样本区域
     viewer.camera.setView({
-      destination: Cesium.Cartesian3.fromDegrees(120.0, 30.0, 5000000)
+      destination: Cesium.Cartesian3.fromDegrees(119.96205, 30.5229, 2500)
     })
 
     viewer.scene.globe.depthTestAgainstTerrain = false
@@ -4742,6 +4771,7 @@ onMounted(async () => {
     }
     if (lod13Attributes) {
       selectedLod13Feature.value = lod13Attributes
+      void refreshModelProperties(selectedLod13Feature.value)
       clearSelectedGridSelection()
       return
     }
@@ -4857,6 +4887,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('object-attributes-updated', refreshEditedObjectAttributes)
   gridFeatureRequest?.abort()
   clearSelectedGridSelection()
   stopUavAnimation()
@@ -4991,6 +5022,8 @@ onBeforeUnmount(() => {
         <div v-for="[key, value] in visibleChartAttributes(selectedLod13Feature.properties)" :key="key">
           {{ chartAttributeLabel(key) }}：{{ formatPropertyValue(value) }}
         </div>
+        <div v-if="selectedLod13Feature.propertiesLoading">正在读取最新对象属性……</div>
+        <div v-if="selectedLod13Feature.propertiesError" role="alert">{{ selectedLod13Feature.propertiesError }}</div>
       </section>
     </aside>
 

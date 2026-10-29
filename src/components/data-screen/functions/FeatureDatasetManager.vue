@@ -13,6 +13,7 @@ import {
 } from 'lucide-vue-next'
 import { errorMessage } from '../../../utils/http'
 import FieldAttributeManager from './FieldAttributeManager.vue'
+import ObjectAttributeManager from './ObjectAttributeManager.vue'
 
 const emit = defineEmits(['import-field'])
 const catalogMode = ref('features')
@@ -288,9 +289,11 @@ onBeforeUnmount(() => {
       <div class="state-tabs" aria-label="管理数据类型">
         <button type="button" :class="{ active: catalogMode === 'features' }" @click="catalogMode = 'features'">实体要素</button>
         <button type="button" :class="{ active: catalogMode === 'fields' }" @click="catalogMode = 'fields'">场数据（噪声 / 监视覆盖）</button>
+        <button type="button" :class="{ active: catalogMode === 'attributes' }" @click="catalogMode = 'attributes'">属性维护 / 回滚</button>
       </div>
     </div>
     <FieldAttributeManager v-if="catalogMode === 'fields'" @import-field="emit('import-field', $event)" />
+    <ObjectAttributeManager v-else-if="catalogMode === 'attributes'" :dataset-id="selectedId" />
     <template v-else>
     <div class="summary-grid">
       <div class="summary-card"><span>筛选结果</span><strong>{{ formatNumber(total) }}</strong><small>个数据集</small></div>
