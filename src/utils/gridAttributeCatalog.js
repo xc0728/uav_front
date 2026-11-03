@@ -42,20 +42,37 @@ export function availableGridAttributeGroups(items, dataset) {
   }))
 }
 
-export async function loadGridAttributeCatalog({ signal } = {}) {
-  const response = await fetch('/api/grid-attributes/catalog', { signal, cache: 'no-store' })
-  if (!response.ok) throw new Error(await errorMessage(response, '查询内容目录加载失败'))
-  const body = await response.json()
+// 目录请求必须有截止时间；包含响应正文读取，避免页面一直停留在“加载中”。
+async function readCatalogJson(url, fallback, { signal, timeoutMs = 15000 } = {}) {
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  signal?.addEventListener('abort', abort, { once: true })
+  if (signal?.aborted) controller.abort()
+  let timedOut = false
+  const timer = setTimeout(() => { timedOut = true; controller.abort() }, timeoutMs)
+  try {
+    const response = await fetch(url, { signal: controller.signal, cache: 'no-store' })
+    if (!response.ok) throw new Error(await errorMessage(response, fallback))
+    return await response.json()
+  } catch (error) {
+    if (timedOut) throw new Error(`${fallback}：请求超时，请检查后端数据库连接后刷新目录`)
+    throw error
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener('abort', abort)
+  }
+}
+
+export async function loadGridAttributeCatalog(options = {}) {
+  const body = await readCatalogJson('/api/grid-attributes/catalog', '查询内容目录加载失败', options)
   if (body?.success === false || body?.status === 'error' || !Array.isArray(body?.data?.items)) {
     throw new Error(body?.message || '查询内容目录响应格式不正确')
   }
   return body.data.items
 }
 
-export async function loadActiveAttributeDatasets({ signal } = {}) {
-  const response = await fetch('/api/true-altitude-airspace/datasets', { signal, cache: 'no-store' })
-  if (!response.ok) throw new Error(await errorMessage(response, '活动空域版本加载失败'))
-  const body = await response.json()
+export async function loadActiveAttributeDatasets(options = {}) {
+  const body = await readCatalogJson('/api/true-altitude-airspace/datasets', '活动空域版本加载失败', options)
   if (body?.success === false || body?.status === 'error'
       || !Array.isArray(body?.data?.datasets ?? body?.datasets)) {
     throw new Error(body?.message || '活动空域版本响应格式不正确')

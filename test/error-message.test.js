@@ -10,3 +10,9 @@ test('uses the decoded JSON error message', async () => {
 test('falls back to a non-JSON response body', async () => {
   assert.equal(await errorMessage(new Response('Bad Gateway'), '请求失败'), 'Bad Gateway')
 })
+
+test('uses the contextual fallback for framework and proxy HTML error pages', async () => {
+  for (const html of ['<html><head><title>404 Not Found</title></head></html>', '<!DOCTYPE html>\n<html>Bad Gateway</html>']) {
+    assert.equal(await errorMessage(new Response(html), '模型格网目录读取失败（404）'), '模型格网目录读取失败（404）')
+  }
+})

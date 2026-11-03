@@ -176,6 +176,27 @@ function normalizeActiveDataset(item, index) {
 
 async function loadModelGridSources(signal) {
   const response = await fetch('/api/multiSource/triangleGrid/modelGridSources', { signal })
+  // 旧部署可能没有来源目录；仅在路由缺失时探测现有建筑查询能力。
+  if (response.status === 404) {
+    const probe = await fetch('/api/multiSource/triangleGrid/queryOsgbGrid', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source: 'lod13', level: LEGACY_BUILDING_MODEL_SOURCE.queryLevel,
+        minLon: 0, maxLon: 0.000001, minLat: 0, maxLat: 0.000001,
+        maxCells: 1, renderOnly: true,
+      }),
+      signal,
+    })
+    if (!probe.ok) throw new Error(await errorMessage(probe, `建筑物查询能力检查失败（${probe.status}）`))
+    const result = await probe.json()
+    if (result?.status !== 'success' || result?.data?.data_source !== 'clickhouse'
+      || !Array.isArray(result.data.cells)) {
+      throw new Error('建筑物查询能力检查失败：未返回有效的 ClickHouse 响应')
+    }
+    // 微小范围仅验证接口可查询，不推断全库是否有数据，也不伪造映射总数。
+    return [{ source: 'lod13', queryAvailable: true, levels: [LEGACY_BUILDING_MODEL_SOURCE.queryLevel] }]
+  }
   if (!response.ok) throw new Error(await errorMessage(response, `模型格网目录读取失败（${response.status}）`))
   const body = await response.json()
   if (body.status !== 'success' || !Array.isArray(body.data?.items)) throw new Error(body.message || '模型格网目录响应无效')
@@ -215,10 +236,14 @@ export async function loadAvailableChartDatasets({ signal, includeLod13 = true, 
   if (includeLod13) {
     try {
       const sources = await loadModelGridSources(signal)
-      const building = sources.find(item => item.source === 'lod13' && Number(item.gridCount) > 0)
+      const building = sources.find(item => item.source === 'lod13' && (Number(item.gridCount) > 0 || item.queryAvailable === true))
       const lod13 = CHART_DATASETS.find(dataset => dataset.id === LOD13_BUILDING_DATASET_ID)
       if (building && lod13 && !datasets.some(dataset => dataset.id === lod13.id)) {
-        datasets.push({ ...lod13, mappingCount: Number(building.gridCount), levels: building.levels || [] })
+        datasets.push({
+          ...lod13,
+          ...(building.gridCount != null ? { mappingCount: Number(building.gridCount) } : {}),
+          levels: building.levels || [],
+        })
       }
     } catch (error) {
       if (error?.name === 'AbortError') throw error

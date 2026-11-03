@@ -4,35 +4,35 @@ import {
 } from './chartAttributeLabels.js'
 
 const SURVEILLANCE_EMF_LEGEND = Object.freeze([
-  { min: -Infinity, label: '<110', color: '#64748b' },
-  { min: 110, label: '110–115', color: '#4f46e5' },
-  { min: 115, label: '115–120', color: '#3b82f6' },
-  { min: 120, label: '120–125', color: '#06b6d4' },
-  { min: 125, label: '125–130', color: '#22c55e' },
-  { min: 130, label: '130–135', color: '#facc15' },
-  { min: 135, label: '135–140', color: '#f97316' },
-  { min: 140, label: '≥140 dBμV/m', color: '#dc2626' },
+  { min: -Infinity, label: '<110', color: '#dc2626' },
+  { min: 110, label: '110–115', color: '#ef4444' },
+  { min: 115, label: '115–120', color: '#f97316' },
+  { min: 120, label: '120–125', color: '#fbbf24' },
+  { min: 125, label: '125–130', color: '#facc15' },
+  { min: 130, label: '130–135', color: '#a3e635' },
+  { min: 135, label: '135–140', color: '#22c55e' },
+  { min: 140, label: '≥140 dBμV/m', color: '#15803d' },
 ])
 
-// 数值分档仅用于显示场强，不是通信可用性或导航精度的判定阈值。
+// 通导监表示信号覆盖强度：数值越大信号越好，按红→黄→绿展示；灰色保留给缺测值。
 const COMMUNICATION_EMF_LEGEND = Object.freeze([
-  { min: -Infinity, label: '<120', color: '#64748b' },
-  { min: 120, label: '120–124', color: '#3b82f6' },
-  { min: 124, label: '124–128', color: '#06b6d4' },
-  { min: 128, label: '128–132', color: '#22c55e' },
-  { min: 132, label: '132–136', color: '#facc15' },
-  { min: 136, label: '136–140', color: '#f97316' },
-  { min: 140, label: '≥140 dBμV/m', color: '#dc2626' },
+  { min: -Infinity, label: '<120', color: '#dc2626' },
+  { min: 120, label: '120–124', color: '#f97316' },
+  { min: 124, label: '124–128', color: '#fbbf24' },
+  { min: 128, label: '128–132', color: '#facc15' },
+  { min: 132, label: '132–136', color: '#a3e635' },
+  { min: 136, label: '136–140', color: '#22c55e' },
+  { min: 140, label: '≥140 dBμV/m', color: '#15803d' },
 ])
 const NAVIGATION_EMF_LEGEND = Object.freeze([
-  { min: -Infinity, label: '<100', color: '#64748b' },
-  { min: 100, label: '100–105', color: '#4f46e5' },
-  { min: 105, label: '105–110', color: '#3b82f6' },
-  { min: 110, label: '110–120', color: '#06b6d4' },
-  { min: 120, label: '120–130', color: '#22c55e' },
-  { min: 130, label: '130–135', color: '#facc15' },
-  { min: 135, label: '135–140', color: '#f97316' },
-  { min: 140, label: '≥140 dBμV/m', color: '#dc2626' },
+  { min: -Infinity, label: '<100', color: '#dc2626' },
+  { min: 100, label: '100–105', color: '#ef4444' },
+  { min: 105, label: '105–110', color: '#f97316' },
+  { min: 110, label: '110–120', color: '#fbbf24' },
+  { min: 120, label: '120–130', color: '#facc15' },
+  { min: 130, label: '130–135', color: '#a3e635' },
+  { min: 135, label: '135–140', color: '#22c55e' },
+  { min: 140, label: '≥140 dBμV/m', color: '#15803d' },
 ])
 const WIND_SPEED_LEGEND = Object.freeze([
   { min: -Infinity, label: '<1.5', color: '#94a3b8' },
@@ -165,15 +165,6 @@ export function noiseGridColor(code, value) {
     if (numeric === 0) return '#ef4444'
     if (numeric === 1) return '#f59e0b'
     if (numeric === 2) return '#22c55e'
-    return '#64748b'
-  }
-  if (ATTRIBUTE_BY_CODE.get(code)?.kind === 'emf') {
-    if (numeric >= 140) return '#dc2626'
-    if (numeric >= 136) return '#f97316'
-    if (numeric >= 132) return '#facc15'
-    if (numeric >= 128) return '#22c55e'
-    if (numeric >= 124) return '#06b6d4'
-    if (numeric >= 120) return '#3b82f6'
     return '#64748b'
   }
   // 裕度大于 0 表示超标；负值越大，噪声余量越充足。

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Database, SlidersHorizontal, History, ShieldCheck, RefreshCw, Plus, Trash2, Eye, Loader2, AlertCircle, CheckCircle2, Undo2, ChevronLeft, ChevronRight, ArrowRight } from 'lucide-vue-next'
-import { attributeRequest, buildAttributeRequest, attributeFieldOptions } from '../../../utils/objectAttributes.js'
+import { attributeRequest, buildAttributeRequests, collectAttributeObjects, submitAttributeRequests, attributeFieldOptions, createAttributeReadState } from '../../../utils/objectAttributes.js'
 import { MODEL_GRID_SOURCES } from '../../../utils/modelGridSources.js'
 import { loadAvailableChartDatasets } from '../../../utils/staticFeatures.js'
 import BulkAttributeManager from './BulkAttributeManager.vue'
@@ -41,20 +41,35 @@ const restorePreview = ref(null)
 const restoreChanges = computed(() => restorePreview.value?.items.some(item => changedProperties(item).length) || false)
 const nextCursor = ref(null)
 const cursorStack = ref([''])
+const scopeLoaded = ref(false)
+const localPage = ref(0)
+const selectionProgress = ref(null)
+const selectionRetry = ref('')
+let scopeReadState = null
+let scopeReadController = null
+const submittedBatches = ref([])
+const visibleObjects = computed(() => scopeLoaded.value ? objects.value.slice(localPage.value * 50, (localPage.value + 1) * 50) : objects.value)
+const chosenKeys = computed(() => new Set(chosen.value))
+const pageEditable = computed(() => visibleObjects.value.filter(item => item.editable))
+const pageChosenCount = computed(() => pageEditable.value.filter(item => chosenKeys.value.has(item.externalKey)).length)
 const requestLifetime = new AbortController()
 let timer = null
 let mounted = true
 let batchGeneration = 0
 let publicationSignature = ''
 let scopeGeneration = 0
-const selected = computed(() => objects.value.filter(item => chosen.value.includes(item.externalKey)))
-const allSelected = computed(() => objects.value.some(item => item.editable) && objects.value.filter(item => item.editable).every(item => chosen.value.includes(item.externalKey)))
+const selected = computed(() => objects.value.filter(item => chosenKeys.value.has(item.externalKey)))
+const allSelected = computed(() => pageEditable.value.length > 0 && pageChosenCount.value === pageEditable.value.length)
 const fields = computed(() => descriptor.value.fields || {})
 const fieldOptions = computed(() => attributeFieldOptions(objects.value, fields.value))
 const editorKeys = computed(() => deleting.value ? attributeFieldOptions(selected.value, fields.value).existing : editMode.value === 'existing' ? fieldOptions.value.existing : fieldOptions.value.additional)
+const modelSources = computed(() => [
+  ...MODEL_GRID_SOURCES,
+  ...(descriptor.value.fieldDefinitions ? [{ value: 'field', label: '场数据（噪声 / 电磁 / 气象 / 监视覆盖）' }] : []),
+])
 const selectedDataset = computed(() => datasets.value.find(item => item.datasetId === scopeId.value) || null)
 const scopeLabel = computed(() => kind.value === 'STATIC_FEATURE' ? selectedDataset.value?.datasetName || '尚未选择数据集' : scopeId.value)
-const serviceLabel = computed(() => descriptorState.value === 'loading' ? '正在检测服务' : descriptorState.value === 'error' ? '服务连接异常' : descriptor.value.enabled ? '属性维护已启用' : '属性维护未启用')
+const serviceLabel = computed(() => descriptorState.value === 'loading' ? '正在检测服务' : descriptorState.value === 'error' ? '服务连接异常' : descriptor.value.enabled ? '属性维护已启用' : descriptor.value.configuredEnabled ? '属性维护暂不可用' : '属性维护未启用')
 const statusLabels = { QUEUED: '排队中', RUNNING: '同步中', RECONCILING: '核对 / 待重试', PARTIAL_FAILED: '部分成功', SUCCEEDED: '全部成功', FAILED: '失败', CANCELLED: '已取消', RETRY_WAIT: '等待重试', BLOCKED: '需人工核对' }
 const operationLabels = { ADD_PROPERTIES: '新增属性', UPDATE_PROPERTIES: '修改属性', DELETE_PROPERTIES: '删除属性', MIXED_PROPERTIES: '混合变更', ROLLBACK: '回滚 / 撤销', RESTORE_AFTER: '恢复操作后状态', NO_CHANGE: '无实际变化' }
 const operationType = item => item.operationType || (item.rollback_of ? (item.actor_note === 'historical_restore:after' ? 'RESTORE_AFTER' : 'ROLLBACK') : 'UNKNOWN')
@@ -71,6 +86,8 @@ function invalidatePreview() { preview.value = null; prepared.value = null; dele
 watch([chosen, edits, reason], invalidatePreview, { deep: true })
 watch([kind, scopeId], () => {
   ++scopeGeneration
+  scopeReadController?.abort(); scopeReadState = null; selectionRetry.value = ''
+  scopeLoaded.value = false; localPage.value = 0; selectionProgress.value = null
   objects.value = []; chosen.value = []; edits.value = []; reason.value = ''; editMode.value = 'existing'; cursorStack.value = ['']; nextCursor.value = null
   error.value = ''; notice.value = ''
   invalidatePreview()
@@ -88,6 +105,7 @@ async function run(work) {
 }
 
 async function loadObjects(cursor = '') {
+  scopeReadState = null
   if (!descriptor.value.enabled) throw new Error('后端属性维护尚未启用，请先部署数据库脚本并配置管理员令牌')
   if (!token.value.trim()) throw new Error('请输入属性维护管理员令牌')
   if (kind.value === 'STATIC_FEATURE' && (datasetsState.value !== 'ready' || !selectedDataset.value))
@@ -95,6 +113,7 @@ async function loadObjects(cursor = '') {
   const generation = scopeGeneration
   const result = await api('read', { method: 'POST', body: { objectKind: kind.value, scopeId: scopeId.value, cursor } })
   if (!mounted || generation !== scopeGeneration) return
+  scopeLoaded.value = false; localPage.value = 0
   objects.value = result.items || []; chosen.value = []; nextCursor.value = result.hasMore ? result.nextCursor : null
 }
 function reload() { return run(async () => { cursorStack.value = ['']; await loadObjects(); await loadHistory() }) }
@@ -104,6 +123,10 @@ function bulkUpdated(detail) {
   reload()
 }
 function page(direction) {
+  if (scopeLoaded.value) {
+    localPage.value = Math.max(0, Math.min(Math.ceil(objects.value.length / 50) - 1, localPage.value + direction))
+    return
+  }
   return run(async () => {
     const stack = [...cursorStack.value]
     if (direction > 0 && nextCursor.value) stack.push(nextCursor.value)
@@ -121,14 +144,61 @@ function currentValues(key) {
   const values = [...new Set(selected.value.map(item => displayProperty(item.properties, key)))]
   return values.length === 1 ? values[0] : `存在 ${values.length} 种原值，请在差异预览中逐项核对`
 }
-function selectAll(event) { chosen.value = event.target.checked ? objects.value.filter(item => item.editable).map(item => item.externalKey) : [] }
+function selectAll(event) {
+  const keys = new Set(chosen.value)
+  for (const item of pageEditable.value) {
+    if (event.target.checked) keys.add(item.externalKey)
+    else keys.delete(item.externalKey)
+  }
+  chosen.value = [...keys]
+}
+async function selectScope() {
+  await run(async () => {
+    if (!descriptor.value.enabled || !scopeId.value || !token.value.trim()) throw new Error('请先选择类别并输入管理员令牌')
+    const generation = scopeGeneration
+    const objectKind = kind.value, id = scopeId.value
+    const state = scopeReadState || createAttributeReadState()
+    scopeReadState = state
+    scopeReadController = new AbortController()
+    const controller = scopeReadController
+    selectionProgress.value = state.items.size
+    selectionRetry.value = ''
+    try {
+      const result = await collectAttributeObjects(
+        cursor => api('read', { method: 'POST', signal: controller.signal, body: { objectKind, scopeId: id, cursor, pageSize: Math.min(500, descriptor.value.maxReadPageSize || 50) } }),
+        count => { if (generation === scopeGeneration) { selectionProgress.value = count; selectionRetry.value = '' } },
+        { state, signal: controller.signal, onRetry: ({ attempt, delayMs }) => {
+          if (generation === scopeGeneration) selectionRetry.value = `数据库暂忙，${delayMs / 1000} 秒后重试当前页（第 ${attempt} 次）`
+        } },
+      )
+      if (!mounted || generation !== scopeGeneration) return
+      scopeReadState = null
+      objects.value = result; scopeLoaded.value = true; localPage.value = 0
+      chosen.value = result.filter(item => item.editable).map(item => item.externalKey)
+      notice.value = `已读取当前类别全部 ${result.length} 个对象，选中 ${chosen.value.length} 个可编辑对象；跳过 ${result.length - chosen.value.length} 个只读或待同步对象。`
+    } catch (e) {
+      if (!mounted || generation !== scopeGeneration) return
+      if (state.items.size) throw new Error(`${e.message}。已暂存 ${state.items.size} 个对象，尚未全部加载；再次点击“全选当前类别”将从失败页继续。点击“读取对象”可重新开始。`)
+      throw e
+    } finally {
+      if (generation === scopeGeneration) { selectionProgress.value = null; selectionRetry.value = '' }
+    }
+  })
+}
 
 async function makePreview() {
   await run(async () => {
     if (deleting.value && !descriptor.value.attributeDeletion) throw new Error('请重启支持属性删除的新版后端')
-    const request = buildAttributeRequest(kind.value, scopeId.value, selected.value, edits.value, fields.value, reason.value, crypto.randomUUID(), deleting.value ? 'delete' : 'set')
-    const result = await api('preview', { method: 'POST', body: request })
-    prepared.value = request; preview.value = result
+    invalidatePreview()
+    const requests = buildAttributeRequests(kind.value, scopeId.value, selected.value, edits.value, fields.value, reason.value, descriptor.value.maxBatchSize || 500, deleting.value ? 'delete' : 'set')
+    const records = [], items = []
+    for (const request of requests) {
+      const result = await api('preview', { method: 'POST', body: request })
+      records.push({ request, changedCount: result.items.filter(item => changedProperties(item).length).length, batchId: '' })
+      items.push(...result.items)
+    }
+    submittedBatches.value = []
+    prepared.value = records; preview.value = { items }
   })
 }
 async function submit() {
@@ -136,11 +206,18 @@ async function submit() {
     if (!prepared.value) throw new Error('请先预览本次修改')
     if (!previewChangedCount.value) throw new Error('没有实际变更，无需提交')
     if (deleting.value && deleteConfirmation.value.trim() !== '删除') throw new Error('请输入“删除”确认移除属性')
-    const result = await api('batches', { method: 'POST', body: prepared.value })
-    const id = result.batchId
-    notice.value = `${deleting.value ? '删除' : '修改'}已受理，批次 ${id} 正在等待数据库同步确认。`
+    const records = prepared.value.filter(record => record.changedCount)
+    try {
+      await submitAttributeRequests(records,
+        request => api('batches', { method: 'POST', body: request }),
+        id => submittedBatches.value.push(id),
+      )
+    } catch (e) {
+      throw new Error(`已受理 ${records.filter(record => record.batchId).length} / ${records.length} 个批次。${e.message}；保留当前预览重试会继续剩余批次，请勿重复创建预览。`)
+    }
+    notice.value = `${deleting.value ? '删除' : '修改'}已受理，共 ${records.length} 个独立批次，正在等待同步确认；各批次可在记录中分别核对和回滚。`
     preview.value = null; prepared.value = null
-    await openBatch(id)
+    await openBatch(records.at(-1).batchId)
   })
 }
 async function loadHistory() {
@@ -279,7 +356,7 @@ async function initialize() {
   if (failures.length) throw new Error(failures.map(result => result.reason?.message || '服务请求失败').join('；'))
 }
 onMounted(() => run(initialize))
-onBeforeUnmount(() => { mounted = false; clearTimeout(timer); requestLifetime.abort() })
+onBeforeUnmount(() => { mounted = false; clearTimeout(timer); requestLifetime.abort(); scopeReadController?.abort() })
 </script>
 
 <template>
@@ -301,7 +378,8 @@ onBeforeUnmount(() => { mounted = false; clearTimeout(timer); requestLifetime.ab
       <button v-if="descriptorState === 'error'" type="button" class="button feedback-action" :disabled="busy" @click="run(initialize)"><RefreshCw :size="14" />重新检测</button>
     </div>
     <div v-else-if="descriptorState === 'ready' && !descriptor.enabled" class="feedback warning" role="status">
-      <ShieldCheck :size="19" /><div><strong>属性维护暂未启用</strong><p>请先完成服务端数据库配置，启用后即可在此维护对象属性。</p></div>
+      <ShieldCheck :size="19" /><div><strong>{{ descriptor.configuredEnabled ? '属性维护暂不可用' : '属性维护暂未启用' }}</strong><p>{{ descriptor.configuredEnabled ? '数据服务暂时不可用，请联系管理员检查。恢复后可重新检测。' : '请先完成服务端数据库配置，启用后即可在此维护对象属性。' }}</p></div>
+      <button type="button" class="button feedback-action" :disabled="busy" @click="run(initialize)"><RefreshCw :size="14" />重新检测</button>
     </div>
     <div v-if="notice" class="feedback success" role="status"><CheckCircle2 :size="19" /><div><strong>操作已受理</strong><p>{{ notice }}</p></div></div>
 
@@ -332,14 +410,22 @@ onBeforeUnmount(() => { mounted = false; clearTimeout(timer); requestLifetime.ab
             </select>
             <small class="dataset-hint" :class="{ 'dataset-error': datasetsState === 'error' }">{{ datasetsState === 'error' ? '请检查后端连接后刷新列表，不支持手动输入编号。' : datasetsState === 'loading' ? '正在读取服务器已入库目录' : datasets.length ? '共 ' + datasets.length + ' 个已入库数据集，仅显示活动且已关联格网的数据。' : '请先导入静态要素并完成网格化，再刷新列表。' }}</small>
           </div>
-          <label v-else><span>模型类别</span><select v-model="scopeId"><option v-for="source in MODEL_GRID_SOURCES" :key="source.value" :value="source.value">{{ source.label }}</option></select></label>
+          <label v-else><span>模型类别</span><select v-model="scopeId"><option v-for="source in modelSources" :key="source.value" :value="source.value">{{ source.label }}</option></select></label>
           <button type="button" class="button primary read-button" :disabled="!descriptor.enabled || descriptorState !== 'ready' || (kind === 'STATIC_FEATURE' && (datasetsState !== 'ready' || !selectedDataset))" @click="reload"><RefreshCw :size="15" />读取对象</button>
+        </div>
+        <p v-if="kind === 'MODEL_OBJECT' && scopeId === 'field'" class="field-hint">每个场定义及版本作为一个模型对象，分类代码适用于该定义的全部空域绑定和格点。请选择“新增属性”添加分类代码。</p>
+        <p v-if="kind === 'MODEL_OBJECT' && descriptor.modelVerificationMode === 'per_object' && scopeId !== 'field'" class="field-hint">模型按对象检查编号及属性副本；编号无效、属性冲突或同步待确认的对象会显示具体原因。</p>
+        <div class="selection-actions">
+          <button type="button" class="button" :disabled="!descriptor.enabled || !scopeId || !token.trim()" @click="selectScope">全选当前{{ kind === 'STATIC_FEATURE' ? '数据集' : '模型类别' }}</button>
+          <button type="button" class="button" :disabled="!chosen.length" @click="chosen = []">清空选择</button>
+          <span v-if="selectionProgress !== null">已读取 {{ selectionProgress }} 个对象，正在继续加载全部对象… {{ selectionRetry }}</span>
+          <span v-else>表头勾选框仅选择本页；跨页全选会跳过只读和待同步对象。</span>
         </div>
         <div class="table-scroll object-table">
           <table>
-            <thead><tr><th class="check-column"><input type="checkbox" :checked="allSelected" :disabled="!objects.some(item => item.editable)" aria-label="选择本页可编辑对象" @change="selectAll" /></th><th>对象编号</th><th class="version-column">版本</th><th>属性 / 状态</th></tr></thead>
+            <thead><tr><th class="check-column"><input type="checkbox" :checked="allSelected" :indeterminate="pageChosenCount > 0 && !allSelected" :disabled="!pageEditable.length" aria-label="选择本页可编辑对象" @change="selectAll" /></th><th>对象编号 <small>（本页全选）</small></th><th class="version-column">版本</th><th>属性 / 状态</th></tr></thead>
             <tbody>
-              <tr v-for="item in objects" :key="item.externalKey" :class="{ 'selected-row': chosen.includes(item.externalKey) }">
+              <tr v-for="item in visibleObjects" :key="item.externalKey" :class="{ 'selected-row': chosenKeys.has(item.externalKey) }">
                 <td><input v-model="chosen" type="checkbox" :value="item.externalKey" :disabled="!item.editable" :aria-label="'选择 ' + item.externalKey" /></td>
                 <td class="identifier">{{ item.externalKey }}</td><td><span class="version-tag">v{{ item.propertyRevision ?? '—' }}</span></td>
                 <td><span v-if="!item.editable" class="row-warning">{{ item.error || '同步待确认：' + item.pendingBatchId }}</span><details v-if="item.properties" class="property-details"><summary>查看属性</summary><pre>{{ json(item.properties) }}</pre></details></td>
@@ -349,8 +435,8 @@ onBeforeUnmount(() => { mounted = false; clearTimeout(timer); requestLifetime.ab
           </table>
         </div>
         <footer class="pagination">
-          <span>第 <b>{{ cursorStack.length }}</b> 页<span class="pagination-divider">·</span>本页 {{ objects.length }} 个对象</span>
-          <div><button type="button" class="button icon-button" :disabled="cursorStack.length < 2" aria-label="上一页" @click="page(-1)"><ChevronLeft :size="16" /></button><button type="button" class="button icon-button" :disabled="!nextCursor" aria-label="下一页" @click="page(1)"><ChevronRight :size="16" /></button></div>
+          <span>第 <b>{{ scopeLoaded ? localPage + 1 : cursorStack.length }}</b> 页<span class="pagination-divider">·</span>本页 {{ visibleObjects.length }} 个对象<span v-if="scopeLoaded"> · 全部 {{ objects.length }} 个</span></span>
+          <div><button type="button" class="button icon-button" :disabled="scopeLoaded ? localPage === 0 : cursorStack.length < 2" aria-label="上一页" @click="page(-1)"><ChevronLeft :size="16" /></button><button type="button" class="button icon-button" :disabled="scopeLoaded ? (localPage + 1) * 50 >= objects.length : !nextCursor" aria-label="下一页" @click="page(1)"><ChevronRight :size="16" /></button></div>
         </footer>
       </fieldset>
 
@@ -382,12 +468,13 @@ onBeforeUnmount(() => { mounted = false; clearTimeout(timer); requestLifetime.ab
           <div v-for="(edit, index) in edits" :key="index" class="attribute-row">
             <label><span>{{ deleting ? '待删除属性字段' : editMode === 'existing' ? '已有属性字段' : '新增属性字段' }}</span><select v-model="edit.key"><option v-for="key in editorKeys" :key="key" :value="key" :disabled="fieldDisabled(key, index)">{{ key }}（{{ fields[key] }}）</option></select></label>
             <p v-if="deleting" class="delete-target">删除后：字段不存在</p>
-            <label v-else><span>新值</span><select v-if="fields[edit.key] === 'boolean'" v-model="edit.value" :disabled="edit.null"><option value="">请选择</option><option value="true">true</option><option value="false">false</option></select><input v-else v-model="edit.value" :disabled="edit.null" :type="fields[edit.key] === 'number' ? 'number' : 'text'" maxlength="4096" placeholder="输入更新后的值" /></label>
+            <label v-else><span>新值</span><select v-if="fields[edit.key] === 'boolean'" v-model="edit.value" :disabled="edit.null"><option value="">请选择</option><option value="true">true</option><option value="false">false</option></select><input v-else v-model="edit.value" :disabled="edit.null" :type="fields[edit.key] === 'number' ? 'number' : 'text'" :inputmode="edit.key === '分类代码' ? 'numeric' : undefined" maxlength="4096" :placeholder="edit.key === '分类代码' ? '例如：1010100（按文本保存，保留前导零）' : '输入更新后的值'" /></label>
             <div class="current-property"><span>当前值</span><pre>{{ currentValues(edit.key) }}</pre><small v-if="selected.some(item => !Object.hasOwn(item.properties || {}, edit.key))">{{ deleting ? '部分对象没有该字段，将跳过其删除操作。' : '部分或全部对象没有该字段，提交后将新增。' }}</small></div>
             <div class="row-options"><label v-if="!deleting" class="inline"><input v-model="edit.null" type="checkbox" />设为空值</label><button type="button" class="button remove-button" :aria-label="'移除第 ' + (index + 1) + ' 个属性'" @click="edits.splice(index, 1)"><Trash2 :size="15" /></button></div>
           </div>
         </div>
         <button type="button" class="button add-button" :disabled="edits.length >= editorKeys.length" @click="addField()"><Plus :size="15" />{{ deleting ? '添加待删除属性' : editMode === 'existing' ? '添加待修改属性' : '添加待新增属性' }}</button>
+        <div v-if="selected.length > (descriptor.maxBatchSize || 500)" class="field-hint">所选对象将分批提交，每批最多 {{ descriptor.maxBatchSize || 500 }} 个，各批次独立同步和回滚。</div>
         <div v-if="selected.length" class="field-hint">编辑列表仅显示当前已读取对象具有的可编辑字段。新增其他白名单字段，请切换“新增普通属性”。部分对象缺少已有字段时，写入前请核对差异预览。</div>
         <details v-if="fieldOptions.readonly.length" class="readonly-properties"><summary>只读属性（{{ fieldOptions.readonly.length }}）</summary><p>{{ fieldOptions.readonly.join('、') }}</p><small>这些字段未开放普通属性维护，可能涉及编号、空间计算或尚未登记的业务字段。保留原值；需核对业务用途后由后端登记。</small></details>
         <label class="reason"><span>{{ deleting ? '删除原因' : '修改原因' }} <em>必填</em></span><textarea v-model="reason" maxlength="500" rows="3" :placeholder="deleting ? '例如：移除误导入的普通属性字段' : '例如：根据最新资料修正所属单位'" /><small>{{ reason.length }} / 500</small></label>
@@ -403,6 +490,7 @@ onBeforeUnmount(() => { mounted = false; clearTimeout(timer); requestLifetime.ab
       </fieldset>
     </div>
 
+    <div v-if="submittedBatches.length" class="submitted-batches"><strong>本次已受理 {{ submittedBatches.length }} 个批次</strong><button v-for="(id, index) in submittedBatches" :key="id" type="button" class="button" :disabled="busy" @click="run(() => openBatch(id))">查看批次 {{ index + 1 }}</button></div>
     <BulkAttributeManager :token="token" :scope-id="scopeId" :object-kind="kind" :objects="objects" :capability="descriptor.bulkImport || {}" @updated="bulkUpdated" @open-batch="id => run(() => openBatch(id))" />
 
     <fieldset class="step-card history-card" :disabled="busy">
@@ -430,7 +518,7 @@ onBeforeUnmount(() => { mounted = false; clearTimeout(timer); requestLifetime.ab
         <div v-if="batch.items?.some(item => item.status === 'SUCCEEDED')" class="rollback">
           <div class="rollback-heading"><Undo2 :size="18" /><div><strong>恢复到历史版本</strong><p>可跨多次修改恢复本批次已成功对象的完整属性快照。后续新增字段也可能被删除，请逐项核对。几何与导入基线变化、同步未完成时禁止恢复；预览后再有新修改也会被拒绝。</p></div></div>
           <div class="restore-target"><label><span>选择恢复目的</span><select v-model="restoreTarget"><option value="before">撤销该次操作 → 恢复操作前（回滚）</option><option value="after">恢复到该次操作后状态（不是撤销）</option></select></label><button type="button" class="button" :disabled="!descriptor.historicalRestore" @click="previewRestore"><Eye :size="14" />预览历史恢复差异</button></div>
-          <p class="restore-purpose">{{ restoreTarget === 'before' ? '当前选择：撤销来源批次。若该批次新增了属性，目标快照中将不再包含这些属性。' : '当前选择：恢复来源批次执行后的状态。若该批次新增了属性，恢复后仍会保留它们；要撤销新增请选择上一项。' }}</p>
+          <p class="restore-purpose">{{ restoreTarget === 'before' ? '当前选择：安全撤销来源批次。新增属性会移除；对象若已有后续修改，将拒绝回滚，避免覆盖新数据。' : '当前选择：恢复来源批次执行后的整份属性快照，将替换当前属性。请核对预览中的全部差异；撤销新增请选择“恢复操作前”。' }}</p>
           <p v-if="!descriptor.historicalRestore" class="field-hint">当前服务端尚未支持历史恢复，请部署并重启新版后端。</p>
           <div v-if="restorePreview" class="preview-panel restore-preview"><strong>当前属性 → 目标历史快照（{{ restorePreview.items.length }} 个对象）</strong><div class="table-scroll"><table><thead><tr><th>对象 / 字段</th><th>当前值</th><th>恢复后的值</th></tr></thead><tbody><template v-for="item in restorePreview.items" :key="item.externalKey"><tr v-for="key in changedProperties(item)" :key="item.externalKey + ':' + key"><td><small class="identifier">{{ item.externalKey }}</small><strong>{{ key }}</strong></td><td>{{ displayProperty(item.before, key) }}</td><td>{{ Object.hasOwn(item.after, key) ? displayProperty(item.after, key) : '删除该字段（历史快照中不存在）' }}</td></tr><tr v-if="!changedProperties(item).length"><td class="identifier">{{ item.externalKey }}</td><td colspan="2">当前属性与目标快照一致</td></tr></template></tbody></table></div></div>
           <p v-if="restorePreview && !restoreChanges" class="no-change restore-purpose" role="status">当前属性与目标快照完全一致，无需恢复，不会创建批次。若要撤销本次操作，请选择“恢复操作前”重新预览。</p>
@@ -517,6 +605,7 @@ tbody tr:hover:not(:has(.empty-state)) { background: #f9fbfd; }tbody .selected-r
 pre { padding: 10px; background: #f5f8fb; border: 1px solid #e5ecf2; border-radius: 6px; color: #456078; font-size: 11px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 140px; max-width: 480px; margin: 8px 0 0; }
 .empty-cell { padding: 0; }.empty-state { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 8px; padding: 44px 14px; min-height: 190px; color: #8d9fac; text-align: center; }
 .empty-state > svg { margin-bottom: 4px; color: #9cb5c8; }.empty-state strong { color: #657d90; font-size: 13px; font-weight: 500; }.empty-state span { color: #7c8f9f; font-size: 11px; }
+.selection-actions, .submitted-batches { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; font-size: 11px; color: #6d8093; }
 .pagination { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 13px; color: #6d8093; font-size: 11px; }.pagination > div { display: flex; gap: 6px; }.pagination b { font-weight: 600; }.pagination-divider { margin: 0 7px; color: #c4d0d9; }
 .editor-guide { display: flex; align-items: center; gap: 11px; background: #f5f8fb; border: 1px dashed #d3e0e9; border-radius: 8px; padding: 14px; margin-bottom: 16px; }.guide-number { color: #7fa4be; font-size: 22px; }.editor-guide strong { font-weight: 550; font-size: 12px; color: #57768c; }.editor-guide p { margin: 3px 0 0; color: #7b8e9e; font-size: 11px; }
 .selection-note { display: flex; gap: 7px; align-items: center; margin-bottom: 16px; padding: 11px; border-radius: 7px; background: #eef8fc; color: #36768f; font-size: 12px; }

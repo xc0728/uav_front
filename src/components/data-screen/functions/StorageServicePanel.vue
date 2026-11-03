@@ -2,6 +2,8 @@
 import { ref, reactive, computed, onBeforeUnmount } from 'vue'
 import { Loader2, RefreshCw, ChevronDown, ChevronUp, Box, Building2, Mountain, Cloud, Search, Layers, Waypoints, Radar, Wrench, FileSpreadsheet } from 'lucide-vue-next'
 import FeatureDatasetManager from './FeatureDatasetManager.vue'
+import { PLANNING_PARQUET_FILES, planningParquetPreset, parquetAttributePayload } from '../../../utils/parquetAttributeImport.js'
+import { dataToolProgress } from '../../../utils/dataToolProgress.js'
 import { MODEL_GRID_SOURCES } from '../../../utils/modelGridSources.js'
 import { GRID_ATTRIBUTE_TOPICS } from '../../../utils/noiseGrid.js'
 import { isDailyWeatherField, weatherFieldPreset, surfaceFieldParameters } from '../../../utils/weatherField.js'
@@ -250,13 +252,15 @@ const WEATHER_ATTRIBUTE_MAPPINGS = [
 ]
 
 const parquetAttributeForm = ref({
-  importMode: 'generic_horizontal_agl',
+  importMode: 'generic_horizontal_agl', planningFile: 'overall', autoPreflight: true, nullValuePolicy: 'REJECT',
   datasetId: '',
   datasetVersion: '',
   input: 'data/deqing_map/deqing_dqg_L17_quasi2d_20250412_130000.parquet',
   level: 17,
   dryRun: true,
   source: 'deqing_weather_static',
+  xField: 'x', yField: 'y', zField: 'z', verifyCoordinates: true,
+  preflightJobId: '', classificationCode: '', exactConfirmation: '',
   codeField: 'dqg_code_key',
   codeTextField: 'dqg_horizontal_code',
   levelField: 'dqg_level',
@@ -273,10 +277,19 @@ const parquetAttributeForm = ref({
   registerMissingAttributes: true,
 })
 
+function fillPlanningFile(file = 'overall') {
+  Object.assign(parquetAttributeForm.value, planningParquetPreset(file))
+  setErrors({})
+}
+function parquetImportModeChanged() {
+  if (parquetAttributeForm.value.importMode === 'grid_code_exact') fillPlanningFile('overall')
+  validateField('importMode')
+}
+
 function validateParquetAttribute(key) {
   const f = parquetAttributeForm.value
   const e = {}
-  if (!['generic_horizontal_agl', 'dqg_noise_v1'].includes(f.importMode)) e.importMode = '请选择导入方式'
+  if (!['generic_horizontal_agl', 'grid_code_exact', 'dqg_noise_v1'].includes(f.importMode)) e.importMode = '请选择导入方式'
   if (isBlank(f.datasetId)) e.datasetId = '目标数据集标识不能为空'
   else {
     const value = String(f.datasetId).trim()
@@ -289,10 +302,11 @@ function validateParquetAttribute(key) {
   else if (!/\.parquet$/i.test(String(f.input).trim())) e.input = '输入文件必须为 .parquet'
   const level = intCheck(f.level, '网格层级', 17, 17)
   if (level) e.level = '当前模板固定使用 L17'
-  if (f.importMode === 'generic_horizontal_agl') {
-    for (const [field, label] of [
-      ['codeField', '压缩编码字段'], ['minAglField', '最小离地高度字段'], ['maxAglField', '最大离地高度字段'],
-    ]) {
+  if (f.importMode !== 'dqg_noise_v1') {
+    const required = f.importMode === 'grid_code_exact'
+      ? [['codeField', '三维编码字段'], ...(f.verifyCoordinates ? [['xField', 'x字段'], ['yField', 'y字段'], ['zField', 'z字段']] : [])]
+      : [['codeField', '压缩编码字段'], ['minAglField', '最小离地高度字段'], ['maxAglField', '最大离地高度字段']]
+    for (const [field, label] of required) {
       if (isBlank(f[field])) e[field] = `${label}不能为空`
       else if (!/^[A-Za-z0-9_]+$/.test(String(f[field]))) e[field] = `${label}只能包含字母、数字和下划线`
     }
@@ -309,6 +323,10 @@ function validateParquetAttribute(key) {
     } catch {
       e.attributeMappingsText = '属性映射不是有效 JSON'
     }
+  }
+  if (f.importMode === 'grid_code_exact' && !f.dryRun) {
+    if (!f.autoPreflight && !/^[A-Za-z0-9_-]{1,128}$/.test(String(f.preflightJobId || '').trim())) e.preflightJobId = '请先完成同文件、同参数的预检并填写任务编号'
+    if (f.exactConfirmation !== '确认导入') e.exactConfirmation = '请输入“确认导入”'
   }
   if (f.showAdvanced) {
     if (isBlank(f.source)) e.source = '来源标识不能为空'
@@ -864,6 +882,7 @@ const JOB_STATUS_TEXT = {
   failed: '失败',
 }
 
+const jobDisplayProgress = computed(() => dataToolProgress(jobStatus.value))
 const jobStatusText = computed(() => JOB_STATUS_TEXT[jobStatus.value?.status] || jobStatus.value?.status || '-')
 
 function validateJobId() {
@@ -912,6 +931,9 @@ async function pollJobStatus(reset) {
     if (!resp.ok) throw new Error(data?.message || `查询失败: ${resp.status}`)
     jobStatus.value = data?.data || null
     const st = jobStatus.value?.status
+    const result = jobStatus.value?.result
+    if (st === 'succeeded' && result?.gridKeyMode === 'GRID_CODE_EXACT' && result?.dryRun && result?.validated)
+      parquetAttributeForm.value.preflightJobId = result.preflightJobId
     if (st === 'succeeded' || st === 'failed') stopJobPolling()
   } catch (e) {
     jobError.value = e?.message || '查询任务状态失败'
@@ -1097,34 +1119,7 @@ async function submitParquetAttribute() {
   feedback.value = null
   const f = parquetAttributeForm.value
   try {
-    const body = {
-      datasetId: String(f.datasetId).trim(),
-      datasetVersion: Number(f.datasetVersion),
-      input: String(f.input).trim(),
-      level: Number(f.level),
-      dryRun: Boolean(f.dryRun),
-      source: String(f.source).trim(),
-      batchSize: Number(f.batchSize),
-      maxRows: Number(f.maxRows),
-      registerMissingAttributes: Boolean(f.registerMissingAttributes),
-    }
-    if (f.importMode === 'dqg_noise_v1') {
-      body.template = 'dqg_noise_v1'
-    } else {
-      body.inputFormat = 'parquet'
-      body.gridKeyMode = 'HORIZONTAL_AGL_RANGE'
-      body.codeField = String(f.codeField).trim()
-      body.codeEncoding = 'PACKED_UINT64'
-      body.codeTextField = String(f.codeTextField || '').trim()
-      body.levelField = String(f.levelField || '').trim()
-      body.minAglField = String(f.minAglField).trim()
-      body.maxAglField = String(f.maxAglField).trim()
-      body.validField = String(f.validField || '').trim()
-      body.unmatchedCodePolicy = f.unmatchedCodePolicy
-      body.verifyCodeConsistency = Boolean(f.verifyCodeConsistency)
-      body.attributeMappings = JSON.parse(f.attributeMappingsText)
-    }
-    if (f.importMode === 'dqg_noise_v1') body.heightTolerance = Number(f.heightTolerance)
+    const body = parquetAttributePayload(f)
     const data = await postJson('/api/grid-attributes/parquet-import-jobs', body)
     handleJobAccepted(data, f.dryRun ? 'Parquet 网格属性预检' : 'Parquet 网格属性导入')
   } catch (err) {
@@ -1728,7 +1723,8 @@ onBeforeUnmount(() => {
         <div class="form-grid">
           <div class="form-field" :class="{ 'has-error': errors.importMode }">
             <label>导入方式 <span class="req">*</span></label>
-            <select v-model="parquetAttributeForm.importMode" @change="validateField('importMode')">
+            <select v-model="parquetAttributeForm.importMode" @change="parquetImportModeChanged">
+              <option value="grid_code_exact">三维格点精确匹配：grid_id（规划评价等）</option>
               <option value="generic_horizontal_agl">通用：水平网格 + 离地高度范围</option>
               <option value="dqg_noise_v1">兼容预设：DQG 噪声 v1</option>
             </select>
@@ -1758,23 +1754,39 @@ onBeforeUnmount(() => {
             <span v-else class="field-hint">项目根目录下的相对路径，不允许绝对路径、.. 或符号链接</span>
           </div>
 
-          <template v-if="parquetAttributeForm.importMode === 'generic_horizontal_agl'">
+          <template v-if="parquetAttributeForm.importMode === 'grid_code_exact'">
+            <div class="form-field span-2">
+              <label>选择正式入库文件</label>
+              <select v-model="parquetAttributeForm.planningFile" @change="fillPlanningFile(parquetAttributeForm.planningFile)"><option v-for="file in PLANNING_PARQUET_FILES" :key="file.value" :value="file.value">{{ file.label }}</option></select>
+              <span class="field-hint">直接读取原文件，自动填写正式属性映射；提交后先校验完整文件，通过后入库。03 不重复写入 02 的得分。目标已有同名绑定时拒绝覆盖。</span>
+            </div>
+            <div v-for="axis in ['x', 'y', 'z']" :key="axis" class="form-field">
+              <label>{{ axis }} 坐标字段</label><input v-model="parquetAttributeForm[axis + 'Field']" type="text" />
+              <span v-if="errors[axis + 'Field']" class="field-error">{{ errors[axis + 'Field'] }}</span>
+            </div>
+            <div class="form-field"><label class="checkbox-item"><input v-model="parquetAttributeForm.verifyCoordinates" type="checkbox" />核对 x/y/z 与目标网格一致</label></div>
+            <div class="form-field"><label>属性空值处理</label><select v-model="parquetAttributeForm.nullValuePolicy"><option value="REJECT">拒绝空值</option><option value="KEEP_NULL">保留空值，不删除网格行</option></select><span class="field-hint">第三个文件的生长代价存在空值，选择保留；不补零，其他字段照常入库。NaN、无穷大及类型异常仍拒绝。</span></div>
+            <div class="form-field"><label>统一分类代码（可选，按文本保存）</label><input v-model="parquetAttributeForm.classificationCode" type="text" placeholder="按分类标准填写；留空不设置" /><span class="field-hint">映射项可单独填写 classificationCode；已有非空分类保留，新增分类通过属性维护批次确认。</span></div>
+            <div v-if="!parquetAttributeForm.autoPreflight" class="form-field"><label>成功预检任务编号</label><input v-model="parquetAttributeForm.preflightJobId" type="text" placeholder="预检成功自动回填，也可从结果复制" /><span v-if="errors.preflightJobId" class="field-error">{{ errors.preflightJobId }}</span></div>
+            <div v-if="!parquetAttributeForm.dryRun" class="form-field span-2"><label>输入“确认导入”</label><input v-model="parquetAttributeForm.exactConfirmation" type="text" placeholder="确认导入" /><span v-if="errors.exactConfirmation" class="field-error">{{ errors.exactConfirmation }}</span><span class="field-hint">自动校验完整文件后添加本次新属性绑定；发现目标版本变化、编码不匹配或已有绑定时停止，保护其他场数据。</span></div>
+          </template>
+          <template v-if="parquetAttributeForm.importMode !== 'dqg_noise_v1'">
             <div class="form-field" :class="{ 'has-error': errors.codeField }">
-              <label>水平格压缩编码字段 <span class="req">*</span></label>
+              <label>{{ parquetAttributeForm.importMode === 'grid_code_exact' ? '三维网格编码字段' : '水平格压缩编码字段' }} <span class="req">*</span></label>
               <input v-model="parquetAttributeForm.codeField" type="text" @blur="validateField('codeField')" />
               <span v-if="errors.codeField" class="field-error">{{ errors.codeField }}</span>
             </div>
-            <div class="form-field" :class="{ 'has-error': errors.codeTextField }">
+            <div v-if="parquetAttributeForm.importMode === 'generic_horizontal_agl'" class="form-field" :class="{ 'has-error': errors.codeTextField }">
               <label>水平格文本编码字段</label>
               <input v-model="parquetAttributeForm.codeTextField" type="text" @blur="validateField('codeTextField')" />
               <span v-if="errors.codeTextField" class="field-error">{{ errors.codeTextField }}</span>
             </div>
-            <div class="form-field" :class="{ 'has-error': errors.minAglField }">
+            <div v-if="parquetAttributeForm.importMode === 'generic_horizontal_agl'" class="form-field" :class="{ 'has-error': errors.minAglField }">
               <label>最小离地高度字段 <span class="req">*</span></label>
               <input v-model="parquetAttributeForm.minAglField" type="text" @blur="validateField('minAglField')" />
               <span v-if="errors.minAglField" class="field-error">{{ errors.minAglField }}</span>
             </div>
-            <div class="form-field" :class="{ 'has-error': errors.maxAglField }">
+            <div v-if="parquetAttributeForm.importMode === 'generic_horizontal_agl'" class="form-field" :class="{ 'has-error': errors.maxAglField }">
               <label>最大离地高度字段 <span class="req">*</span></label>
               <input v-model="parquetAttributeForm.maxAglField" type="text" @blur="validateField('maxAglField')" />
               <span v-if="errors.maxAglField" class="field-error">{{ errors.maxAglField }}</span>
@@ -1803,7 +1815,7 @@ onBeforeUnmount(() => {
               <span v-if="errors.attributeMappingsText" class="field-error">{{ errors.attributeMappingsText }}</span>
               <span v-else class="field-hint">时间字段不在映射中，因此本次数据按静态属性导入</span>
             </div>
-            <div class="form-field span-2">
+            <div v-if="parquetAttributeForm.importMode === 'generic_horizontal_agl'" class="form-field span-2">
               <label class="checkbox-item">
                 <input v-model="parquetAttributeForm.verifyCodeConsistency" type="checkbox" />
                 <span>核验文本 DQG 编码与压缩编码完全一致</span>
@@ -1815,7 +1827,7 @@ onBeforeUnmount(() => {
         <div class="check-group">
           <label class="checkbox-item">
             <input v-model="parquetAttributeForm.dryRun" type="checkbox" />
-            <span>只执行全量预检，不写入属性事实和活动绑定（推荐先勾选）</span>
+            <span>{{ parquetAttributeForm.importMode === 'grid_code_exact' ? '仅校验原文件，不入库（可选）；正式入库会自动完成全量校验' : '只执行全量预检，不写入属性事实和活动绑定（推荐先勾选）' }}</span>
           </label>
         </div>
 
@@ -1856,7 +1868,7 @@ onBeforeUnmount(() => {
         <div class="submit-row">
           <button class="btn-primary" type="button" :disabled="submittingMap.parquetAttribute" @click="submitParquetAttribute">
             <Loader2 v-if="submittingMap.parquetAttribute" :size="14" class="spin" />
-            <span>{{ submittingMap.parquetAttribute ? '提交中...' : (parquetAttributeForm.dryRun ? '提交预检任务' : '提交正式导入') }}</span>
+            <span>{{ submittingMap.parquetAttribute ? '提交中...' : (parquetAttributeForm.dryRun ? '提交全量校验' : parquetAttributeForm.importMode === 'grid_code_exact' ? '校验并正式入库' : '提交正式导入') }}</span>
           </button>
           <span class="submit-hint">任务提交后进入异步队列，并自动跳转到任务进度页面</span>
         </div>
@@ -2472,13 +2484,15 @@ onBeforeUnmount(() => {
 
           <div class="progress-row">
             <div class="progress-track">
-              <div class="progress-fill" :class="jobStatus.status" :style="{ width: `${jobStatus.progress?.percent ?? 0}%` }"></div>
+              <div class="progress-fill" :class="jobStatus.status" :style="{ width: `${jobDisplayProgress.percent ?? 0}%` }"></div>
             </div>
             <span class="progress-text">
-              {{ jobStatus.progress?.percent !== null && jobStatus.progress?.percent !== undefined ? formatProgressPercent(jobStatus.progress.percent) : (jobStatus.progress?.stage || '-') }}
+              {{ jobDisplayProgress.percent !== null ? formatProgressPercent(jobDisplayProgress.percent) : (jobStatus.progress?.stage || '-') }}
             </span>
           </div>
 
+          <p v-if="jobStatus.result?.input">原文件：{{ jobStatus.result.input }}</p>
+          <p v-if="jobStatus.status === 'succeeded' && jobStatus.result?.dryRun">已完成 {{ formatNumber(jobStatus.result.validRows || jobStatus.result.sourceRows) }} 行校验，尚未写入属性事实或绑定。</p>
           <div class="job-meta">
             <div class="meta-item">
               <span class="meta-label">任务 ID</span>
@@ -2494,7 +2508,7 @@ onBeforeUnmount(() => {
             </div>
             <div class="meta-item">
               <span class="meta-label">处理进度</span>
-              <span class="meta-value">{{ formatNumber(jobStatus.progress?.processed) }} / {{ formatNumber(jobStatus.progress?.total) }}</span>
+              <span class="meta-value">{{ formatNumber(jobDisplayProgress.processed) }} / {{ formatNumber(jobDisplayProgress.total) }}</span>
             </div>
             <div class="meta-item">
               <span class="meta-label">创建时间</span>
@@ -2511,6 +2525,9 @@ onBeforeUnmount(() => {
             <span class="meta-value error-text">{{ jobStatus.error }}</span>
           </div>
 
+          <button v-if="jobStatus.status === 'succeeded' && jobStatus.result?.gridKeyMode === 'GRID_CODE_EXACT' && jobStatus.result?.dryRun" type="button" @click="activeTab = 'parquetAttribute'">返回 Parquet 导入（预检编号已回填）</button>
+          <p v-if="jobStatus.result?.classificationStatus === 'PENDING'">格点数据已激活，分类代码正在通过属性维护批次同步：{{ jobStatus.result.classificationBatchId }}。请在属性维护中核对全部成功。</p>
+          <p v-if="jobStatus.result?.classificationError" class="field-error">{{ jobStatus.result.classificationError }}</p>
           <details v-if="jobStatus.result && Object.keys(jobStatus.result).length" class="job-result-detail">
             <summary>查看执行结果</summary>
             <pre class="result-json">{{ JSON.stringify(jobStatus.result, null, 2) }}</pre>

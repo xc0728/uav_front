@@ -44,6 +44,7 @@ function bandLabel(band) {
       <span v-else class="legend-unit">{{ attributeCode ? '分区含义' : '要素类别' }}</span>
     </div>
     <div v-if="attributeCode" class="legend-topic">{{ noiseAttributeLabel(attributeCode) }}</div>
+    <p v-if="definition?.kind === 'emf'" class="legend-direction">信号覆盖：弱（红）→ 强（绿），数值越大信号越好</p>
     <ul v-if="bands.length" class="legend-bands">
       <li v-for="(band, index) in bands" :key="band.id || index">
         <i class="legend-color" :style="{ background: band.color }" aria-hidden="true" />
@@ -118,6 +119,11 @@ function bandLabel(band) {
 .legend-bands small {
   color: #475569;
   font-size: 11px;
+}
+.legend-direction {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
 }
 .legend-empty {
   margin: 10px 0 0;

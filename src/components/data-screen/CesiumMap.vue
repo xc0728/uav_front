@@ -25,6 +25,7 @@ import {
   filterChartDatasetTree,
   queryChartFeatures,
   queryLod13GridFeatures,
+  queryModelGridFeatures,
   sortChartFeaturesForDisplay,
 } from '../../utils/staticFeatures.js'
 import ChartDatasetTreeNode from './functions/ChartDatasetTreeNode.vue'
@@ -183,6 +184,7 @@ async function selectGridDetail(detail) {
     ...detail,
     features: sortChartFeaturesForDisplay(Array.isArray(detail?.features) ? detail.features : []),
     attributes: detail?.attributes || {},
+    attributeMetadata: detail?.attributeMetadata || {},
     featuresLoading: false,
     attributesLoading: false,
     featuresError: '',
@@ -195,10 +197,22 @@ async function selectGridDetail(detail) {
   gridFeatureRequest = request
   const attributesTask = (async () => {
     if (!selected.datasetId) return
-    // LOD 属性格元代表多个 L17 源格元，不能用粗层编码冒充单个权威格元查询详情。
-    if (selected.attributeAggregation && selected.attributeAggregation !== 'none') return
     selected.attributesLoading = true
     try {
+      // LOD 仅按精确场定义身份刷新普通属性，不将粗格编码当作 L17 格点。
+      if (selected.attributeAggregation && selected.attributeAggregation !== 'none') {
+        if (selected.attributeId) {
+          const result = await attributeRequest('model-properties', {
+            method: 'POST', signal: request.signal,
+            body: { scopeId: 'field', externalKey: `attribute_id:${selected.attributeId}` },
+          })
+          if (!request.signal.aborted && selectedGrid.value === selected && result.enabled) {
+            selected.attributeProperties = result.properties || {}
+            selected.classificationCode = result.properties?.['分类代码'] ?? null
+          }
+        }
+        return
+      }
       const response = await fetch('/api/true-altitude-airspace/grid/cell', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -217,6 +231,11 @@ async function selectGridDetail(detail) {
         throw new Error(body?.message || '场属性查询失败')
       }
       selected.attributes = body?.data?.attributes || {}
+      selected.attributeMetadata = body?.data?.attributeMetadata || {}
+      if (selected.attributeCode && selected.attributeMetadata[selected.attributeCode]) {
+        selected.attributeProperties = selected.attributeMetadata[selected.attributeCode].properties || {}
+        selected.classificationCode = selected.attributeMetadata[selected.attributeCode].classificationCode ?? null
+      }
       const grid = body?.data?.grid || {}
       selected.row = grid.y ?? selected.row
       selected.column = grid.x ?? selected.column
@@ -243,15 +262,17 @@ async function selectGridDetail(detail) {
       mask | (feature.datasetId === LOD13_BUILDING_DATASET_ID ? 2 : 1), 0)
     const sourceMask = Number(selected.chartSourceMask) || cachedSourceMask
     const [staticData, lod13Features] = await Promise.all([
-      sourceMask === 0 || (sourceMask & 1) !== 0
+      !selected.modelSource && (sourceMask === 0 || (sourceMask & 1) !== 0)
         ? queryChartFeatures([selected], {
             signal: request.signal,
             includeRelatedLevels: true,
           })
         : Promise.resolve({ features2D: [], features3D: [], truncated: false }),
-      (sourceMask & 2) !== 0
-        ? queryLod13GridFeatures(selected, { signal: request.signal })
-        : Promise.resolve([]),
+      selected.modelSource
+        ? queryModelGridFeatures(selected, selected.modelSource, { signal: request.signal })
+        : (sourceMask & 2) !== 0
+          ? queryLod13GridFeatures(selected, { signal: request.signal })
+          : Promise.resolve([]),
     ])
     if (request.signal.aborted || selectedGrid.value !== selected) return
     selected.features = sortChartFeaturesForDisplay([...new Map([
@@ -315,6 +336,10 @@ function toGridDetail(cell, bounds, fallbackLevel) {
     overviewColumnTop: cell?.overviewColumnTop,
     chartSourceMask: cell?.chartSourceMask,
     attributeCode: cell?.attributeCode,
+    attributeId: cell?.attributeId,
+    attributeProperties: cell?.attributeProperties || {},
+    classificationCode: cell?.classificationCode ?? null,
+    attributeMetadata: cell?.attributeMetadata || {},
     attributeValue: cell?.attributeValue,
     attributeAggregation: cell?.attributeAggregation,
     lodSourceCellCount: cell?.lodSourceCellCount,
@@ -1766,30 +1791,35 @@ function pickedLod13Attributes(picked, dataset, tilesetInstance) {
       || attributes.Name
       || attributes.name
     return String(attributeId) === String(featureId)
-  }) || dataset.attributes?.[0]
+  })
 
   const properties = { ...(externalAttributes || {}), ...pickedProperties }
   return Object.keys(properties).length ? { title: dataset.label, properties, source: dataset.source || 'lod13' } : null
 }
 
+let modelPropertiesGeneration = 0
 async function refreshModelProperties(detail) {
+  const generation = ++modelPropertiesGeneration
   const key = modelAttributeKey(detail.properties)
-  if (!key) return
+  if (!key) {
+    detail.propertiesError = '模型没有有效的 OID/Id，无法关联维护属性；请通过对应模型网格查看并核对对象编号。'
+    return
+  }
   detail.propertiesLoading = true
   try {
     const result = await attributeRequest('model-properties', {
       method: 'POST', body: { scopeId: detail.source, externalKey: key },
     })
-    if (selectedLod13Feature.value !== detail) return
+    if (selectedLod13Feature.value !== detail || generation !== modelPropertiesGeneration) return
     if (result.enabled) detail.properties = result.properties
     detail.propertiesError = ''
   } catch (error) {
-    if (selectedLod13Feature.value === detail) detail.propertiesError = `最新属性读取失败；下方为模型文件原属性：${error.message}`
-  } finally { detail.propertiesLoading = false }
+    if (selectedLod13Feature.value === detail && generation === modelPropertiesGeneration) detail.propertiesError = `最新属性读取失败；下方为模型文件原属性：${error.message}`
+  } finally { if (generation === modelPropertiesGeneration) detail.propertiesLoading = false }
 }
 
 function refreshEditedObjectAttributes() {
-  if (selectedGrid.value && !selectedGrid.value.attributeGrid) {
+  if (selectedGrid.value) {
     void selectGridDetail(selectedGrid.value)
   } else if (selectedLod13Feature.value) {
     void refreshModelProperties(selectedLod13Feature.value)
@@ -4965,7 +4995,8 @@ onBeforeUnmount(() => {
         <section class="selected-grid-field-attributes">
           <div class="selected-grid-features">场相关属性</div>
           <div v-if="selectedGrid.attributeGrid" class="selected-attribute-current">
-            当前专题：{{ noiseAttributeLabel(selectedGrid.attributeCode) }} ·
+            <div>分类代码：{{ selectedGrid.classificationCode ?? selectedGrid.attributeProperties?.['分类代码'] ?? '未设置' }}</div>
+            当前专题：{{ selectedGrid.attributeProperties?.name || noiseAttributeLabel(selectedGrid.attributeCode) }} ·
             {{ formatNoiseAttribute(selectedGrid.attributeCode, selectedGrid.attributeValue) }}
           </div>
           <div v-if="selectedGrid.attributeAggregation && selectedGrid.attributeAggregation !== 'none'" class="selected-attribute-current">
@@ -4980,8 +5011,10 @@ onBeforeUnmount(() => {
           </div>
           <dl v-else-if="visibleNoiseAttributes(selectedGrid.attributes).length" class="grid-property-list noise-property-list">
             <div v-for="attribute in visibleNoiseAttributes(selectedGrid.attributes)" :key="attribute.code" class="grid-property-row">
-              <dt>{{ attribute.label }}</dt>
-              <dd>{{ formatNoiseAttribute(attribute.code, attribute.value) }}</dd>
+              <dt>{{ selectedGrid.attributeMetadata?.[attribute.code]?.properties?.name || attribute.label }}</dt>
+              <dd>{{ formatNoiseAttribute(attribute.code, attribute.value) }}
+                <div>分类代码：{{ selectedGrid.attributeMetadata?.[attribute.code]?.classificationCode ?? '未设置' }}</div>
+              </dd>
             </div>
           </dl>
           <div v-else-if="!selectedGrid.datasetId">该网格未关联真高空域数据集，暂无可查询的场属性。</div>
@@ -5001,6 +5034,7 @@ onBeforeUnmount(() => {
           <b>{{ chartFeatureLabel(feature) }}</b>
           <span v-if="feature.datasetId">数据集：{{ chartFeatureDatasetLabel(feature) }}</span>
           <span v-if="feature.featureUid">系统要素ID：{{ feature.featureUid }}</span>
+          <span>分类代码：{{ feature.properties?.['分类代码'] ?? '未设置' }}</span>
           <span v-if="feature.featureType">要素分类：{{ chartFeatureTypeLabel(feature.featureType) }}</span>
           <span v-if="featureBusinessType(feature.properties)">类型：{{ featureBusinessType(feature.properties) }}</span>
           <span>{{ chartFeatureDimensionLabel(feature) }}</span>
@@ -5019,7 +5053,8 @@ onBeforeUnmount(() => {
           <span>{{ selectedLod13Feature.title }}属性</span>
           <button type="button" aria-label="关闭模型属性" @click="selectedLod13Feature = null">×</button>
         </div>
-        <div v-for="[key, value] in visibleChartAttributes(selectedLod13Feature.properties)" :key="key">
+        <div>分类代码：{{ selectedLod13Feature.properties?.['分类代码'] ?? '未设置' }}</div>
+        <div v-for="[key, value] in visibleChartAttributes(selectedLod13Feature.properties).filter(([key]) => key !== '分类代码')" :key="key">
           {{ chartAttributeLabel(key) }}：{{ formatPropertyValue(value) }}
         </div>
         <div v-if="selectedLod13Feature.propertiesLoading">正在读取最新对象属性……</div>

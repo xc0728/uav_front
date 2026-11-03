@@ -9,7 +9,6 @@ import { errorMessage } from '../../../utils/http'
 import { getGridVisualStyle } from '../../../utils/cesium/gridVisualStyle'
 import {
   TRUE_ALTITUDE_QUERY_MODE,
-  activeTrueAltitudeDatasets,
   buildTrueAltitudeRegionPayload,
   compactMixedDisplayCells,
   toAirspaceMapCells,
@@ -172,11 +171,13 @@ async function refreshQueryCatalog() {
       attributeCatalogItems.value = items
       // 同步活动版本信息，保留用户已经填写的查询高度范围。
       trueAltitudeDatasets.value = datasets
+      datasetError.value = ''
+      if (!airspaceGridForm.datasetId) airspaceGridForm.datasetId = datasets[0]?.datasetId || ''
       return true
     } catch (err) {
       if (err?.name === 'AbortError' || attributeCatalogController !== controller) return false
-      attributeCatalogItems.value = []
-      attributeCatalogError.value = err?.message || '查询内容目录加载失败'
+      attributeCatalogError.value = (err?.message || '查询内容目录加载失败')
+        + (attributeCatalogItems.value.length ? '；已保留上次成功加载的选项，查询前仍需重新验证目录。' : '')
       return false
     } finally {
       if (attributeCatalogController === controller) {
@@ -305,13 +306,8 @@ async function loadTrueAltitudeDatasets() {
   datasetLoading.value = true
   datasetError.value = ''
   try {
-    const response = await fetch('/api/true-altitude-airspace/datasets')
-    if (!response.ok) throw new Error(await errorMessage(response, `数据集加载失败，状态码 ${response.status}`))
-    const body = await response.json()
-    const datasets = Array.isArray(body?.data?.datasets)
-      ? body.data.datasets
-      : (Array.isArray(body?.datasets) ? body.datasets : [])
-    trueAltitudeDatasets.value = activeTrueAltitudeDatasets(body)
+    const datasets = await loadActiveAttributeDatasets()
+    trueAltitudeDatasets.value = datasets
     const hasSelectedDataset = trueAltitudeDatasets.value.some(
       dataset => dataset.datasetId === airspaceGridForm.datasetId,
     )
@@ -319,12 +315,11 @@ async function loadTrueAltitudeDatasets() {
       airspaceGridForm.datasetId = trueAltitudeDatasets.value[0]?.datasetId || ''
     }
     applyTrueAltitudeDataset(selectedTrueAltitudeDataset.value)
-    if (datasets.length > 0 && trueAltitudeDatasets.value.length === 0) {
-      datasetError.value = '存在真高数据集，但尚无已激活且层级有效的版本'
+    if (datasets.length === 0) {
+      datasetError.value = '当前暂无已激活且层级有效的真高数据集'
     }
   } catch (err) {
     datasetError.value = err?.message || '真高数据集加载失败'
-    trueAltitudeDatasets.value = []
   } finally {
     datasetLoading.value = false
   }
@@ -471,7 +466,7 @@ watch(gridAttributeTopicGroups, groups => {
   resetForm()
   attributeCatalogNotice.value = '原选中属性已停用、删除或未绑定当前活动版本，请重新选择查询内容。'
   emit('showGrid', { cells: [], level: Number(airspaceGridForm.level) })
-}, { flush: 'sync' })
+}, { flush: 'post' })
 
 async function queryAndRenderChartPages(basePayload, controller, options = {}) {
   const startedAt = performance.now()
@@ -655,6 +650,9 @@ async function queryAndRenderTrueAltitudePages(basePayload, controller, options 
       ...cell,
       color: attributeHasStyle ? noiseGridColor(attributeCode, cell.attributeValue) : '#64748b',
       attributeGrid: true,
+      attributeId: data?.data?.attributeId,
+      attributeProperties: data?.data?.attributeProperties || {},
+      classificationCode: data?.data?.classificationCode ?? null,
     } : cell)
     let cells = pageCells
     if (mixed) {
@@ -1371,7 +1369,7 @@ function clearGrids() {
               {{ attributeCatalogLoading ? '加载中...' : '刷新目录' }}
             </button>
           </div>
-          <select v-model="selectedGridAttributeCode" class="level-select" :disabled="loading || dynamicZoomEnabled || attributeCatalogLoading">
+          <select v-model="selectedGridAttributeCode" class="level-select" :disabled="loading || dynamicZoomEnabled || (attributeCatalogLoading && !attributeCatalogItems.length)">
             <option value="">航图实体要素</option>
             <optgroup v-for="group in gridAttributeTopicGroups" :key="group.label" :label="group.label">
               <option
@@ -1411,7 +1409,7 @@ function clearGrids() {
             <div v-if="chartSummary?.sourceMetadata">源日期：{{ chartSummary.sourceMetadata.sourceDate }}；源变量：{{ chartSummary.sourceMetadata.sourceVariable }}；单位：{{ chartSummary.sourceMetadata.unit }}</div>
           </div>
           <div v-if="GRID_ATTRIBUTE_TOPICS.find(item => item.code === selectedGridAttributeCode)?.kind === 'emf'" class="dataset-hint">
-            颜色仅表示电磁场强数值，不代表通信服务质量、导航定位精度或监视探测能力。
+            颜色表示信号覆盖强度：数值越大，信号越好；红色表示较弱，黄色表示中间档，绿色表示较强。
             请先完成对应属性的入库和激活；无结果时请核对场数据目录、空域绑定及查询范围。
           </div>
         </template>
