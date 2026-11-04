@@ -14,6 +14,7 @@ import {
 import { errorMessage } from '../../../utils/http'
 import FieldAttributeManager from './FieldAttributeManager.vue'
 import ObjectAttributeManager from './ObjectAttributeManager.vue'
+import FormalElementManager from './FormalElementManager.vue'
 
 const emit = defineEmits(['import-field'])
 const catalogMode = ref('features')
@@ -290,9 +291,11 @@ onBeforeUnmount(() => {
         <button type="button" :class="{ active: catalogMode === 'features' }" @click="catalogMode = 'features'">实体要素</button>
         <button type="button" :class="{ active: catalogMode === 'fields' }" @click="catalogMode = 'fields'">场数据（噪声 / 监视覆盖）</button>
         <button type="button" :class="{ active: catalogMode === 'attributes' }" @click="catalogMode = 'attributes'">属性维护 / 回滚</button>
+        <button type="button" :class="{ active: catalogMode === 'formal' }" @click="catalogMode = 'formal'">正式要素增删</button>
       </div>
     </div>
     <FieldAttributeManager v-if="catalogMode === 'fields'" @import-field="emit('import-field', $event)" />
+    <FormalElementManager v-else-if="catalogMode === 'formal' || (catalogMode === 'attributes' && selected?.managed)" :initial-collection-id="selectedId" />
     <ObjectAttributeManager v-else-if="catalogMode === 'attributes'" :dataset-id="selectedId" />
     <template v-else>
     <div class="summary-grid">
@@ -359,7 +362,8 @@ onBeforeUnmount(() => {
         <div v-if="selected.minHeight !== null || selected.maxHeight !== null" class="detail-section"><h4>高度范围</h4><p>{{ selected.minHeight ?? '-' }} m — {{ selected.maxHeight ?? '-' }} m</p></div>
         <div class="detail-section timeline"><h4>时间信息</h4><p>创建：{{ formatTime(selected.createdAt) }}</p><p>更新：{{ formatTime(selected.updatedAt) }}</p><p v-if="selected.lastOperation">最近操作：{{ OPERATION_LABELS[selected.lastOperation.operation] || selected.lastOperation.operation }} · {{ formatTime(selected.lastOperation.createdAt) }}</p><small v-if="selected.lastOperation?.reason">{{ selected.lastOperation.reason }}</small></div>
         <div class="action-area">
-          <button v-if="selected.state === 'active'" class="danger-button" type="button" @click="openAction('retire', selected)"><Trash2 :size="16" />退役删除</button>
+          <button v-if="selected.managed" type="button" class="restore-button" @click="catalogMode = 'formal'">管理此集合中的对象</button>
+          <button v-else-if="selected.state === 'active'" class="danger-button" type="button" @click="openAction('retire', selected)"><Trash2 :size="16" />退役删除</button>
           <template v-else>
             <button class="restore-button" type="button" :disabled="!selected.availableRevision" @click="openAction('restore', selected)"><ArchiveRestore :size="16" />恢复上线</button>
             <button class="purge-button" type="button" @click="openAction('purge', selected)"><Trash2 :size="16" />永久清理</button>

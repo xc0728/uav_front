@@ -50,6 +50,53 @@ import {
 import { LEGACY_BUILDING_MODEL_SOURCE } from '../../utils/modelGridSources.js'
 import { attributeRequest, modelAttributeKey } from '../../utils/objectAttributes.js'
 
+// 正式维护使用独立图层，不清空既有查询或模型资源。
+let formalDataSource = null
+function renderFormalElements(event) {
+  if (!viewer || viewer.isDestroyed()) return
+  const data = event.detail
+  if (!data || !Array.isArray(data.cells)) return
+  if (!formalDataSource) {
+    formalDataSource = new Cesium.CustomDataSource('formal-elements')
+    viewer.dataSources.add(formalDataSource)
+  }
+  formalDataSource.entities.removeAll()
+  const groups = new Map()
+  for (const cell of data.cells) {
+    if (!groups.has(cell.code)) groups.set(cell.code, { ...cell, features: [] })
+    groups.get(cell.code).features.push(...(cell.features || []))
+  }
+  for (const cell of groups.values()) {
+    if (![cell.minlon, cell.maxlon, cell.minlat, cell.maxlat, cell.bottom, cell.top].every(Number.isFinite)) continue
+    const entity = formalDataSource.entities.add({
+      id: 'formal:' + data.collectionId + ':' + cell.code,
+      name: data.preview ? '候选网格（尚未发布）' : '正式维护网格',
+      rectangle: { coordinates: Cesium.Rectangle.fromDegrees(cell.minlon,cell.minlat,cell.maxlon,cell.maxlat),
+        height: cell.bottom, extrudedHeight: cell.top,
+        material: (data.preview ? Cesium.Color.ORANGE : data.collectionId === 'managed_prohibited' ? Cesium.Color.RED : Cesium.Color.CYAN).withAlpha(0.28) },
+    })
+    entity.__chartGridDetail = { code: cell.code, level: cell.level, datasetId: data.collectionId,
+      managed: true, managedRevision: data.revision, preview: data.preview,
+      features: cell.features, classificationCode: cell.classificationCode,
+      bounds: { west: cell.minlon,east:cell.maxlon,south:cell.minlat,north:cell.maxlat,bottom:cell.bottom,top:cell.top } }
+  }
+  viewer.scene.requestRender()
+}
+function invalidateFormalElements() {
+  formalDataSource?.entities.removeAll()
+  if (selectedGrid.value?.managed) clearSelectedGridSelection()
+  viewer?.scene?.requestRender()
+}
+onMounted(() => {
+  window.addEventListener('formal-element-grids',renderFormalElements)
+  window.addEventListener('formal-elements-changed',invalidateFormalElements)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('formal-element-grids',renderFormalElements)
+  window.removeEventListener('formal-elements-changed',invalidateFormalElements)
+  formalDataSource=null
+})
+
 // 模块级别的存储（持久化，不随组件销毁而丢失）
 const routeGridEntities = {}
 let buildingModels = []       // 建筑白膜数据
@@ -192,6 +239,7 @@ async function selectGridDetail(detail) {
     featuresTruncated: false,
   }
   const selected = selectedGrid.value
+  if (selected.managed) { showSelectedGridHighlight(selected); return }
   showSelectedGridHighlight(selected)
   const request = new AbortController()
   gridFeatureRequest = request
@@ -327,6 +375,8 @@ function toGridDetail(cell, bounds, fallbackLevel) {
     aglCenter: cell?.aglCenter,
     datasetId: cell?.datasetId,
     datasetVersion: cell?.datasetVersion,
+    managed: cell?.managed === true || ((cell?.features?.length || 0) > 0 && cell.features.every(feature => feature.managed)),
+    revision: cell?.revision,
     overviewColumn: cell?.overviewColumn === true,
     overviewCellCount: cell?.overviewCellCount,
     sourceCellCount: cell?.sourceCellCount,

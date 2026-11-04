@@ -1,3 +1,4 @@
+import { queryManagedCells } from './elementMaintenance.js'
 import { errorMessage } from './http.js'
 import { getModelGridSource, LEGACY_BUILDING_MODEL_SOURCE, MODEL_GRID_SOURCES } from './modelGridSources.js'
 
@@ -519,13 +520,25 @@ export async function queryChartSourcePages(payload, { signal, onPage } = {}) {
   const requestedModelSources = requestedIds
     .map(id => MODEL_GRID_SOURCE_BY_DATASET_ID.get(id))
     .filter(Boolean)
-  const staticIds = requestedIds.filter(id => !MODEL_GRID_SOURCE_BY_DATASET_ID.has(id))
+  const managedIds = requestedIds.filter(id => id.startsWith('managed_'))
+  const staticIds = requestedIds.filter(id => !MODEL_GRID_SOURCE_BY_DATASET_ID.has(id) && !id.startsWith('managed_'))
   const states = [
     ...(staticIds.length ? [{
       name: 'static', cursor: undefined, watermark: undefined, hasMore: true,
       done: false, initialized: false, buffer: [], response: null,
       query: cursor => queryChartRegion({ ...payload, datasetIds: staticIds }, { signal, cursor }),
     }] : []),
+    ...managedIds.map(id => {
+      let revision
+      return { name: id, opaqueCursor: true, cursor: undefined, watermark: undefined, hasMore: true,
+        done: false, initialized: false, buffer: [], response: null,
+        query: async cursor => {
+          const response = await queryManagedCells(payload, id, { signal, cursor, revision })
+          revision = response.data.revision
+          return response
+        },
+      }
+    }),
     ...requestedModelSources.map(source => ({
       name: `model_grid_${source}`, cursor: undefined, watermark: undefined, hasMore: true,
       done: false, initialized: false, buffer: [], response: null,
@@ -543,7 +556,7 @@ export async function queryChartSourcePages(payload, { signal, onPage } = {}) {
     if (data.hasMore === true && !scannedCursor) {
       throw new Error(`${state.name} 航图分页返回 hasMore，但当前页没有可推进游标`)
     }
-    if (scannedCursor && state.cursor && scannedCursor <= state.cursor) {
+    if (scannedCursor && (state.opaqueCursor ? state.watermark : state.cursor) && scannedCursor <= (state.opaqueCursor ? state.watermark : state.cursor)) {
       throw new Error(`${state.name} 航图分页游标没有向前推进`)
     }
     state.response = response
@@ -552,7 +565,7 @@ export async function queryChartSourcePages(payload, { signal, onPage } = {}) {
     state.hasMore = data.hasMore === true
     state.done = !state.hasMore
     if (scannedCursor) {
-      state.cursor = scannedCursor
+      state.cursor = state.opaqueCursor ? data.nextCursor : scannedCursor
       state.watermark = scannedCursor
     }
   }
@@ -585,7 +598,7 @@ export async function queryChartSourcePages(payload, { signal, onPage } = {}) {
     const staticResponse = states.find(state => state.name === 'static')?.response
     const modelGridResponse = states.find(state => state.name.startsWith('model_grid_'))?.response
     const data = {
-      ...(staticResponse?.data || modelGridResponse?.data || {}),
+      ...(staticResponse?.data || modelGridResponse?.data || states[0]?.response?.data || {}),
       cells,
       matchedCount: cells.length,
       mappingCount: features.length,
@@ -597,7 +610,7 @@ export async function queryChartSourcePages(payload, { signal, onPage } = {}) {
         .map(feature => `${feature.datasetId}\u0000${feature.code}`)).size,
       hasMore: pending,
       nextCursor: pending ? (boundary || committedCursor) : null,
-      dataSource: 'clickhouse',
+      dataSource: managedIds.length ? 'mixed' : 'clickhouse',
       pageIndex,
     }
     const page = { status: 'success', success: true, data }
@@ -636,7 +649,7 @@ export async function queryChartSources(payload, { signal } = {}) {
       hasMore: false,
       nextCursor: null,
       truncated: false,
-      dataSource: 'clickhouse',
+      dataSource: firstData.dataSource || 'clickhouse',
       pageCount: pages.length,
     },
   }
