@@ -30,6 +30,9 @@ import {
 } from '../../utils/staticFeatures.js'
 import ChartDatasetTreeNode from './functions/ChartDatasetTreeNode.vue'
 import ChartLegend from './functions/ChartLegend.vue'
+import ConflictCheckOptions from './functions/ConflictCheckOptions.vue'
+import ConflictCheckResult from './functions/ConflictCheckResult.vue'
+import { createConflictForm, buildConflictPayload, requestConflictCheck, conflictDisplayGrids, conflictReasonsText, scenarioPlanningCondition } from '../../utils/conflictCheck.js'
 import InstancedGridRenderer from '../../utils/cesium/InstancedGridRenderer.js'
 import GridRendererManager, { GRID_RENDERER } from '../../utils/cesium/GridRendererManager.js'
 import { buildGridHighlightPaths } from '../../utils/cesium/gridHighlight.js'
@@ -563,6 +566,7 @@ const onFenceConfirmCallback = ref(null)
 const emit = defineEmits(['point-selected', 'fence-confirm', 'box-select-start', 'box-select-end', 'get-view-bounds', 'flight-start', 'flight-end', 'view-bounds-changed'])
 
 const props = defineProps({
+  routePointPicking: { type: Boolean, default: false },
   show3DToggle: {
     type: Boolean,
     default: true,
@@ -587,6 +591,9 @@ let boxSelectEntity = null
 // 场景演示常量
 const SCENARIO_CENTER = { lon: 119.9725, lat: 30.5449 }
 const SCENARIO_RADIUS_KM = 3
+
+const scenarioConflictForm = reactive(createConflictForm())
+let scenarioConflictController
 
 // 场景演示状态
 const scenarioState = reactive({
@@ -2042,6 +2049,7 @@ function openScenarioDemo() {
 
 /** 关闭/取消场景演示（通用全量重置） */
 function closeScenarioDemo() {
+  scenarioConflictController?.abort()
   if (currentFlightAnim) {
     if (currentFlightAnim.rafId) cancelAnimationFrame(currentFlightAnim.rafId)
     if (currentFlightAnim.entity && viewer) viewer.entities.remove(currentFlightAnim.entity)
@@ -2067,6 +2075,7 @@ function closeScenarioDemo() {
 /** 下一步 */
 function nextScenarioStep() {
   if (scenarioState.dialogType === 'intro') {
+    if (!scenarioConflictForm.datasetId || !scenarioConflictForm.catalogLoaded) return
     scenarioState.dialogType = 'location'
   } else if (scenarioState.dialogType === 'location' && scenarioState.incidentLocation) {
     scenarioState.step = 3
@@ -2094,6 +2103,10 @@ let currentStartToken = 0
 
 /** 放飞无人机：沿A*路径飞行（医院 → 事故地点） */
 function releaseDrone() {
+  if (scenarioState.conflictResult?.hasConflict !== false) {
+    alert('尚未取得所选条件下的检测通过结果')
+    return
+  }
   const pathData = scenarioState.astarRoute
   if (!pathData || pathData.length === 0) {
     alert('无航线数据')
@@ -2251,6 +2264,7 @@ function doFlightAnimation(droneImg, centers) {
 }
 
 function cancelFlight() {
+  scenarioConflictController?.abort()
   // 停止飞行动画
   if (currentFlightAnim) {
     if (currentFlightAnim.rafId) {
@@ -2571,6 +2585,7 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 
 /** 执行航线规划 */
 async function executeRoutePlanning() {
+  scenarioConflictController?.abort()
   const incident = scenarioState.incidentLocation
   const runToken = ++currentPlanningToken
   const runStartToken = currentStartToken
@@ -2581,7 +2596,7 @@ async function executeRoutePlanning() {
     if (runToken !== currentPlanningToken) return
     scenarioState.nearestHospital = hospital
 
-    // 2. 准备直线航线点（高度10m，层级14）
+    // 2. 准备直线航线点（绝对高程10m，检测和显示统一 L17）
     const linePoints = [
       [hospital.lon, hospital.lat, 10],
       [incident.lon, incident.lat, 10]
@@ -2599,7 +2614,7 @@ async function executeRoutePlanning() {
     }
 
     // 4. 调用冲突检测API
-    const conflictResult = await checkRouteConflict(linePoints)
+    const conflictResult = await checkRouteConflict(linePoints, gridData.cells || [])
     if (runToken !== currentPlanningToken) return
     scenarioState.conflictResult = conflictResult
 
@@ -2607,7 +2622,7 @@ async function executeRoutePlanning() {
     if (runStartToken !== currentStartToken) return
 
     if (conflictResult.hasConflict) {
-      if (gridData.cells && gridData.cells.length > 0) drawGridRoute(gridData, scenarioEntityIds)
+      if (gridData.cells && gridData.cells.length > 0) drawGridRoute(gridData, scenarioEntityIds, '#64748b')
       if (conflictResult.conflictCell) drawConflictCell(conflictResult.conflictCell, scenarioEntityIds)
       scenarioState.dialogType = 'conflict'
     } else {
@@ -2628,50 +2643,19 @@ async function executeRoutePlanning() {
 }
 
 /** 调用冲突检测API */
-async function checkRouteConflict(points) {
-  const payload = {
-    startTime: Math.floor(Date.now() / 1000),
-    points: points,
-    level: 14,
-    planeRadius: 0.75,
-    speed: 15.0,
-    workHeight: 100,
-    condition: {
-      gd_14: "",
-      dz_14: ""
-    }
-  }
-
-  try {
-    console.log('[ScenarioDemo] 调用冲突检测API:', payload)
-
-    const resp = await fetch('/api/airRoute/lineConflict/checkFirst', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-
-    const data = await resp.json()
-    console.log('[ScenarioDemo] 冲突检测结果:', data)
-
-    // 检查是否有冲突
-    const hasConflict = resp.status === 400 || data.status === 'conflict'
-
-    // 提取冲突格网信息
-    let conflictCell = null
-    if (hasConflict) {
-      conflictCell = data.grid || data.conflictCell || data.cell || null
-    }
-
-    return {
-      hasConflict,
-      reason: data.reason || data.message || (hasConflict ? '检测到航线冲突' : ''),
-      grid: data.grid,
-      conflictCell
-    }
-  } catch (err) {
-    console.error('[ScenarioDemo] 冲突检测失败:', err)
-    return { hasConflict: false, reason: '', grid: null, conflictCell: null }
+async function checkRouteConflict(points, pathCells) {
+  const payload = buildConflictPayload(scenarioConflictForm, points, 'FIRST')
+  const current = new AbortController()
+  scenarioConflictController = current
+  const data = await requestConflictCheck(payload, { signal: current.signal })
+  const first = conflictDisplayGrids(data, pathCells)[0]
+  const hasBounds = first && [first.minlon, first.maxlon, first.minlat, first.maxlat, first.bottom, first.top].every(Number.isFinite)
+  return {
+    details: { data, mode: 'FIRST', grids: conflictDisplayGrids(data, pathCells) },
+    hasConflict: data.conflict,
+    reason: data.conflict ? conflictReasonsText(first?.reasons) : '所选条件下未发现冲突',
+    grid: first || null,
+    conflictCell: hasBounds ? first : null,
   }
 }
 
@@ -2679,7 +2663,7 @@ async function checkRouteConflict(points) {
 async function getGridByLine(points) {
   const payload = {
     line: points,
-    level: 14
+    level: 17
   }
 
   try {
@@ -2976,6 +2960,7 @@ function createIncidentMarkerImage() {
 
 /** 启动A*航路规划 */
 async function startAstarPlanning() {
+  scenarioConflictController?.abort()
   const incident = scenarioState.incidentLocation
   const hospital = scenarioState.nearestHospital
   const runToken = ++currentPlanningToken
@@ -2995,18 +2980,20 @@ async function startAstarPlanning() {
       [incident.lon, incident.lat, startHeight],
       [hospital.lon, hospital.lat, endHeight]
     ],
-    level: 14,
+    level: 17,
     planeRadius: 0.75,
     speed: 15.0,
     workHeight: 100,
-    condition: {
-      gd_14: "",
-      dz_14: ""
-    }
+    condition: {}
   }
 
   try {
-    const resp = await fetch('/api/airRoute/Astar/AstarPathPlane', {
+    const selected = buildConflictPayload(scenarioConflictForm, payload.points, 'FIRST')
+    payload.airspaceId = selected.datasetId
+    if (selected.datasetVersion) payload.version = selected.datasetVersion
+    if (selected.stateRevision) payload.airspaceVersion = selected.stateRevision
+    payload.condition = scenarioPlanningCondition(scenarioConflictForm, selected)
+    const resp = await fetch('/api/airRoute/Astar/AstarPathPlaneClickHouse', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -3018,31 +3005,41 @@ async function startAstarPlanning() {
     if (runToken !== currentPlanningToken) return
     if (runStartToken !== currentStartToken) return
 
-    if (data.results?.success) {
-      scenarioState.astarRoute = data.results.path
-
-      // 清除旧直线航线、蓝色格网和冲突格网（含 cell 实体）
-      viewer.entities.removeById('scenario-line-route')
-      viewer.entities.removeById('scenario-grid-route')
-      viewer.entities.removeById('scenario-conflict-cell')
-      for (let i = 0; i < scenarioEntityIds.length; i++) {
-        const id = scenarioEntityIds[i]
-        if (id.startsWith('scenario-grid-cell-') || id === 'scenario-conflict-cell') {
+    if (resp.ok && data.results?.success) {
+      // 规划完成后按同一组模型、航图和环境阈值复检，不能直接将规划成功视作检测通过。
+      const candidate = data.results.path
+      if (!Array.isArray(candidate) || candidate.length < 2) throw new Error('A* 未返回有效航迹')
+      const checked = await checkRouteConflict(candidate.map(cell => cell.center), candidate)
+      if (runToken !== currentPlanningToken || runStartToken !== currentStartToken) return
+      scenarioState.conflictResult = checked
+      // 只替换航迹和冲突图层，保留医院与事故位置等场景实体。
+      for (const id of ['scenario-line-route', 'scenario-grid-route', 'scenario-conflict-cell', 'scenario-conflict-marker']) viewer.entities.removeById(id)
+      for (let index = scenarioEntityIds.length - 1; index >= 0; --index) {
+        const id = scenarioEntityIds[index]
+        if (id.startsWith('scenario-grid-cell-') || id.startsWith('scenario-conflict-') || id === 'scenario-line-route') {
           viewer.entities.removeById(id)
+          scenarioEntityIds.splice(index, 1)
         }
       }
-      scenarioEntityIds.splice(0)
+      if (checked.hasConflict) {
+        scenarioState.astarRoute = null
+        scenarioState.dialogType = 'conflict'
+        drawGridRoute({ cells: candidate }, scenarioEntityIds, '#64748b')
+        if (checked.conflictCell) drawConflictCell(checked.conflictCell, scenarioEntityIds)
+        return
+      }
+      scenarioState.astarRoute = candidate
 
       // 用 A* 返回的 path 绘制绿色格网路径
       drawGridRoute({ cells: data.results.path }, scenarioEntityIds, '#22c55e')
       scenarioState.dialogType = 'result'
     } else {
       if (runToken !== currentPlanningToken || runStartToken !== currentStartToken) return
-      alert('A*规划失败: ' + (data.results?.reason || '未知错误'))
+      alert('A*规划失败: ' + (data.message || data.results?.reason || '未知错误'))
     }
   } catch (err) {
     if (runToken !== currentPlanningToken || runStartToken !== currentStartToken) return
-    alert('A*规划请求失败')
+    alert('A*规划或复检失败：' + (err?.message || '请求失败'))
   } finally {
     if (runToken === currentPlanningToken) {
       scenarioState.planningLoading = false
@@ -4816,7 +4813,7 @@ onMounted(async () => {
   handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas)
   handler.setInputAction((movement) => {
     if (!viewer) return
-    const cartesian = viewer.scene.pickPosition(movement.endPosition)
+    const cartesian = pickMapCartesian(movement.endPosition)
     if (!cartesian) {
       lon.value = null
       lat.value = null
@@ -4830,6 +4827,66 @@ onMounted(async () => {
     height.value = cartographic.height
   }, Cesium.ScreenSpaceEventType.MOUSE_MOVE)
 
+  function pickMapCartesian(position) {
+    let cartesian
+    if (viewer.scene.pickPositionSupported) {
+      try { cartesian = viewer.scene.pickPosition(position) } catch { /* 无深度数据时使用地形或椭球 */ }
+    }
+    if (!cartesian) {
+      const ray = viewer.camera.getPickRay(position)
+      if (ray) cartesian = viewer.scene.globe.pick(ray, viewer.scene)
+    }
+    if (!cartesian) cartesian = viewer.camera.pickEllipsoid(position, viewer.scene.globe.ellipsoid)
+    return cartesian
+  }
+
+  // 模型、地形、纯底图均可选点；不依赖深度缓冲始终可用。
+  function selectMapPoint(position) {
+    // 获取点击位置的 cartesian 坐标
+    const cartesian = pickMapCartesian(position)
+    if (!cartesian) return
+
+    let pickedLon, pickedLat, pickedHeight
+
+    // 尝试从 pickPosition 获取高度
+    const cartographic = Cesium.Cartographic.fromCartesian(cartesian)
+    pickedLon = Cesium.Math.toDegrees(cartographic.longitude)
+    pickedLat = Cesium.Math.toDegrees(cartographic.latitude)
+    pickedHeight = cartographic.height
+
+    // 如果高度无效或为0，尝试从地形获取
+    if (!pickedHeight || pickedHeight < 0 || !isFinite(pickedHeight)) {
+      try {
+        const terrainHeight = viewer.scene.globe.getHeight(cartographic)
+        if (terrainHeight && isFinite(terrainHeight)) {
+          pickedHeight = terrainHeight
+        }
+      } catch (e) {
+        // 忽略错误
+      }
+    }
+
+    // 确保高度有效且为正数
+    if (!pickedHeight || pickedHeight <= 0 || !isFinite(pickedHeight)) {
+      pickedHeight = 100
+    }
+
+    // 保留高精度小数位
+    pickedLon = Number(pickedLon.toFixed(10))
+    pickedLat = Number(pickedLat.toFixed(10))
+    pickedHeight = Number(pickedHeight.toFixed(1))
+
+    lon.value = pickedLon
+    lat.value = pickedLat
+    height.value = pickedHeight
+
+    emit('point-selected', {
+      lon: pickedLon,
+      lat: pickedLat,
+      height: pickedHeight,
+    })
+  }
+
   // 处理鼠标点击
   function handleMouseClick(movement) {
     if (!viewer) return
@@ -4837,6 +4894,10 @@ onMounted(async () => {
     // 如果处于场景演示模式且正在选择地点，交给场景演示处理
     if (scenarioState.active && scenarioState.dialogType === 'location') {
       handleScenarioMapClick(movement)
+      return
+    }
+    if (props.routePointPicking) {
+      selectMapPoint(movement.position)
       return
     }
 
@@ -4904,49 +4965,7 @@ onMounted(async () => {
     clearSelectedGridSelection()
     selectedLod13Feature.value = null
 
-    // 获取点击位置的 cartesian 坐标
-    const cartesian = viewer.scene.pickPosition(movement.position)
-    if (!cartesian) return
-
-    let pickedLon, pickedLat, pickedHeight
-
-    // 尝试从 pickPosition 获取高度
-    const cartographic = Cesium.Cartographic.fromCartesian(cartesian)
-    pickedLon = Cesium.Math.toDegrees(cartographic.longitude)
-    pickedLat = Cesium.Math.toDegrees(cartographic.latitude)
-    pickedHeight = cartographic.height
-
-    // 如果高度无效或为0，尝试从地形获取
-    if (!pickedHeight || pickedHeight < 0 || !isFinite(pickedHeight)) {
-      try {
-        const terrainHeight = viewer.scene.globe.getHeight(cartographic)
-        if (terrainHeight && isFinite(terrainHeight)) {
-          pickedHeight = terrainHeight
-        }
-      } catch (e) {
-        // 忽略错误
-      }
-    }
-
-    // 确保高度有效且为正数
-    if (!pickedHeight || pickedHeight <= 0 || !isFinite(pickedHeight)) {
-      pickedHeight = 100
-    }
-
-    // 保留高精度小数位
-    pickedLon = Number(pickedLon.toFixed(10))
-    pickedLat = Number(pickedLat.toFixed(10))
-    pickedHeight = Number(pickedHeight.toFixed(1))
-
-    lon.value = pickedLon
-    lat.value = pickedLat
-    height.value = pickedHeight
-
-    emit('point-selected', {
-      lon: pickedLon,
-      lat: pickedLat,
-      height: pickedHeight,
-    })
+    selectMapPoint(movement.position)
   }
 
   handler.setInputAction((movement) => {
@@ -4967,6 +4986,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  scenarioConflictController?.abort()
   window.removeEventListener('object-attributes-updated', refreshEditedObjectAttributes)
   gridFeatureRequest?.abort()
   clearSelectedGridSelection()
@@ -5340,6 +5360,13 @@ onBeforeUnmount(() => {
             <div class="step-content">为伤者提供及时的急救支持</div>
           </div>
         </div>
+        <details>
+          <summary>冲突检测数据集与环境条件（L17）</summary>
+          <div style="max-height: 280px; overflow-y: auto">
+            <ConflictCheckOptions :form="scenarioConflictForm" />
+          </div>
+        </details>
+        <p style="font-size: 12px">{{ scenarioConflictForm.datasetId ? `检测数据集：${scenarioConflictForm.datasetId}` : '请展开检测条件，选择活动的 L17 数据集' }}</p>
         <div class="scenario-urgency">
           <div class="urgency-bar"></div>
           <span>这是一场与时间赛跑的生命救援</span>
@@ -5348,7 +5375,7 @@ onBeforeUnmount(() => {
       </div>
       <div class="location-card-footer">
         <button class="scenario-btn cancel small" @click="closeScenarioDemo">取消</button>
-        <button class="scenario-btn primary small" @click="nextScenarioStep">
+        <button class="scenario-btn primary small" @click="nextScenarioStep" :disabled="!scenarioConflictForm.datasetId || !scenarioConflictForm.catalogLoaded">
           <span class="btn-icon">&#x25B6;</span>
           开始演示
         </button>
@@ -5409,7 +5436,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <div class="result-success-badge">
-            <span>&#x2714;</span> 航线已生成，允许放飞无人机
+            <span>&#x2714;</span> 所选条件检测通过，可演示飞行
           </div>
         </div>
       </div>
@@ -5434,7 +5461,10 @@ onBeforeUnmount(() => {
           <div class="conflict-reason">
             {{ scenarioState.conflictResult?.reason || '检测到障碍物' }}
           </div>
-          <p class="conflict-question">是否启用 A* 智能航路规划绕开障碍物？</p>
+          <div v-if="scenarioState.conflictResult?.details" style="max-height: 240px; overflow-y: auto">
+            <ConflictCheckResult :result="scenarioState.conflictResult.details" />
+          </div>
+          <p class="conflict-question">可尝试 A* 绕行；生成航迹后将按同一组条件复检。</p>
         </div>
       </div>
       <div class="location-card-footer">
@@ -6447,6 +6477,19 @@ onBeforeUnmount(() => {
 
 /* ==================== 结果展示卡片 ==================== */
 .scenario-result-card {
+  --panel-card-bg: #0f172a;
+  --panel-card-border: #475569;
+  --panel-text: #cbd5e1;
+  --panel-text-strong: #f1f5f9;
+  --panel-input-bg: #1e293b;
+  --panel-input-border: #64748b;
+  --panel-btn-secondary-bg: #1e293b;
+  --panel-btn-secondary-text: #f1f5f9;
+  --panel-btn-secondary-border: #64748b;
+  --panel-muted: #cbd5e1;
+  --panel-card-hover-bg: #334155;
+  --panel-danger-bg: rgba(239, 68, 68, 0.15);
+  --panel-primary: #60a5fa;
   position: fixed;
   top: 80px;
   right: 20px;
