@@ -32,7 +32,7 @@ import ChartDatasetTreeNode from './functions/ChartDatasetTreeNode.vue'
 import ChartLegend from './functions/ChartLegend.vue'
 import ConflictCheckOptions from './functions/ConflictCheckOptions.vue'
 import ConflictCheckResult from './functions/ConflictCheckResult.vue'
-import { createConflictForm, buildConflictPayload, requestConflictCheck, conflictDisplayGrids, conflictReasonsText, scenarioPlanningCondition } from '../../utils/conflictCheck.js'
+import { createConflictForm, buildConflictPayload, requestConflictCheck, conflictDisplayGrids, conflictReasonsText, buildAstarPayload, requestAstarPath } from '../../utils/conflictCheck.js'
 import InstancedGridRenderer from '../../utils/cesium/InstancedGridRenderer.js'
 import GridRendererManager, { GRID_RENDERER } from '../../utils/cesium/GridRendererManager.js'
 import { buildGridHighlightPaths } from '../../utils/cesium/gridHighlight.js'
@@ -3002,38 +3002,17 @@ async function startAstarPlanning() {
   // OSGB网格可能仍标记该格子为障碍，需叠加一个安全余量
   const endHeight = Math.max(10, (hospital.building?.height || 30) + 1) + 30
 
-  const payload = {
-    startTime: Math.floor(Date.now() / 1000),
-    points: [
-      [incident.lon, incident.lat, startHeight],
-      [hospital.lon, hospital.lat, endHeight]
-    ],
-    level: 17,
-    planeRadius: 0.75,
-    speed: 15.0,
-    workHeight: 100,
-    condition: {}
-  }
-
   try {
-    const selected = buildConflictPayload(scenarioConflictForm, payload.points, 'FIRST')
-    payload.airspaceId = selected.datasetId
-    if (selected.datasetVersion) payload.version = selected.datasetVersion
-    if (selected.stateRevision) payload.airspaceVersion = selected.stateRevision
-    payload.condition = scenarioPlanningCondition(scenarioConflictForm, selected)
-    const resp = await fetch('/api/airRoute/Astar/AstarPathPlaneClickHouse', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-
-    const data = await resp.json()
+    const payload = buildAstarPayload(scenarioConflictForm, [
+      [incident.lon, incident.lat, startHeight], [hospital.lon, hospital.lat, endHeight],
+    ])
+    const data = await requestAstarPath(payload)
 
     // 门卫：旧请求直接丢弃
     if (runToken !== currentPlanningToken) return
     if (runStartToken !== currentStartToken) return
 
-    if (resp.ok && data.results?.success) {
+    if (data.results?.success) {
       // 规划完成后按同一组模型、航图和环境阈值复检，不能直接将规划成功视作检测通过。
       const candidate = data.results.path
       if (!Array.isArray(candidate) || candidate.length < 2) throw new Error('A* 未返回有效航迹')

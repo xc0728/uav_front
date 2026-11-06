@@ -134,11 +134,35 @@ export function buildCatalogRules(form, timestamp) {
   })
 }
 
-// A* 只接收其支持的候选约束；完整目录规则始终在生成路线后复检。
-export function scenarioPlanningCondition(form, payload) {
-  if (!payload.rules) return Object.fromEntries(Object.entries(payload.checks).filter(([key, enabled]) => enabled && key.endsWith('_17')).map(([key]) => [key, '']))
-  const items = new Map(form.catalogItems.map(item => [item.id, item]))
-  return Object.fromEntries(payload.rules.map(rule => items.get(rule.elementId)?.planningKey).filter(Boolean).map(key => [key, '']))
+// 直接携带完整目录规则，禁止将阈值/方式压缩成旧布尔开关。
+export function buildAstarPayload(form, points, aircraft = {}) {
+  const payload = buildConflictPayload(form, points, 'ALL')
+  delete payload.mode
+  payload.planeRadius = finiteNumber(aircraft.planeRadius ?? 0.75, '无人机半径')
+  payload.cruisingSpeed = finiteNumber(aircraft.speed ?? 15, '飞行速度')
+  if (payload.planeRadius < 0 || payload.cruisingSpeed <= 0) throw new Error('半径不能为负数，飞行速度必须为正数')
+  payload.startTime = payload.timestamp || Math.floor(Date.now() / 1000)
+  return payload
+}
+
+export async function requestAstarPath(payload, options) {
+  const body = await fetchJson('/api/airRoute/Astar/AstarPathPlaneClickHouse', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  }, { timeoutMs: 120000, ...options })
+  const check = body.conflictCheck
+  if (body.ruleMode !== 'catalog' || body.results?.success !== true || !Array.isArray(body.results.path) || !body.results.path.length
+      || check?.ruleMode !== 'catalog' || check.conflict !== false || check.level !== 17 || check.datasetId !== payload.datasetId
+      || !Array.isArray(check.conflicts) || check.conflicts.length || check.conflictGridCount !== 0
+      || !Number.isSafeInteger(check.checkedGridCount) || check.checkedGridCount < new Set(body.results.path.map(cell => cell.code)).size
+      || !Array.isArray(check.appliedRules) || check.appliedRules.length !== payload.rules.length
+      || payload.rules.some(rule => !check.appliedRules.some(applied => Object.entries(rule).every(([key, value]) => JSON.stringify(applied[key]) === JSON.stringify(value))))
+      || (payload.datasetVersion !== undefined && check.datasetVersion !== payload.datasetVersion)
+      || (payload.stateRevision !== undefined && check.stateRevision !== payload.stateRevision)
+      || body.results.path.some(cell => !/^[0-7]{17}$/.test(String(cell.code || '').replace(/^dqg/, ''))
+        || ![cell.minlon, cell.maxlon, cell.minlat, cell.maxlat, cell.bottom, cell.top].every(Number.isFinite))) {
+    throw new Error('规划响应缺少完整目录规则复检，未确认航迹可用')
+  }
+  return body
 }
 
 export async function requestConflictCatalog(form, options) {
