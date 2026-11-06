@@ -309,8 +309,86 @@ export function sortChartFeaturesForDisplay(features) {
   return regularFeatures.concat(trailingFeatures)
 }
 
-export function chartFeatureColor(feature) {
-  return DATASETS_BY_ID.get(feature.datasetId)?.color || THEME_COLORS[feature?.theme] || '#38bdf8'
+// 航路按绝对高程连续配色：0 m 青蓝、300 m 橙黄、600 m 紫红。
+// 使用服务端高度范围，避免读取源文件中可能为空或为零的 height 属性。
+const AIR_ROUTE_HEIGHT_COLORS = [
+  { height: 0, rgb: [30,229,197] },
+  { height: 300, rgb: [232,96,44] },
+  { height: 600, rgb: [75,31,142] },
+]
+
+function airRouteHeightColor(feature) {
+  if (feature?.verticalMode !== 'RANGE') return null
+  const isHeight = value => value !== null && value !== undefined && value !== ''
+    && (typeof value === 'number' || typeof value === 'string') && Number.isFinite(Number(value))
+  if (!isHeight(feature.minHeight) || !isHeight(feature.maxHeight)) return null
+  const minHeight = Number(feature.minHeight)
+  const maxHeight = Number(feature.maxHeight)
+  if (minHeight > maxHeight) return null
+  // 变高线使用该水平格内高度范围的中点，恒高航路直接使用实际高度。
+  const height = Math.max(0, Math.min(600, minHeight / 2 + maxHeight / 2))
+  const upperIndex = height <= 300 ? 1 : 2
+  const lower = AIR_ROUTE_HEIGHT_COLORS[upperIndex - 1]
+  const upper = AIR_ROUTE_HEIGHT_COLORS[upperIndex]
+  const ratio = (height - lower.height) / (upper.height - lower.height)
+  return '#' + lower.rgb.map((channel, index) =>
+    Math.round(channel + (upper.rgb[index] - channel) * ratio).toString(16).padStart(2, '0'),
+  ).join('')
+}
+// 连接通道：0 米为灰色，600 米为接近白色。
+// function connectionHeightColor(feature, bounds) {
+//   const isNumber = value =>
+//       value !== null &&
+//       value !== undefined &&
+//       String(value).trim() !== '' &&
+//       Number.isFinite(Number(value))
+//
+//   // 批量绘制优先使用实际格元高度。
+//   const bottom = bounds?.bottom ?? feature?.minHeight
+//   const top = bounds?.top ?? feature?.maxHeight
+//
+//   if (!isNumber(bottom) || !isNumber(top)) return '#b0b0a8'
+//
+//   const height = Number(bottom) / 2 + Number(top) / 2
+//   const ratio = Math.max(0, Math.min(1, height / 600))
+//
+//   const low = [145, 145, 135]   // 底部：暖灰色
+//   const high = [250, 250, 245]  // 顶部：米白色
+//
+//   return '#' + low.map((value, index) =>
+//       Math.round(value + (high[index] - value) * ratio)
+//           .toString(16)
+//           .padStart(2, '0'),
+//   ).join('')
+// }
+export function chartFeatureColor(feature, bounds) {
+  const dataset = DATASETS_BY_ID.get(feature?.datasetId)
+  const datasetId = feature?.datasetId
+  const featureType = feature?.featureType || dataset?.featureType
+
+  // 连接通道优先使用统一蓝色，不参与航路高度渐变。
+  const isConnection =
+      featureType === 'route_connection' ||
+      featureType === 'connection_channel' ||
+      datasetId === 'deqing_air_route_l17_connections' ||
+      datasetId === 'deqing_route_20261104_connectors_l17'
+
+  //if (isConnection) return connectionHeightColor(feature, bounds)
+  if (isConnection) return '#FFD700'
+
+  if ((feature?.theme || dataset?.theme) === 'air_route') {
+    const heightColor = bounds && feature?.dimensionMode === '3D'
+        ? airRouteHeightColor({
+          verticalMode: 'RANGE',
+          minHeight: bounds.bottom,
+          maxHeight: bounds.top,
+        })
+        : airRouteHeightColor(feature)
+
+    if (heightColor) return heightColor
+  }
+
+  return dataset?.color || THEME_COLORS[feature?.theme] || '#38bdf8'
 }
 
 export function chartFeatureDimensionMode(feature) {

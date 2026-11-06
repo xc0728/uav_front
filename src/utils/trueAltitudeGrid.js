@@ -48,6 +48,7 @@ export function buildTrueAltitudeRegionPayload({
   renderTargetCells,
   attributeCode,
   attributeLodAggregation,
+  attributeLodLevel,
   project2DToAllHeights,
   experimentalMixedResolution = false,
 }) {
@@ -64,7 +65,10 @@ export function buildTrueAltitudeRegionPayload({
   if (renderTargetCells != null) payload.renderTargetCells = Number(renderTargetCells)
   if (attributeCode) payload.attributeCode = attributeCode
   if (attributeCode && project2DToAllHeights != null) payload.project2DToAllHeights = Boolean(project2DToAllHeights)
-  if (attributeCode && attributeLodAggregation) payload.attributeLodAggregation = attributeLodAggregation
+  if (attributeCode && attributeLodAggregation) {
+    payload.attributeLodAggregation = attributeLodAggregation
+    if (attributeLodLevel != null) payload.attributeLodLevel = Number(attributeLodLevel)
+  }
   if (experimentalMixedResolution) payload.experimentalMixedResolution = true
   return payload
 }
