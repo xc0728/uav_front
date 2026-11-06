@@ -477,6 +477,12 @@ function cancelConflictRequest() {
 }
 onBeforeUnmount(cancelConflictRequest)
 const canSubmitConflict = computed(() => conflictPoints.value.length >= 2 && Boolean(conflictForm.datasetId) && conflictForm.catalogLoaded)
+function focusConflictResult(result, grid) {
+  if (!result) return
+  result.focusedGrid = grid
+  emit('showGrid', { focusGrid: grid })
+}
+
 async function runConflictCheck(form, points, mode, loading, error, result) {
   cancelConflictRequest()
   const current = new AbortController()
@@ -497,7 +503,8 @@ async function runConflictCheck(form, points, mode, loading, error, result) {
       const cells = conflictMapCells(data, pathCells, mode)
       if (!cells.length) throw new Error('未取得可显示的航迹网格')
       result.value.grids = conflictDisplayGrids(data, pathCells)
-      emit('showGrid', { cells, level: 17, runtime: performance.now() - startedAt })
+      emit('showGrid', { cells, level: 17, runtime: performance.now() - startedAt, skipFlyTo: Boolean(result.value.focusedGrid) })
+      if (result.value.focusedGrid) emit('showGrid', { focusGrid: result.value.focusedGrid })
     } catch (displayError) {
       if (!current.signal.aborted) result.value.visualizationWarning = `检测结果已取得，路径网格显示失败：${displayError.message}`
     }
@@ -1167,7 +1174,7 @@ async function submitAstarPath() {
 
       <div v-if="conflictError" class="error-box">{{ conflictError }}</div>
 
-      <ConflictCheckResult v-if="conflictResult" :result="conflictResult" />
+      <ConflictCheckResult v-if="conflictResult" :result="conflictResult" @focus-grid="grid => focusConflictResult(conflictResult, grid)" />
     </template>
 
     <!-- 路径冲突检测（首个冲突） -->
@@ -1284,7 +1291,7 @@ async function submitAstarPath() {
 
       <div v-if="conflictFirstError" class="error-box">{{ conflictFirstError }}</div>
 
-      <ConflictCheckResult v-if="conflictFirstResult" :result="conflictFirstResult" />
+      <ConflictCheckResult v-if="conflictFirstResult" :result="conflictFirstResult" @focus-grid="grid => focusConflictResult(conflictFirstResult, grid)" />
     </template>
   </div>
 </template>

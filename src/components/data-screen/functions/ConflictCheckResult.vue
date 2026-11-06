@@ -1,7 +1,40 @@
 <script setup>
-import { conflictReasonsText, MODEL_SOURCE_LABELS } from '../../../utils/conflictCheck.js'
+import { ref, watch, onBeforeUnmount } from 'vue'
+import { conflictReasonsText, MODEL_SOURCE_LABELS, resolveConflictGrid } from '../../../utils/conflictCheck.js'
 import { noiseAttributeLabel } from '../../../utils/noiseGrid.js'
-defineProps({ result: { type: Object, required: true } })
+const props = defineProps({ result: { type: Object, required: true } })
+const emit = defineEmits(['focus-grid'])
+const selectedCode = ref('')
+const pendingCode = ref('')
+const focusError = ref('')
+const resolvedGrids = new Map()
+let focusRequest
+const gridKey = grid => String(grid.code || '').replace(/^dqg/, '')
+function resetFocus() {
+  focusRequest?.abort()
+  selectedCode.value = ''; pendingCode.value = ''; focusError.value = ''
+  resolvedGrids.clear()
+}
+watch(() => props.result, resetFocus)
+onBeforeUnmount(resetFocus)
+async function focusGrid(grid) {
+  focusRequest?.abort()
+  const current = new AbortController()
+  focusRequest = current
+  pendingCode.value = gridKey(grid)
+  focusError.value = ''
+  try {
+    const detail = resolvedGrids.get(gridKey(grid)) || await resolveConflictGrid(grid, { signal: current.signal })
+    if (current.signal.aborted) return
+    resolvedGrids.set(detail.code, detail)
+    selectedCode.value = detail.code
+    emit('focus-grid', detail)
+  } catch (error) {
+    if (!current.signal.aborted) focusError.value = `网格定位失败：${error.message}`
+  } finally {
+    if (focusRequest === current) pendingCode.value = ''
+  }
+}
 </script>
 <template>
   <section class="conflict-result" aria-live="polite">
@@ -14,7 +47,13 @@ defineProps({ result: { type: Object, required: true } })
       <summary>已执行 {{ result.data.appliedRules?.length || 0 }} 项可选规则及正式维护强制约束</summary>
       <p v-for="rule in result.data.appliedRules || []" :key="rule.elementId">{{ rule.elementName }} · {{ rule.methodName || rule.method }}</p>
     </details>
-    <article v-for="(grid, index) in result.grids" :key="grid.code">
+    <p v-if="focusError" role="alert" class="warning">{{ focusError }}</p>
+    <article v-for="(grid, index) in result.grids" :key="grid.code"
+      role="button" tabindex="0" :aria-label="`定位冲突网格 ${grid.code}`"
+      :aria-pressed="selectedCode === gridKey(grid)" :aria-busy="pendingCode === gridKey(grid)"
+      :class="{ selected: selectedCode === gridKey(grid) }"
+      @click="focusGrid(grid)" @keydown.enter.prevent="focusGrid(grid)" @keydown.space.prevent="focusGrid(grid)">
+      <span class="locate-hint">{{ pendingCode === gridKey(grid) ? '正在定位…' : selectedCode === gridKey(grid) ? '已定位 · 点击重新定位' : '点击定位并高亮' }}</span>
       <strong>#{{ index + 1 }} {{ conflictReasonsText(grid.reasons) }}</strong>
       <p>编码：{{ grid.code }} · 航迹索引：{{ grid.routeIndex }}</p>
       <p>绝对高程：{{ grid.bottom }} ～ {{ grid.top }} m</p>
@@ -41,7 +80,10 @@ h4 { color: var(--panel-text-strong, #334155); border-left: 3px solid #16a34a; p
 p { margin: 5px 0; line-height: 1.7; }
 .warning { color: var(--panel-text-strong, #334155); background: var(--panel-danger-bg, #fef2f2); border-left: 3px solid #dc2626; padding: 8px; }
 .muted { color: var(--panel-text, #475569); font-size: 12px; }
-article { border-top: 1px solid var(--panel-card-border, #d7dee8); margin-top: 10px; padding-top: 10px; }
+article { border: 1px solid var(--panel-card-border, #d7dee8); border-radius: 6px; margin-top: 10px; padding: 10px; cursor: pointer; }
+article:hover, article.selected { border-color: var(--panel-primary, #2563eb); background: var(--panel-primary-soft, #eff6ff); }
+article:focus-visible { outline: 2px solid var(--panel-text-strong, #334155); outline-offset: 2px; }
+.locate-hint { display: block; margin-bottom: 6px; color: var(--panel-text-strong, #334155); font-size: 12px; }
 .rule-hit { border-left: 2px solid var(--panel-input-border, #cbd5e1); padding-left: 8px; margin: 8px 0; }
 strong { color: var(--panel-text-strong, #334155); }
 </style>

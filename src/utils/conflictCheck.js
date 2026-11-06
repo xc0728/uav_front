@@ -227,3 +227,30 @@ export function conflictMapCells(data, pathCells, mode) {
     }
   }).filter(cell => Object.values(cell.bounds).length === 6 && Object.values(cell.bounds).every(Number.isFinite))
 }
+
+// 冲突记录通常已合并航迹边界；可视化失败时仍能按完整三维编码单独定位。
+export async function resolveConflictGrid(grid, options) {
+  const code = codeOf(grid)
+  if (!/^[0-7]{17}$/.test(code)) throw new Error('冲突网格编码必须为 L17')
+  const normalize = value => ({
+    west: value.bounds?.west ?? value.minlon ?? value.west,
+    east: value.bounds?.east ?? value.maxlon ?? value.east,
+    south: value.bounds?.south ?? value.minlat ?? value.south,
+    north: value.bounds?.north ?? value.maxlat ?? value.north,
+    bottom: value.bottom ?? value.bounds?.bottom,
+    top: value.top ?? value.bounds?.top,
+  })
+  const valid = bounds => Object.values(bounds).every(Number.isFinite)
+    && bounds.east > bounds.west && bounds.north > bounds.south && bounds.top >= bounds.bottom
+    && bounds.west >= -180 && bounds.east <= 180 && bounds.south >= -90 && bounds.north <= 90
+  let bounds = normalize(grid)
+  if (!valid(bounds)) {
+    const body = await fetchJson('/api/multiSource/basicGrid/getGridBoundaryByCode', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gridCode: code }),
+    }, { timeoutMs: 10000, ...options })
+    if (codeOf(body.data || {}) !== code || body.data?.level !== CONFLICT_LEVEL) throw new Error('网格边界响应与所选编码不一致')
+    bounds = normalize(body.data)
+    if (!valid(bounds)) throw new Error('未取得有效的网格边界，无法定位')
+  }
+  return { ...grid, code, level: CONFLICT_LEVEL, bounds }
+}

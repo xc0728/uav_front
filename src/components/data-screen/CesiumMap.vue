@@ -223,6 +223,28 @@ function showSelectedGridHighlight(detail) {
   viewer.scene.requestRender()
 }
 
+// 仅替换当前高亮，不重画或清除整条航迹。
+function focusConflictGrid(detail) {
+  if (!viewer || viewer.isDestroyed()) return
+  const paths = buildGridHighlightPaths(detail?.bounds)
+  if (!paths.length) return
+  const positions = paths.flat().map(([longitude, latitude, altitude]) => Cesium.Cartesian3.fromDegrees(longitude, latitude, altitude))
+  const sphere = Cesium.BoundingSphere.fromPoints(positions)
+  const center = Cesium.Cartographic.fromCartesian(sphere.center)
+  const terrainHeight = viewer.scene.globe.getHeight(center)
+  const ground = Number.isFinite(terrainHeight) ? terrainHeight : 0
+  const pitch = -Math.PI / 4
+  // 地表/地下冲突也要从地形上方观察，避免相机落进地下。
+  const range = Math.max(sphere.radius * 4, 80, (ground - center.height + 50) / Math.sin(-pitch))
+  viewer.camera.cancelFlight()
+  clearSelectedGridSelection()
+  showSelectedGridHighlight(detail)
+  viewer.camera.flyToBoundingSphere(sphere, {
+    duration: 0.8,
+    offset: new Cesium.HeadingPitchRange(viewer.camera.heading, pitch, range),
+  })
+}
+
 function clearSelectedGridSelection() {
   selectedGrid.value = null
   removeSelectedGridHighlight()
@@ -660,6 +682,11 @@ function flyToPoint(lon, lat, height = 0) {
 function drawGridBoundary(gridInfo, options = {}) {
   if (!viewer || !gridInfo) {
     console.log('[CesiumMap] drawGridBoundary: viewer 或 gridInfo 不存在')
+    return
+  }
+
+  if (gridInfo.focusGrid) {
+    focusConflictGrid(gridInfo.focusGrid)
     return
   }
 
@@ -2367,6 +2394,7 @@ function drawScenarioCircle() {
 
 /** 清除场景可视化 */
 function clearScenarioVisualization() {
+  clearSelectedGridSelection()
   if (scenarioCircleEntity) {
     viewer.entities.remove(scenarioCircleEntity)
     scenarioCircleEntity = null
@@ -4699,6 +4727,7 @@ function getScenarioFlightPosition() {
 }
 
 defineExpose({
+  focusConflictGrid,
   flyToPoint,
   clearCenterPoint,
   drawGridBoundary,
@@ -5462,7 +5491,7 @@ onBeforeUnmount(() => {
             {{ scenarioState.conflictResult?.reason || '检测到障碍物' }}
           </div>
           <div v-if="scenarioState.conflictResult?.details" style="max-height: 240px; overflow-y: auto">
-            <ConflictCheckResult :result="scenarioState.conflictResult.details" />
+            <ConflictCheckResult :result="scenarioState.conflictResult.details" @focus-grid="focusConflictGrid" />
           </div>
           <p class="conflict-question">可尝试 A* 绕行；生成航迹后将按同一组条件复检。</p>
         </div>
