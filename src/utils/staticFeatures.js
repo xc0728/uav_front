@@ -22,6 +22,8 @@ export const MODEL_GRID_DATASET_IDS = Object.freeze({
   communication: 'deqing_model_grid_communication',
   navigation: 'deqing_model_grid_navigation',
   surveillance: 'deqing_model_grid_surveillance',
+  power: 'deqing_model_grid_power',
+  crane: 'deqing_model_grid_crane',
 })
 
 const MODEL_GRID_SOURCE_BY_DATASET_ID = new Map(
@@ -56,6 +58,8 @@ export const CHART_DATASETS = [
   [LOD13_BUILDING_DATASET_ID, LEGACY_BUILDING_MODEL_SOURCE.label, LEGACY_BUILDING_MODEL_SOURCE.theme, LEGACY_BUILDING_MODEL_SOURCE.color, '3D', LEGACY_BUILDING_MODEL_SOURCE.featureType, ['环境要素', '建构筑物'], 9, 'model_grid', 'lod13'],
   [MODEL_GRID_DATASET_IDS.surveillance, '监视设施模型网格', 'surveillance', '#f43f5e', '3D', 'surveillance_facility', ['环境要素', '建构筑物', '人工构筑物'], 13.1, 'model_grid', 'surveillance'],
   [MODEL_GRID_DATASET_IDS.communication, '通信设施模型网格', 'communication', '#14b8a6', '3D', 'communication_facility', ['环境要素', '建构筑物', '人工构筑物'], 14, 'model_grid', 'communication'],
+  [MODEL_GRID_DATASET_IDS.power, '输电塔模型网格', 'utility', '#f59e0b', '3D', 'power_facility', ['环境要素', '建构筑物', '人工构筑物'], 14.1, 'model_grid', 'power'],
+  [MODEL_GRID_DATASET_IDS.crane, '塔吊模型网格', 'structure', '#ef4444', '3D', 'tower_crane', ['环境要素', '建构筑物', '人工构筑物'], 14.2, 'model_grid', 'crane'],
   [MODEL_GRID_DATASET_IDS.navigation, '导航设施模型网格', 'navigation', '#8b5cf6', '3D', 'navigation_facility', ['功能要素', '飞行控制空间', '飞行信息控制要素'], 78.1, 'model_grid', 'navigation'],
 ].map(([id, label, theme, color, dimensionMode, featureType, catalogPath, catalogOrder, sourceKind = 'static', modelSource]) => ({
   id, label, theme, color, dimensionMode, featureType, catalogPath, catalogOrder, sourceKind, modelSource,
@@ -312,9 +316,9 @@ export function sortChartFeaturesForDisplay(features) {
 // 航路按绝对高程连续配色：0 m 青蓝、300 m 橙黄、600 m 紫红。
 // 使用服务端高度范围，避免读取源文件中可能为空或为零的 height 属性。
 const AIR_ROUTE_HEIGHT_COLORS = [
-  { height: 0, rgb: [30,229,197] },
+  { height: 0, rgb: [75,31,142] },
   { height: 300, rgb: [232,96,44] },
-  { height: 600, rgb: [75,31,142] },
+  { height: 600, rgb: [30,229,197] },
 ]
 
 function airRouteHeightColor(feature) {
