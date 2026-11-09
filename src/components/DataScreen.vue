@@ -475,6 +475,7 @@ function handleViewBoundsChanged(bounds) {
         ref="cesiumMapRef"
         :left-panel-width="servicePanelWidth"
         :show-scenario-demo="false"
+        :route-point-picking="Boolean(servicePanelRef?.routePointPicking)"
         @point-selected="handleMapPointSelected"
         @box-select-start="handleBoxSelectStart"
         @box-select-end="handleBoxSelectEnd"

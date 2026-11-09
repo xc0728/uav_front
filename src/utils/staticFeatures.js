@@ -22,6 +22,8 @@ export const MODEL_GRID_DATASET_IDS = Object.freeze({
   communication: 'deqing_model_grid_communication',
   navigation: 'deqing_model_grid_navigation',
   surveillance: 'deqing_model_grid_surveillance',
+  power: 'deqing_model_grid_power',
+  crane: 'deqing_model_grid_crane',
 })
 
 const MODEL_GRID_SOURCE_BY_DATASET_ID = new Map(
@@ -56,6 +58,8 @@ export const CHART_DATASETS = [
   [LOD13_BUILDING_DATASET_ID, LEGACY_BUILDING_MODEL_SOURCE.label, LEGACY_BUILDING_MODEL_SOURCE.theme, LEGACY_BUILDING_MODEL_SOURCE.color, '3D', LEGACY_BUILDING_MODEL_SOURCE.featureType, ['环境要素', '建构筑物'], 9, 'model_grid', 'lod13'],
   [MODEL_GRID_DATASET_IDS.surveillance, '监视设施模型网格', 'surveillance', '#f43f5e', '3D', 'surveillance_facility', ['环境要素', '建构筑物', '人工构筑物'], 13.1, 'model_grid', 'surveillance'],
   [MODEL_GRID_DATASET_IDS.communication, '通信设施模型网格', 'communication', '#14b8a6', '3D', 'communication_facility', ['环境要素', '建构筑物', '人工构筑物'], 14, 'model_grid', 'communication'],
+  [MODEL_GRID_DATASET_IDS.power, '输电塔模型网格', 'utility', '#f59e0b', '3D', 'power_facility', ['环境要素', '建构筑物', '人工构筑物'], 14.1, 'model_grid', 'power'],
+  [MODEL_GRID_DATASET_IDS.crane, '塔吊模型网格', 'structure', '#ef4444', '3D', 'tower_crane', ['环境要素', '建构筑物', '人工构筑物'], 14.2, 'model_grid', 'crane'],
   [MODEL_GRID_DATASET_IDS.navigation, '导航设施模型网格', 'navigation', '#8b5cf6', '3D', 'navigation_facility', ['功能要素', '飞行控制空间', '飞行信息控制要素'], 78.1, 'model_grid', 'navigation'],
 ].map(([id, label, theme, color, dimensionMode, featureType, catalogPath, catalogOrder, sourceKind = 'static', modelSource]) => ({
   id, label, theme, color, dimensionMode, featureType, catalogPath, catalogOrder, sourceKind, modelSource,
@@ -309,8 +313,86 @@ export function sortChartFeaturesForDisplay(features) {
   return regularFeatures.concat(trailingFeatures)
 }
 
-export function chartFeatureColor(feature) {
-  return DATASETS_BY_ID.get(feature.datasetId)?.color || THEME_COLORS[feature?.theme] || '#38bdf8'
+// 航路按绝对高程连续配色：0 m 青蓝、300 m 橙黄、600 m 紫红。
+// 使用服务端高度范围，避免读取源文件中可能为空或为零的 height 属性。
+const AIR_ROUTE_HEIGHT_COLORS = [
+  { height: 0, rgb: [75,31,142] },
+  { height: 300, rgb: [232,96,44] },
+  { height: 600, rgb: [30,229,197] },
+]
+
+function airRouteHeightColor(feature) {
+  if (feature?.verticalMode !== 'RANGE') return null
+  const isHeight = value => value !== null && value !== undefined && value !== ''
+    && (typeof value === 'number' || typeof value === 'string') && Number.isFinite(Number(value))
+  if (!isHeight(feature.minHeight) || !isHeight(feature.maxHeight)) return null
+  const minHeight = Number(feature.minHeight)
+  const maxHeight = Number(feature.maxHeight)
+  if (minHeight > maxHeight) return null
+  // 变高线使用该水平格内高度范围的中点，恒高航路直接使用实际高度。
+  const height = Math.max(0, Math.min(600, minHeight / 2 + maxHeight / 2))
+  const upperIndex = height <= 300 ? 1 : 2
+  const lower = AIR_ROUTE_HEIGHT_COLORS[upperIndex - 1]
+  const upper = AIR_ROUTE_HEIGHT_COLORS[upperIndex]
+  const ratio = (height - lower.height) / (upper.height - lower.height)
+  return '#' + lower.rgb.map((channel, index) =>
+    Math.round(channel + (upper.rgb[index] - channel) * ratio).toString(16).padStart(2, '0'),
+  ).join('')
+}
+// 连接通道：0 米为灰色，600 米为接近白色。
+// function connectionHeightColor(feature, bounds) {
+//   const isNumber = value =>
+//       value !== null &&
+//       value !== undefined &&
+//       String(value).trim() !== '' &&
+//       Number.isFinite(Number(value))
+//
+//   // 批量绘制优先使用实际格元高度。
+//   const bottom = bounds?.bottom ?? feature?.minHeight
+//   const top = bounds?.top ?? feature?.maxHeight
+//
+//   if (!isNumber(bottom) || !isNumber(top)) return '#b0b0a8'
+//
+//   const height = Number(bottom) / 2 + Number(top) / 2
+//   const ratio = Math.max(0, Math.min(1, height / 600))
+//
+//   const low = [145, 145, 135]   // 底部：暖灰色
+//   const high = [250, 250, 245]  // 顶部：米白色
+//
+//   return '#' + low.map((value, index) =>
+//       Math.round(value + (high[index] - value) * ratio)
+//           .toString(16)
+//           .padStart(2, '0'),
+//   ).join('')
+// }
+export function chartFeatureColor(feature, bounds) {
+  const dataset = DATASETS_BY_ID.get(feature?.datasetId)
+  const datasetId = feature?.datasetId
+  const featureType = feature?.featureType || dataset?.featureType
+
+  // 连接通道优先使用统一蓝色，不参与航路高度渐变。
+  const isConnection =
+      featureType === 'route_connection' ||
+      featureType === 'connection_channel' ||
+      datasetId === 'deqing_air_route_l17_connections' ||
+      datasetId === 'deqing_route_20261104_connectors_l17'
+
+  //if (isConnection) return connectionHeightColor(feature, bounds)
+  if (isConnection) return '#FFD700'
+
+  if ((feature?.theme || dataset?.theme) === 'air_route') {
+    const heightColor = bounds && feature?.dimensionMode === '3D'
+        ? airRouteHeightColor({
+          verticalMode: 'RANGE',
+          minHeight: bounds.bottom,
+          maxHeight: bounds.top,
+        })
+        : airRouteHeightColor(feature)
+
+    if (heightColor) return heightColor
+  }
+
+  return dataset?.color || THEME_COLORS[feature?.theme] || '#38bdf8'
 }
 
 export function chartFeatureDimensionMode(feature) {

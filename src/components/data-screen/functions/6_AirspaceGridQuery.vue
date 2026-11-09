@@ -264,6 +264,7 @@ const trueAltitudeLodEnabled = computed(
 const experimentalMixedResolution = ref(false)
 // 属性 LOD 聚合是独立试验路径，默认关闭并保留权威层原值查询。
 const attributeLodEnabled = ref(false)
+const attributeLodLevelMode = ref('auto')
 const attributeLodActive = computed(() => attributeTopicMode.value
   && attributeLodEnabled.value
   && !weatherSurfaceTopic.value
@@ -446,7 +447,7 @@ async function buildDisplayedCells(rawGrids, signal, { updateSummary = true, ren
         bounds: cell.bounds,
         gridType: cell.gridType,
         chartSourceMask,
-        color: chartFeatureColor(primaryFeature),
+        color: chartFeatureColor(primaryFeature, cell.bounds),
       }]
     })
   }
@@ -483,7 +484,7 @@ async function buildDisplayedCells(rawGrids, signal, { updateSummary = true, ren
     })).values()]
     return [{
       ...cell,
-      color: chartFeatureColor(primaryFeature),
+      color: chartFeatureColor(primaryFeature, cell.bounds),
       description: featureDescription(cell, features),
       features,
       chartFeatures,
@@ -684,6 +685,7 @@ async function queryAndRenderTrueAltitudePages(basePayload, controller, options 
       renderTargetCells: basePayload.renderTargetCells,
       attributeCode,
       attributeLodAggregation,
+      attributeLodLevel: basePayload.attributeLodLevel,
       experimentalMixedResolution: mixed,
       cursor,
     })
@@ -702,6 +704,10 @@ async function queryAndRenderTrueAltitudePages(basePayload, controller, options 
     if (attributeLodAggregation && data?.data?.lod === true
       && data?.data?.attributeAggregation !== attributeLodAggregation) {
       throw new Error('当前后端未按请求策略返回属性 LOD 聚合结果，请更新后端或关闭聚合开关')
+    }
+    if (basePayload.attributeLodLevel != null
+      && Number(data?.data?.renderLevel) !== Number(basePayload.attributeLodLevel)) {
+      throw new Error('后端未返回请求的固定 LOD 层级，请更新后端或改用自动选层')
     }
     datasetVersion ??= data?.data?.datasetVersion
 
@@ -950,6 +956,7 @@ async function onViewBoundsChanged(bounds) {
       ...(attributeLodActive.value ? {
         renderTargetCells: TRUE_ALTITUDE_RENDER_TARGET,
         attributeLodAggregation: selectedAttributeLodAggregation.value,
+        ...(attributeLodLevelMode.value === 'fixed14' ? { attributeLodLevel: 14 } : {}),
       } : {}),
       ...(trueAltitudeMode.value ? trueAltitudeQueryOptions(trueAltitudeResolutionMode.value, {
         renderTargetCells: TRUE_ALTITUDE_RENDER_TARGET,
@@ -1271,6 +1278,7 @@ async function submitAirspaceGridQuery() {
       ...(attributeLodActive.value ? {
         renderTargetCells: TRUE_ALTITUDE_RENDER_TARGET,
         attributeLodAggregation: selectedAttributeLodAggregation.value,
+        ...(attributeLodLevelMode.value === 'fixed14' ? { attributeLodLevel: 14 } : {}),
       } : {}),
       ...(trueAltitudeMode.value ? trueAltitudeQueryOptions(trueAltitudeResolutionMode.value, {
         renderTargetCells: TRUE_ALTITUDE_RENDER_TARGET,
@@ -1562,7 +1570,7 @@ function clearGrids() {
           <ChartLegend v-if="selectedGridAttributeCode" :attribute-code="selectedGridAttributeCode" />
           <div v-if="selectedGridAttributeCode" class="dataset-hint">
             <template v-if="attributeLodActive">
-              按显示预算选择预生成 LOD 网格，属性采用“{{ selectedAttributeLodAggregationLabel }}”聚合；边界覆盖及命中数是概略值。
+              {{ attributeLodLevelMode === 'fixed14' ? '固定使用 L14 聚合网格' : '按显示预算自动选择 LOD 网格' }}，属性采用“{{ selectedAttributeLodAggregationLabel }}”聚合；边界覆盖及命中数是概略值。
             </template>
             <template v-else>
               专题属性按原始 L17 网格查询并逐页渲染，不使用粗层 LOD 聚合。
@@ -1572,7 +1580,15 @@ function clearGrids() {
             <input v-model="attributeLodEnabled" type="checkbox" :disabled="loading || dynamicZoomEnabled" />
             LOD 聚合网格显示（试验，默认关闭）
           </label>
-          <div v-else-if="selectedGridAttributeCode && !weatherSurfaceTopic" class="dataset-hint">
+          <div v-if="attributeLodActive" class="dataset-hint">
+            <label for="attribute-lod-level">聚合显示层级</label>
+            <select id="attribute-lod-level" v-model="attributeLodLevelMode" :disabled="loading || dynamicZoomEnabled">
+              <option value="auto">自动选层（约 10 万格预算）</option>
+              <option value="fixed14">固定 L14</option>
+            </select>
+            <div>固定 L14 仍需实时聚合原始属性；范围过大时请缩小区域或真高区间。</div>
+          </div>
+          <div v-if="selectedGridAttributeCode && !selectedAttributeLodAggregation && !weatherSurfaceTopic" class="dataset-hint">
             当前属性尚未定义安全的 LOD 聚合策略，只能显示原始格元。
           </div>
           <div v-if="weatherSurfaceTopic" class="dataset-hint">

@@ -139,6 +139,12 @@ const activeFunctionName = ref('')
 const activeServiceId = ref('')
 const activeComponentRef = ref(null)
 
+// 航迹输入时点击模型或网格也应添加航点，避免被属性查询截走。
+const routePointPicking = computed(() => panelMode.value === 'calc'
+  && activeServiceId.value === 'path-planning'
+  && ['A星航路规划', '路径冲突检测（所有冲突）', '路径冲突检测（首个冲突）'].includes(activeFunctionName.value))
+
+
 // 切换控制面板折叠/展开
 function toggleControlPanelCollapse() {
   isControlPanelCollapsed.value = !isControlPanelCollapsed.value
@@ -353,6 +359,7 @@ function onActiveServiceViewBoundsChanged(bounds) {
 }
 
 defineExpose({
+  routePointPicking,
   applyMapPointToActiveService,
   applyBoundsToActiveService,
   setViewBoundsToActiveService,
