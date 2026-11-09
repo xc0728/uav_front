@@ -205,6 +205,56 @@ onBeforeUnmount(() => {
 const weatherSurfaceTopic = computed(() => isDailyWeatherField(selectedGridAttributeCode.value))
 const projectWeatherToAllHeights = ref(false)
 const attributeTopicMode = computed(() => chartMode.value && Boolean(selectedGridAttributeCode.value))
+const overlayChartEnabled = ref(false)
+const overlayPaddingOptions = [0, 200, 500, 1000]
+const overlayPaddingMeters = ref(500)
+const overlayChartActive = computed(() => attributeTopicMode.value && overlayChartEnabled.value)
+const chartSelectionRequired = computed(() => chartMode.value && (!attributeTopicMode.value || overlayChartActive.value))
+const overlayStats = ref(null)
+const overlayStatusLabels = { pending: '等待查询', loading: '查询中', success: '已完成', empty: '无结果', error: '查询失败', cancelled: '已取消' }
+
+function overlaySelectionError() {
+  if (!overlayChartActive.value) return ''
+  if (!selectedDatasetIds.value.length) return '请至少勾选一种叠加的航图要素'
+  if (!overlayPaddingOptions.includes(Number(overlayPaddingMeters.value))) return '请选择有效的静态要素外围扩展距离'
+  const bottom = Number(airspaceGridForm.bottom)
+  const top = Number(airspaceGridForm.top)
+  if (!Number.isFinite(bottom) || !Number.isFinite(top) || bottom < 0 || bottom > top) {
+    return '静态要素海拔范围必须满足 0 ≤ 最低海拔 ≤ 最高海拔'
+  }
+  return ''
+}
+// 米制距离近似换算为经纬度矩形外扩；不改变原格元及场属性查询范围。
+function buildOverlayChartPolygon(polygon, paddingMeters) {
+  if (!Number.isFinite(paddingMeters) || paddingMeters < 0 || paddingMeters > 1000) {
+    throw new Error('静态要素外围扩展距离必须在 0–1000 米之间')
+  }
+  if (!Array.isArray(polygon) || polygon.length < 3 || polygon.some(point =>
+    !Array.isArray(point) || point.length !== 2 || !point.every(Number.isFinite)
+      || Math.abs(point[0]) > 180 || Math.abs(point[1]) > 90)) {
+    throw new Error('查询范围必须包含有效的经纬度坐标')
+  }
+  const west = Math.min(...polygon.map(point => point[0]))
+  const east = Math.max(...polygon.map(point => point[0]))
+  const south = Math.min(...polygon.map(point => point[1]))
+  const north = Math.max(...polygon.map(point => point[1]))
+  if (west >= east || south >= north) throw new Error('查询范围必须具有有效面积')
+  if (paddingMeters === 0) return polygon.map(point => [...point])
+  const latitudePadding = paddingMeters / 6378137 * 180 / Math.PI
+  const edgeLatitude = Math.max(Math.abs(south), Math.abs(north)) + latitudePadding
+  if (edgeLatitude >= 90) throw new Error('外扩后的查询范围不能跨越极点')
+  const longitudePadding = latitudePadding / Math.cos(edgeLatitude * Math.PI / 180)
+  if (west - longitudePadding < -180 || east + longitudePadding > 180) {
+    throw new Error('外扩后的查询范围不能跨越国际日期变更线')
+  }
+  return [
+    [west - longitudePadding, south - latitudePadding],
+    [east + longitudePadding, south - latitudePadding],
+    [east + longitudePadding, north + latitudePadding],
+    [west - longitudePadding, north + latitudePadding],
+    [west - longitudePadding, south - latitudePadding],
+  ]
+}
 const trueAltitudeQueryMode = computed(() => trueAltitudeMode.value || attributeTopicMode.value)
 const trueAltitudeResolutionMode = ref(TRUE_ALTITUDE_QUERY_MODE.LOD)
 const trueAltitudeLodEnabled = computed(
@@ -281,6 +331,7 @@ watch(chartMode, (active) => {
     attributeCatalogError.value = ''
     attributeCatalogNotice.value = ''
     selectedGridAttributeCode.value = ''
+    overlayChartEnabled.value = false
     chartDatasetRequest?.abort()
     return
   }
@@ -469,6 +520,13 @@ watch(gridAttributeTopicGroups, groups => {
 }, { flush: 'post' })
 
 async function queryAndRenderChartPages(basePayload, controller, options = {}) {
+  const emitGrid = options.emitGrid || (payload => emit('showGrid', payload))
+  let lastStats
+  const setStats = stats => {
+    lastStats = stats
+    if (options.setStats) options.setStats(stats)
+    else queryStats.value = stats
+  }
   const startedAt = performance.now()
   const renderedCodes = new Set()
   const feature2DIds = new Set()
@@ -481,7 +539,7 @@ async function queryAndRenderChartPages(basePayload, controller, options = {}) {
   let lastData = null
 
   // 立即清除上一次查询结果；后续页面即使因高度过滤暂时为空，也不会残留旧网格。
-  emit('showGrid', {
+  emitGrid({
     cells: [],
     level: Number(basePayload.level),
     runtime: 0,
@@ -501,6 +559,7 @@ async function queryAndRenderChartPages(basePayload, controller, options = {}) {
         updateSummary: false,
         renderOnly: true,
       })
+      if (controller.signal.aborted) return
       cells.forEach((cell) => {
         cell.datasetId ??= page?.data?.datasetId || basePayload.datasetId
         cell.datasetVersion ??= page?.data?.datasetVersion
@@ -526,13 +585,13 @@ async function queryAndRenderChartPages(basePayload, controller, options = {}) {
       lastData = page
       result.value = page
       totalCount = rendered
-      queryStats.value = {
+      setStats({
         total: rendered,
         rendered,
         pages: pageCount + 1,
         complete: page?.data?.hasMore !== true,
         status: 'loading',
-      }
+      })
       chartSummary.value = {
         grids: rendered,
         features2D: feature2DIds.size,
@@ -547,7 +606,7 @@ async function queryAndRenderChartPages(basePayload, controller, options = {}) {
 
       if (cells.length > 0) {
         const visualStyle = getGridVisualStyle(rendered, false)
-        emit('showGrid', {
+        emitGrid({
           cells,
           level: Number(basePayload.level),
           runtime: performance.now() - startedAt,
@@ -579,16 +638,15 @@ async function queryAndRenderChartPages(basePayload, controller, options = {}) {
   })
 
   if (pageCount === 0) {
-    emit('showGrid', {
+    emitGrid({
       cells: [],
       level: Number(basePayload.level),
       runtime: performance.now() - startedAt,
       skipFlyTo: options.skipFlyTo === true,
     })
   }
-  if (!controller.signal.aborted && queryStats.value) {
-    queryStats.value = { ...queryStats.value, complete: true, status: 'success' }
-  }
+  if (controller.signal.aborted) return null
+  if (lastStats) setStats({ ...lastStats, complete: true, status: 'success' })
   gridsData.value = []
   return {
     data: lastData,
@@ -600,6 +658,8 @@ async function queryAndRenderChartPages(basePayload, controller, options = {}) {
 }
 
 async function queryAndRenderTrueAltitudePages(basePayload, controller, options = {}) {
+  const emitGrid = options.emitGrid || (payload => emit('showGrid', payload))
+  const setStats = options.setStats || (stats => { queryStats.value = stats })
   let cursor
   let pageIndex = 0
   let total = 0
@@ -675,7 +735,7 @@ async function queryAndRenderTrueAltitudePages(basePayload, controller, options 
     displayed = mixed ? cells.length : displayed + cells.length
     lastData = data
     result.value = data
-    queryStats.value = {
+    setStats({
       total,
       displayed,
       rendered: displayed,
@@ -694,11 +754,11 @@ async function queryAndRenderTrueAltitudePages(basePayload, controller, options 
       attributeAggregation: data?.data?.attributeAggregation,
       sourceMetadata: data?.data?.sourceMetadata,
       dimensionMode: data?.data?.dimensionMode,
-    }
+    })
 
     if (cells.length > 0) {
       const visualStyle = getGridVisualStyle(displayed, data?.data?.lod === true)
-      emit('showGrid', {
+      emitGrid({
         cells,
         level: Number(data?.data?.renderLevel ?? basePayload.level),
         runtime,
@@ -720,7 +780,7 @@ async function queryAndRenderTrueAltitudePages(basePayload, controller, options 
         skipFlyTo: options.skipFlyTo === true || pageIndex > 0,
       })
     } else if (pageIndex === 0) {
-      emit('showGrid', { cells: [], level: Number(basePayload.level), runtime })
+      emitGrid({ cells: [], level: Number(basePayload.level), runtime })
     }
 
     const nextCursor = data?.data?.nextCursor
@@ -733,14 +793,105 @@ async function queryAndRenderTrueAltitudePages(basePayload, controller, options 
     await new Promise(resolve => setTimeout(resolve, 0))
   } while (!controller.signal.aborted)
 
+  if (controller.signal.aborted) return null
   gridsData.value = []
   totalCount = total
   return {
     data: lastData,
     total,
     displayed,
-    rendered: queryStats.value?.rendered ?? displayed,
+    rendered: displayed,
     runtime: performance.now() - startedAt,
+  }
+}
+
+// 两类数据共用一次清空和取消控制，空页不能清除另一类已经绘制的结果。
+async function queryAndRenderOverlayPages(basePayload, controller, options = {}) {
+  const selectionError = overlaySelectionError()
+  if (selectionError) throw new Error(selectionError)
+  if (controller.signal.aborted) return null
+  const chartPolygon = buildOverlayChartPolygon(basePayload.polygon, Number(overlayPaddingMeters.value))
+  const startedAt = performance.now()
+  const stats = reactive({
+    field: { total: 0, rendered: 0, status: 'pending' },
+    chart: { total: 0, rendered: 0, status: 'pending' },
+  })
+  overlayStats.value = stats
+  chartSummary.value = null
+  let attributeRendered = 0
+  const failures = []
+  // MSL 参数单独构造，不能把场属性的 AGL 范围直接传给航图接口。
+  const chartPayload = {
+    datasetId: basePayload.datasetId,
+    polygon: chartPolygon,
+    level: basePayload.level,
+    bottom: Number(airspaceGridForm.bottom),
+    top: Number(airspaceGridForm.top),
+    datasetIds: [...selectedDatasetIds.value],
+    maxCells: 50000,
+    maxMappings: 50000,
+    renderOnly: true,
+    exactLevelOnly: Number(basePayload.level) === 17,
+  }
+  emit('showGrid', {
+    cells: [],
+    skipFlyTo: options.skipFlyTo === true,
+    overlayRegion: { fieldPolygon: basePayload.polygon, chartPolygon },
+  })
+  try {
+    await Promise.allSettled([
+      ['field', '场属性', queryAndRenderTrueAltitudePages, basePayload],
+      ['chart', '航图要素', queryAndRenderChartPages, chartPayload],
+    ].map(async ([kind, label, query, payload]) => {
+      if (controller.signal.aborted) return
+      stats[kind].status = 'loading'
+      try {
+        const pageResult = await query(payload, controller, {
+          skipFlyTo: options.skipFlyTo,
+          setStats: value => {
+            if (controller.signal.aborted) return
+            stats[kind] = { ...value, status: 'loading' }
+            overlayStats.value = { ...stats }
+          },
+          emitGrid: page => {
+            if (controller.signal.aborted || !page.cells?.length) return
+            if (kind === 'field') attributeRendered += page.cells.length
+            emit('showGrid', {
+              ...page,
+              append: true,
+              skipFlyTo: true,
+              overlay: true,
+              attributeRendered,
+              legendTitle: '场属性与航图要素',
+              fillAlpha: kind === 'field' ? Math.min(page.fillAlpha ?? 0.3, 0.3) : 0.08,
+              outlineAlpha: kind === 'chart' ? 0.9 : page.outlineAlpha,
+            })
+          },
+        })
+        if (controller.signal.aborted) return
+        stats[kind] = { ...stats[kind], complete: true, status: pageResult?.total ? 'success' : 'empty' }
+      } catch (err) {
+        if (controller.signal.aborted) return
+        stats[kind] = { ...stats[kind], complete: false, status: 'error' }
+        failures.push(`${label}查询失败：${err?.message || '请求失败'}`)
+      }
+      overlayStats.value = { ...stats }
+    }))
+    if (controller.signal.aborted) return null
+    error.value = failures.join('；')
+    queryStats.value = {
+      complete: failures.length === 0,
+      status: failures.length ? 'error' : 'success',
+    }
+    return { runtime: performance.now() - startedAt }
+  } finally {
+    if (controller.signal.aborted) {
+      for (const value of Object.values(stats)) {
+        if (value.status === 'pending' || value.status === 'loading') value.status = 'cancelled'
+      }
+      // 新查询已经接管统计时，旧请求不能覆盖新状态。
+      if (overlayStats.value?.field === stats.field) overlayStats.value = { ...stats }
+    }
   }
 }
 
@@ -752,7 +903,9 @@ async function queryAndRenderTrueAltitudePages(basePayload, controller, options 
 async function onViewBoundsChanged(bounds) {
   if (!dynamicZoomEnabled.value) return
   if (!bounds) return
-  if (chartMode.value && !attributeTopicMode.value && selectedDatasetIds.value.length === 0) return
+  const selectionError = overlaySelectionError()
+  if (selectionError) { error.value = selectionError; return }
+  if (chartSelectionRequired.value && selectedDatasetIds.value.length === 0) return
   if (trueAltitudeDatasetMode.value && !airspaceGridForm.datasetId) return
 
   // 1. 取消上一次未完成的请求（避免旧响应覆盖新响应）
@@ -767,6 +920,7 @@ async function onViewBoundsChanged(bounds) {
   const queryLevel = Number(airspaceGridForm.level)
 
   dynamicLoading.value = true
+  overlayStats.value = null
   error.value = ''
   queryStats.value = { total: 0, rendered: 0, pages: 0, complete: false, status: 'loading' }
 
@@ -819,6 +973,11 @@ async function onViewBoundsChanged(bounds) {
       } : {}),
     }
 
+    if (overlayChartActive.value) {
+      const pagedResult = await queryAndRenderOverlayPages(payload, controller, { skipFlyTo: true })
+      if (pagedResult && !controller.signal.aborted) dynamicRuntime.value = pagedResult.runtime
+      return
+    }
     if (trueAltitudeQueryMode.value) {
       if (attributeTopicMode.value) chartSummary.value = null
       const pagedResult = await queryAndRenderTrueAltitudePages(payload, controller, { skipFlyTo: true })
@@ -898,7 +1057,9 @@ async function onViewBoundsChanged(bounds) {
 }
 
 function toggleDynamicZoom() {
-  if (!dynamicZoomEnabled.value && chartMode.value && !attributeTopicMode.value && selectedDatasetIds.value.length === 0) {
+  const selectionError = !dynamicZoomEnabled.value && overlaySelectionError()
+  if (selectionError) { error.value = selectionError; return }
+  if (!dynamicZoomEnabled.value && chartSelectionRequired.value && selectedDatasetIds.value.length === 0) {
     error.value = '请至少勾选一种航图要素'
     return
   }
@@ -925,9 +1086,11 @@ function resetForm() {
   error.value = ''
   result.value = null
   queryStats.value = null
+  overlayStats.value = null
   gridsData.value = []
   chartSummary.value = null
   dynamicZoomEnabled.value = false
+  dynamicLoading.value = false
   dynamicRuntime.value = 0
   if (abortController) {
     abortController.abort()
@@ -993,6 +1156,7 @@ async function submitAirspaceGridQuery() {
   error.value = ''
   result.value = null
   queryStats.value = null
+  overlayStats.value = null
   if (chartMode.value && selectedGridAttributeCode.value) {
     const selected = selectedGridAttributeCode.value
     const datasetId = airspaceGridForm.datasetId
@@ -1007,6 +1171,9 @@ async function submitAirspaceGridQuery() {
       return
     }
   }
+
+  const selectionError = overlaySelectionError()
+  if (selectionError) { error.value = selectionError; return }
 
   // 验证层级
   if (!Number.isInteger(Number(airspaceGridForm.level)) || airspaceGridForm.level < 0) {
@@ -1034,7 +1201,7 @@ async function submitAirspaceGridQuery() {
     error.value = '请输入空域ID'
     return
   }
-  if (chartMode.value && !attributeTopicMode.value && selectedDatasetIds.value.length === 0) {
+  if (chartSelectionRequired.value && selectedDatasetIds.value.length === 0) {
     error.value = '请至少勾选一种航图要素'
     return
   }
@@ -1146,6 +1313,10 @@ async function submitAirspaceGridQuery() {
       }, timeoutMs)
     }
 
+    if (overlayChartActive.value) {
+      await queryAndRenderOverlayPages(payload, controller)
+      return
+    }
     if (trueAltitudeQueryMode.value) {
       if (attributeTopicMode.value) chartSummary.value = null
       const pagedResult = await queryAndRenderTrueAltitudePages(payload, controller)
@@ -1276,11 +1447,8 @@ async function submitAirspaceGridQuery() {
 }
 
 function clearGrids() {
+  resetForm()
   emit('showGrid', { cells: [] })
-  result.value = null
-  queryStats.value = null
-  gridsData.value = []
-  chartSummary.value = null
 }
 </script>
 
@@ -1387,6 +1555,10 @@ function clearGrids() {
           <div v-else-if="!attributeCatalogLoading && !gridAttributeTopicGroups.length" class="dataset-hint">
             {{ selectedTrueAltitudeDataset ? '当前活动空域版本暂无已启用并绑定的场属性。' : '选择已激活的空域数据集后显示可用场属性。' }}
           </div>
+          <label v-if="selectedGridAttributeCode" class="dataset-hint">
+            <input v-model="overlayChartEnabled" type="checkbox" :disabled="loading || dynamicZoomEnabled" />
+            叠加航图实体要素
+          </label>
           <ChartLegend v-if="selectedGridAttributeCode" :attribute-code="selectedGridAttributeCode" />
           <div v-if="selectedGridAttributeCode" class="dataset-hint">
             <template v-if="attributeLodActive">
@@ -1437,7 +1609,7 @@ function clearGrids() {
         </datalist>
       </div>
 
-      <div v-if="chartMode && !attributeTopicMode" class="form-group">
+      <div v-if="chartSelectionRequired" class="form-group">
         <div class="dataset-title-row">
           <div class="group-title">查询要素（已选 {{ selectedDatasetIds.length }}）</div>
           <div class="dataset-actions">
@@ -1457,12 +1629,26 @@ function clearGrids() {
             @toggle="setDatasetIdsSelected"
           />
         </div>
+        <template v-if="overlayChartActive">
+          <label class="dataset-hint">
+            静态要素外围扩展距离
+            <select v-model.number="overlayPaddingMeters" class="level-select" :disabled="loading || dynamicZoomEnabled">
+              <option v-for="meters in overlayPaddingOptions" :key="meters" :value="meters">{{ meters === 0 ? '不扩展（与场属性同范围）' : `向四周各扩展约 ${meters} 米` }}</option>
+            </select>
+          </label>
+          <div class="group-title">静态要素海拔范围（MSL，米）</div>
+          <div class="height-grid">
+            <label class="coord-line">最低<input v-model.number="airspaceGridForm.bottom" type="number" min="0" step="10" class="airspace-id-input" :disabled="loading || dynamicZoomEnabled" /></label>
+            <label class="coord-line">最高<input v-model.number="airspaceGridForm.top" type="number" min="0" step="10" class="airspace-id-input" :disabled="loading || dynamicZoomEnabled" /></label>
+          </div>
+          <div class="dataset-hint">场属性保留原查询边界，静态要素向四周外扩。两类数据同时查询，分别使用 AGL 真高与 MSL 海拔范围，格网单元保持原样。</div>
+        </template>
         <div class="dataset-hint">静态要素来自已有 Feature 和网格映射的活动 Dataset；建筑物来自后端已入库模型格网，不依赖本地模型文件。仅查询已勾选项。</div>
       </div>
 
       <!-- 查询边界 -->
       <div class="form-group">
-        <div class="group-title">查询边界</div>
+        <div class="group-title">{{ overlayChartActive ? '场属性查询边界' : '查询边界' }}</div>
         <div class="boundary-presets" aria-label="查询边界预设">
           <button
             v-for="preset in boundaryPresets"
@@ -1597,9 +1783,9 @@ function clearGrids() {
         <button
           class="btn-query"
           @click="submitAirspaceGridQuery"
-          :disabled="loading || datasetLoading || (chartMode && !attributeTopicMode && !selectedDatasetIds.length) || (trueAltitudeDatasetMode && !airspaceGridForm.datasetId)"
+          :disabled="loading || dynamicZoomEnabled || datasetLoading || (chartSelectionRequired && !selectedDatasetIds.length) || (trueAltitudeDatasetMode && !airspaceGridForm.datasetId)"
         >
-          <span>{{ loading ? '查询中...' : (attributeTopicMode ? '查询并展示专题属性' : (chartMode ? '查询并展示航图要素' : (trueAltitudeMode ? '查询真高网格' : '查询'))) }}</span>
+          <span>{{ loading ? '查询中...' : (overlayChartActive ? '查询并叠加展示' : attributeTopicMode ? '查询并展示专题属性' : (chartMode ? '查询并展示航图要素' : (trueAltitudeMode ? '查询真高网格' : '查询'))) }}</span>
         </button>
         <button v-if="loading" class="btn-cancel" @click="cancelManualQuery" type="button">
           <span>取消</span>
@@ -1613,7 +1799,20 @@ function clearGrids() {
       <div v-if="error" class="error-box">{{ error }}</div>
 
       <!-- 查询结果 -->
-      <div v-if="queryStats" class="result-box">
+      <div v-if="overlayStats" class="result-box">
+        <div v-for="(label, kind) in { field: '场属性', chart: '航图要素' }" :key="kind">
+          <div class="result-row">
+            <span class="result-label">{{ label }}{{ overlayStats[kind].lod ? ' LOD 覆盖' : '网格' }}</span>
+            <span class="result-num">{{ Number(overlayStats[kind].total).toLocaleString() }}</span>
+          </div>
+          <div class="result-meta">
+            {{ overlayStatusLabels[overlayStats[kind].status] }}
+            <span v-if="overlayStats[kind].lod"> · 显示节点 {{ overlayStats[kind].displayed }}（概略覆盖）</span>
+          </div>
+        </div>
+        <div class="dataset-hint">两类结果可能覆盖相同网格，数量分别统计，不相加。</div>
+      </div>
+      <div v-else-if="queryStats" class="result-box">
         <div class="result-row">
           <span class="result-label">{{ queryStats.countExact ? (queryStats.complete ? '精确命中' : '累计命中') : (queryStats.lod ? 'LOD 覆盖' : '原始命中') }}</span>
           <span class="result-num">{{ Number(queryStats.total).toLocaleString() }}</span>

@@ -80,6 +80,9 @@ function renderFormalElements(event) {
       features: cell.features, classificationCode: cell.classificationCode,
       bounds: { west: cell.minlon,east:cell.maxlon,south:cell.minlat,north:cell.maxlat,bottom:cell.bottom,top:cell.top } }
   }
+  if (formalDataSource.entities.values.length) {
+    viewer.flyTo(formalDataSource, { duration: 0.8 }).catch(error => console.warn('定位正式要素网格失败', error))
+  }
   viewer.scene.requestRender()
 }
 function invalidateFormalElements() {
@@ -88,11 +91,11 @@ function invalidateFormalElements() {
   viewer?.scene?.requestRender()
 }
 onMounted(() => {
-  window.addEventListener('formal-element-grids',renderFormalElements)
+  // 预览事件由DataScreen接收，跨页面等待地图就绪后调用公开方法。
   window.addEventListener('formal-elements-changed',invalidateFormalElements)
 })
 onBeforeUnmount(() => {
-  window.removeEventListener('formal-element-grids',renderFormalElements)
+
   window.removeEventListener('formal-elements-changed',invalidateFormalElements)
   formalDataSource=null
 })
@@ -468,6 +471,8 @@ const gridResultState = reactive({
   visible: false,
   title: '查询网格',
   attributeCode: '',
+  overlay: false,
+  attributeRendered: 0,
   levels: [],        // 多层级数组: [{ level, count, color, sizeLabel }]
   total: 0,          // 网格总数
   runtime: '',       // 计算运行时间（如 "1.23 s"）
@@ -668,6 +673,29 @@ function drawGridBoundary(gridInfo, options = {}) {
 
   if (Array.isArray(coloredGridInfo.cells) && coloredGridInfo.cells.length === 0) {
     clearGridVisual()
+    if (gridInfo.overlayRegion) {
+      const { fieldPolygon, chartPolygon } = gridInfo.overlayRegion
+      viewer.entities.add({
+        id: 'grid-boundary-field-range',
+        polyline: {
+          positions: Cesium.Cartesian3.fromDegreesArray(fieldPolygon.flat()),
+          width: 2,
+          material: Cesium.Color.WHITE.withAlpha(0.8),
+          clampToGround: true,
+        },
+      })
+      if (!skipFlyTo) {
+        viewer.camera.flyTo({
+          destination: Cesium.Rectangle.fromDegrees(
+            Math.min(...chartPolygon.map(point => point[0])),
+            Math.min(...chartPolygon.map(point => point[1])),
+            Math.max(...chartPolygon.map(point => point[0])),
+            Math.max(...chartPolygon.map(point => point[1])),
+          ),
+          duration: 1.5,
+        })
+      }
+    }
     return
   }
 
@@ -678,12 +706,12 @@ function drawGridBoundary(gridInfo, options = {}) {
     })
     if (renderer === GRID_RENDERER.INSTANCED) {
       drawGridInstanced(coloredGridInfo, { skipFlyTo, append: coloredGridInfo.append === true })
-      gridResultState.attributeCode = coloredGridInfo.cells[0]?.attributeCode || ''
+      gridResultState.attributeCode = coloredGridInfo.cells[0]?.attributeCode || (coloredGridInfo.append ? gridResultState.attributeCode : '')
       return
     }
     if (renderer === GRID_RENDERER.PRIMITIVE) {
       drawGridPrimitives(coloredGridInfo, { skipFlyTo, append: coloredGridInfo.append === true })
-      gridResultState.attributeCode = coloredGridInfo.cells[0]?.attributeCode || ''
+      gridResultState.attributeCode = coloredGridInfo.cells[0]?.attributeCode || (coloredGridInfo.append ? gridResultState.attributeCode : '')
       return
     }
   }
@@ -1465,6 +1493,8 @@ function clearGridVisual() {
   gridResultState.visible = false
   gridResultState.title = '查询网格'
   gridResultState.attributeCode = ''
+  gridResultState.overlay = false
+  gridResultState.attributeRendered = 0
   gridResultState.levels = []
   gridResultState.total = 0
   gridResultState.runtime = ''
@@ -1472,6 +1502,8 @@ function clearGridVisual() {
 
 function applyGridResultMetadata(gridInfo) {
   gridResultState.title = gridInfo?.legendTitle || '查询网格'
+  gridResultState.overlay = gridInfo?.overlay === true
+  gridResultState.attributeRendered = gridInfo?.attributeRendered ?? 0
 }
 
 // 百万级静态网格使用共享立方体模板 + GPU 实例属性，避免逐格 GeometryInstance。
@@ -1548,7 +1580,8 @@ function drawGridPrimitives(gridInfo, options = {}) {
   const previousChartLayers = new Map(chartFeatureLayers.value.map(layer => [layer.type, layer.enabled]))
   if (!options.append) clearGridVisual()
   if (!gridInfo.cells.length) return
-  syncChartFeatureLayers(gridInfo.cells, previousChartLayers)
+  if (gridInfo.chartLayers) syncChartLayerMetadata(gridInfo.chartLayers, previousChartLayers)
+  else syncChartFeatureLayers(gridInfo.cells, previousChartLayers)
 
   const batchSize = 50000
   let minLon = Infinity, maxLon = -Infinity
@@ -1579,7 +1612,7 @@ function drawGridPrimitives(gridInfo, options = {}) {
           vertexFormat: Cesium.PerInstanceColorAppearance.VERTEX_FORMAT,
         }),
         attributes: {
-          color: Cesium.ColorGeometryInstanceAttribute.fromColor(cellColor.withAlpha(0.5)),
+          color: Cesium.ColorGeometryInstanceAttribute.fromColor(cellColor.withAlpha(gridInfo.fillAlpha ?? 0.5)),
           show: new Cesium.ShowGeometryInstanceAttribute(true),
         },
       }))
@@ -4702,6 +4735,7 @@ function getScenarioFlightPosition() {
 }
 
 defineExpose({
+  renderFormalElements,
   flyToPoint,
   clearCenterPoint,
   drawGridBoundary,
@@ -4998,12 +5032,13 @@ onBeforeUnmount(() => {
     <aside v-if="isMapReady" class="chart-feature-panel">
       <div class="chart-feature-panel-title">
         <span>航图要素 · 图例</span>
-        <small>{{ gridResultState.attributeCode ? '已加载专题' : (chartFeatureLayers.length ? `${chartFeatureLayers.length} 类` : '未加载') }}</small>
+        <small>{{ gridResultState.attributeCode ? (gridResultState.overlay ? '专题与航图叠加' : '已加载专题') : (chartFeatureLayers.length ? `${chartFeatureLayers.length} 类` : '未加载') }}</small>
       </div>
       <div v-if="gridResultState.attributeCode" class="chart-feature-empty">
         <ChartLegend :attribute-code="gridResultState.attributeCode" variant="dark" />
-        <div>已渲染 {{ Number(gridResultState.total).toLocaleString() }} 个网格</div>
+        <div>已渲染 {{ Number(gridResultState.overlay ? gridResultState.attributeRendered : gridResultState.total).toLocaleString() }} 个专题网格</div>
         <div>点击网格查看场值与高度属性。</div>
+        <ChartLegend v-if="gridResultState.overlay && chartFeatureLayers.length" :items="chartFeatureLayers" variant="dark" />
       </div>
       <div v-else-if="!chartFeatureLayers.length" class="chart-feature-empty">
         点击网格可查看关联航图要素属性；航图查询后可在此筛选要素显示。
