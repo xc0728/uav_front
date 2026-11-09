@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, onBeforeUnmount, watch } from 'vue'
 import { Loader2, RefreshCw, ChevronDown, ChevronUp, Box, Building2, Mountain, Cloud, Search, Layers, Waypoints, Radar, Wrench, FileSpreadsheet } from 'lucide-vue-next'
 import FeatureDatasetManager from './FeatureDatasetManager.vue'
 import { PLANNING_PARQUET_FILES, planningParquetPreset, parquetAttributePayload } from '../../../utils/parquetAttributeImport.js'
@@ -569,6 +569,9 @@ const FEATURE_THEMES = [
 const HEIGHT_SOURCES = ['NONE', 'ATTRIBUTE', 'GEOMETRY_Z', 'DEM_AGL']
 
 const featureForm = ref({
+  importMode: 'CREATE',
+  sourceIdField: '',
+  confirmReplace: false,
   datasetId: '',
   datasetName: '',
   theme: 'road',
@@ -589,10 +592,79 @@ const featureForm = ref({
   maxMappings: 5000000,
 })
 
+const featureImportDatasets = ref([])
+const featureImportCatalogLoading = ref(false)
+const featureImportCatalogError = ref('')
+const featureAppendSupported = ref(false)
+const selectedFeatureImportDataset = computed(() => featureImportDatasets.value.find(item => item.datasetId === featureForm.value.datasetId))
+let featureImportCatalogController = null
+
+function applyFeatureImportDataset() {
+  const dataset = selectedFeatureImportDataset.value
+  if (!dataset || featureForm.value.importMode === 'CREATE') return
+  Object.assign(featureForm.value, {
+    datasetName: dataset.datasetName, theme: dataset.theme,
+    dimensionMode: dataset.dimensionMode, level: Number(dataset.level),
+  })
+  if (dataset.dimensionMode === '2D') featureForm.value.heightSource = 'NONE'
+}
+
+async function loadFeatureImportDatasets() {
+  featureImportCatalogController?.abort()
+  const controller = new AbortController()
+  featureImportCatalogController = controller
+  featureImportCatalogLoading.value = true
+  featureImportCatalogError.value = ''
+  featureAppendSupported.value = false
+  try {
+    const items = []
+    let offset = 0
+    while (true) {
+      const response = await fetch(`/api/static-features/datasets?state=active&limit=200&offset=${offset}`, { signal: controller.signal })
+      if (!response.ok) throw new Error(await errorMessage(response, '静态数据集目录加载失败'))
+      const body = await response.json()
+      if (controller.signal.aborted) return false
+      if (body?.data?.appendImportSupported !== true) throw new Error('后端尚未支持追加入库，请先部署配套后端，禁止使用旧导入接口尝试追加')
+      const page = body?.data?.items
+      if (!Array.isArray(page)) throw new Error('数据集目录响应格式无效')
+      items.push(...page.filter(item => item.appendImportSupported === true && item.state === 'active'
+        && Number.isSafeInteger(Number(item.activeRevision)) && Number(item.activeRevision) > 0))
+      offset += page.length
+      if (!page.length || (Number.isFinite(Number(body.data.total)) && offset >= Number(body.data.total)) || page.length < 200) break
+    }
+    featureImportDatasets.value = items
+    featureAppendSupported.value = true
+    if (!items.some(item => item.datasetId === featureForm.value.datasetId) && featureForm.value.importMode !== 'CREATE') featureForm.value.datasetId = ''
+    applyFeatureImportDataset()
+    return true
+  } catch (error) {
+    if (controller.signal.aborted || featureImportCatalogController !== controller || error?.name === 'AbortError') return false
+    featureImportCatalogError.value = error?.message || '目录加载失败'
+    return false
+  } finally {
+    if (featureImportCatalogController === controller) featureImportCatalogLoading.value = false
+  }
+}
+
+watch(() => featureForm.value.importMode, mode => {
+  featureForm.value.confirmReplace = false
+  if (mode !== 'CREATE') {
+    featureForm.value.datasetId = ''
+    loadFeatureImportDatasets()
+  }
+})
+watch(activeTab, tab => {
+  if (tab === 'featureImport' && featureForm.value.importMode !== 'CREATE') loadFeatureImportDatasets()
+})
+onBeforeUnmount(() => featureImportCatalogController?.abort())
+
 function validateFeature(key) {
   const f = featureForm.value
   const e = {}
-  if (isBlank(f.datasetId)) e.datasetId = 'Dataset 标识不能为空'
+  if (!['CREATE', 'APPEND', 'REPLACE'].includes(f.importMode)) e.importMode = '请选择导入方式'
+  if (f.importMode !== 'CREATE' && (!featureAppendSupported.value || !selectedFeatureImportDataset.value)) e.datasetId = '请加载目录并选择现有活动数据集'
+  if (f.importMode === 'REPLACE' && !f.confirmReplace) e.confirmReplace = '全量替换必须明确确认'
+  if (isBlank(f.datasetId)) e.datasetId = 'Dataset 标识不能为空' 
   else {
     const v = String(f.datasetId).trim()
     if (!DATASET_ID_RE.test(v)) e.datasetId = '仅允许字母/数字/下划线/点/短横线'
@@ -612,6 +684,9 @@ function validateFeature(key) {
     if (f.dimensionMode !== '3D') e.heightSource = 'DEM＋离地高度仅用于 3D 面要素'
     if (isBlank(f.aglHeightField)) e.aglHeightField = '请填写离地高度上限字段'
     if (!['ERROR', 'SKIP_CELL'].includes(f.demNoDataPolicy)) e.demNoDataPolicy = '请选择缺测处理方式'
+  }
+  if (f.heightSource === 'ATTRIBUTE' && (isBlank(f.minHeightField) || isBlank(f.maxHeightField))) {
+    e.minHeightField = '属性高度需要同时填写绝对底高和顶高字段（米）'
   }
   if (f.showAdvanced) {
     if (!isBlank(f.featureTypeMapping)) {
@@ -883,7 +958,7 @@ const JOB_STATUS_TEXT = {
 }
 
 const jobDisplayProgress = computed(() => dataToolProgress(jobStatus.value))
-const jobStatusText = computed(() => JOB_STATUS_TEXT[jobStatus.value?.status] || jobStatus.value?.status || '-')
+const jobStatusText = computed(() => jobStatus.value?.result?.syncPending ? '待同步（尚未全部完成）' : JOB_STATUS_TEXT[jobStatus.value?.status] || jobStatus.value?.status || '-')
 
 function validateJobId() {
   const v = String(jobForm.value.jobId || '').trim()
@@ -1228,6 +1303,17 @@ async function submitDemClassify() {
 }
 
 async function submitFeatureImport() {
+  if (submittingMap.featureImport || featureImportCatalogLoading.value) return
+  const chosenMode = featureForm.value.importMode
+  const chosenRevision = selectedFeatureImportDataset.value?.activeRevision
+  const chosenId = featureForm.value.datasetId
+  if (featureForm.value.importMode !== 'CREATE') {
+    const loaded = await loadFeatureImportDatasets()
+    if (!loaded || featureForm.value.importMode !== chosenMode || featureForm.value.datasetId !== chosenId || selectedFeatureImportDataset.value?.activeRevision !== chosenRevision) {
+      feedback.value = { type: 'error', title: '请重新确认目标数据集', detail: featureImportCatalogError.value || '活动版本已变化，请核对目录后重新提交' }
+      return
+    }
+  }
   const e = validateFeature()
   setErrors(e)
   if (hasErrors(e)) return
@@ -1236,12 +1322,19 @@ async function submitFeatureImport() {
   const f = featureForm.value
   try {
     const body = {
+      importMode: f.importMode,
       datasetId: String(f.datasetId).trim(),
       theme: f.theme,
       dimensionMode: f.dimensionMode,
       level: Number(f.level),
       input: String(f.input).trim(),
       heightSource: f.heightSource,
+    }
+    if (f.importMode !== 'CREATE') body.expectedRevision = Number(selectedFeatureImportDataset.value.activeRevision)
+    if (!isBlank(f.sourceIdField)) body.sourceIdField = String(f.sourceIdField).trim()
+    if (f.heightSource === 'ATTRIBUTE') {
+      body.minHeightField = String(f.minHeightField).trim()
+      body.maxHeightField = String(f.maxHeightField).trim()
     }
     if (f.heightSource === 'DEM_AGL') {
       body.heightReference = 'ABSOLUTE'
@@ -1260,7 +1353,7 @@ async function submitFeatureImport() {
       body.maxMappings = Number(f.maxMappings)
     }
     const data = await postJson('/api/static-features/import-jobs', body)
-    handleJobAccepted(data, '静态 Feature 导入')
+    handleJobAccepted(data, f.importMode === 'APPEND' ? '静态 Feature 追加' : '静态 Feature 导入')
   } catch (err) {
     feedback.value = { type: 'error', title: '静态 Feature 导入任务提交失败', detail: err?.message || '网络错误，请稍后重试' }
   } finally {
@@ -2112,29 +2205,61 @@ onBeforeUnmount(() => {
       <!-- 静态 Feature 导入 -->
       <section v-show="activeTab === 'featureImport'" class="storage-card">
         <div class="card-title">静态业务 Feature-DQG 导入</div>
-        <p class="card-desc">把 Shapefile/GeoJSON 通用业务要素转换为水平 DQG 稀疏关系：PostgreSQL 保存原始 Feature 与 Geometry，ClickHouse 保存查询投影。同一 datasetId 再次导入将全量覆盖该 Dataset。</p>
+        <p class="card-desc">把 Shapefile/GeoJSON 通用业务要素转换为水平 DQG 稀疏关系：PostgreSQL 保存原始 Feature 与 Geometry，ClickHouse 保存查询投影。选择“追加已有数据集”保留旧要素，只对新文件网格化；全量替换需明确确认。</p>
 
         <div class="form-grid">
+          <div class="form-field span-2 feature-import-mode">
+            <label>导入方式</label>
+            <select v-model="featureForm.importMode" :disabled="submittingMap.featureImport">
+              <option value="CREATE">新建数据集（同 ID 已存在则拒绝）</option>
+              <option value="APPEND">追加已有数据集（保留旧要素）</option>
+              <option value="REPLACE">全量替换已有数据集</option>
+            </select>
+          </div>
           <div class="form-field" :class="{ 'has-error': errors.datasetId }">
-            <label>Dataset 标识 <span class="req">*</span></label>
-            <input v-model="featureForm.datasetId" type="text" placeholder="road_deqing" @blur="validateField('datasetId')" />
+            <div class="feature-dataset-label">
+              <label for="static-feature-dataset">Dataset 标识 <span class="req">*</span></label>
+              <button
+                v-if="featureForm.importMode !== 'CREATE'"
+                class="btn-secondary feature-catalog-refresh"
+                type="button"
+                :disabled="featureImportCatalogLoading || submittingMap.featureImport"
+                :aria-busy="featureImportCatalogLoading"
+                @click="loadFeatureImportDatasets"
+              >
+                <RefreshCw :size="14" :class="{ spin: featureImportCatalogLoading }" aria-hidden="true" />
+                <span>{{ featureImportCatalogLoading ? '刷新中…' : '刷新数据集目录' }}</span>
+              </button>
+            </div>
+            <input id="static-feature-dataset" v-if="featureForm.importMode === 'CREATE'" v-model="featureForm.datasetId" type="text" placeholder="road_deqing" @blur="validateField('datasetId')" />
+            <select id="static-feature-dataset" v-else v-model="featureForm.datasetId" :disabled="featureImportCatalogLoading || submittingMap.featureImport" @change="applyFeatureImportDataset">
+              <option value="">请选择已有数据集</option>
+              <option v-for="dataset in featureImportDatasets" :key="dataset.datasetId" :value="dataset.datasetId">{{ dataset.datasetName }}（{{ dataset.datasetId }}）</option>
+            </select>
             <span v-if="errors.datasetId" class="field-error">{{ errors.datasetId }}</span>
             <span v-else class="field-hint">字母/数字/下划线/点/短横线，最长 128 字符</span>
+            <template v-if="featureForm.importMode !== 'CREATE'">
+              <span v-if="featureImportCatalogError" class="field-error">{{ featureImportCatalogError }}</span>
+              <span v-else-if="!featureImportCatalogLoading && !featureImportDatasets.length" class="field-hint">暂无可追加的活动静态 Feature 数据集。</span>
+              <span v-if="selectedFeatureImportDataset" class="field-hint">当前版本 {{ selectedFeatureImportDataset.activeRevision }} · 要素 {{ selectedFeatureImportDataset.featureCount }} · 高度基准 {{ selectedFeatureImportDataset.heightReference }}。expectedRevision 自动填写。</span>
+            </template>
           </div>
           <div class="form-field">
-            <label>Dataset 名称</label>
-            <input v-model="featureForm.datasetName" type="text" placeholder="留空时使用 datasetId" />
+            <div class="feature-dataset-label">
+              <label for="static-feature-dataset-name">Dataset 名称</label>
+            </div>
+            <input id="static-feature-dataset-name" v-model="featureForm.datasetName" :disabled="featureForm.importMode !== 'CREATE'" type="text" placeholder="留空时使用 datasetId" />
           </div>
           <div class="form-field" :class="{ 'has-error': errors.theme }">
             <label>业务主题 <span class="req">*</span></label>
-            <select v-model="featureForm.theme" @change="validateField('theme')">
+            <select v-model="featureForm.theme" :disabled="featureForm.importMode !== 'CREATE'" @change="validateField('theme')">
               <option v-for="t in FEATURE_THEMES" :key="t" :value="t">{{ t }}</option>
             </select>
             <span v-if="errors.theme" class="field-error">{{ errors.theme }}</span>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.dimensionMode }">
             <label>维度模式 <span class="req">*</span></label>
-            <select v-model="featureForm.dimensionMode" @change="validateField('dimensionMode')">
+            <select v-model="featureForm.dimensionMode" :disabled="featureForm.importMode !== 'CREATE'" @change="validateField('dimensionMode')">
               <option value="2D">2D（无 z 映射）</option>
               <option value="3D">3D（ALL 或 RANGE）</option>
             </select>
@@ -2142,7 +2267,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="form-field" :class="{ 'has-error': errors.level }">
             <label>水平 DQG 层级（1-21） <span class="req">*</span></label>
-            <input v-model.number="featureForm.level" type="number" min="1" max="21" @blur="validateField('level')" />
+            <input v-model.number="featureForm.level" :disabled="featureForm.importMode !== 'CREATE'" type="number" min="1" max="21" @blur="validateField('level')" />
             <span v-if="errors.level" class="field-error">{{ errors.level }}</span>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.input }">
@@ -2196,12 +2321,21 @@ onBeforeUnmount(() => {
           </template>
         </div>
 
+        <div v-if="featureForm.importMode !== 'CREATE'" class="form-field">
+          <label>业务唯一编号字段（可选）</label>
+          <input v-model="featureForm.sourceIdField" type="text" placeholder="如 OBJECT_ID；同编号内容不同则停止追加" />
+          <span class="field-hint">无业务编号时只跳过完全相同的几何、属性及高度；同格网的不同要素允许共存。高度来源可以重新选择，最终均使用绝对高程（米）。</span>
+        </div>
+        <label v-if="featureForm.importMode === 'REPLACE'" class="field-hint">
+          <input v-model="featureForm.confirmReplace" type="checkbox" />我确认替换该数据集全部要素（含历次追加）
+          <span v-if="errors.confirmReplace" class="field-error">{{ errors.confirmReplace }}</span>
+        </label>
         <button class="advanced-toggle" type="button" @click="featureForm.showAdvanced = !featureForm.showAdvanced">
           <component :is="featureForm.showAdvanced ? ChevronUp : ChevronDown" :size="14" />
           <span>{{ featureForm.showAdvanced ? '收起高级参数' : '展开高级参数' }}</span>
         </button>
 
-        <div v-show="featureForm.showAdvanced" class="form-grid advanced">
+        <div v-show="featureForm.showAdvanced || featureForm.heightSource === 'ATTRIBUTE'" class="form-grid advanced">
           <div class="form-field span-2" :class="{ 'has-error': errors.featureTypeMapping }">
             <label>类型值映射（JSON 对象）</label>
             <textarea
@@ -2242,9 +2376,9 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="submit-row">
-          <button class="btn-primary" type="button" :disabled="submittingMap.featureImport" @click="submitFeatureImport">
+          <button class="btn-primary" type="button" :disabled="submittingMap.featureImport || featureImportCatalogLoading || (featureForm.importMode !== 'CREATE' && !featureAppendSupported)" @click="submitFeatureImport">
             <Loader2 v-if="submittingMap.featureImport" :size="14" class="spin" />
-            <span>{{ submittingMap.featureImport ? '提交中...' : '提交导入任务' }}</span>
+            <span>{{ submittingMap.featureImport ? '提交中...' : featureForm.importMode === 'APPEND' ? '提交追加任务' : '提交导入任务' }}</span>
           </button>
           <span class="submit-hint">提交后任务进入异步队列，将自动跟踪进度</span>
         </div>
@@ -2477,7 +2611,7 @@ onBeforeUnmount(() => {
 
         <div v-if="jobStatus" class="job-result">
           <div class="job-header">
-            <span class="status-badge" :class="jobStatus.status">{{ jobStatusText }}</span>
+            <span class="status-badge" :class="jobStatus.result?.syncPending ? 'running' : jobStatus.status">{{ jobStatusText }}</span>
             <span v-if="jobPolling" class="polling-hint">每 2 秒自动刷新</span>
             <span v-else-if="jobStatus.status !== 'succeeded' && jobStatus.status !== 'failed'" class="polling-hint stopped">自动刷新已停止</span>
           </div>
@@ -2528,6 +2662,10 @@ onBeforeUnmount(() => {
           <button v-if="jobStatus.status === 'succeeded' && jobStatus.result?.gridKeyMode === 'GRID_CODE_EXACT' && jobStatus.result?.dryRun" type="button" @click="activeTab = 'parquetAttribute'">返回 Parquet 导入（预检编号已回填）</button>
           <p v-if="jobStatus.result?.classificationStatus === 'PENDING'">格点数据已激活，分类代码正在通过属性维护批次同步：{{ jobStatus.result.classificationBatchId }}。请在属性维护中核对全部成功。</p>
           <p v-if="jobStatus.result?.classificationError" class="field-error">{{ jobStatus.result.classificationError }}</p>
+          <div v-if="jobStatus.result?.importMode === 'APPEND'" class="job-result-detail">
+            <p v-if="jobStatus.result.syncPending" class="field-error">{{ jobStatus.result.message || 'PostgreSQL 已追加，ClickHouse 尚未同步完成。请重新提交原文件及参数恢复；不要修改参数反复追加。' }}</p>
+            <p v-else>{{ jobStatus.result.alreadyImported ? '同一文件已导入，本次未重复写入。' : '追加完成。' }} 原有 {{ jobStatus.result.existingFeatureCount }}，本次新增 {{ jobStatus.result.addedFeatures }}，跳过重复 {{ jobStatus.result.duplicateFeatures }}，合计 {{ jobStatus.result.totalFeatureCount }}。</p>
+          </div>
           <details v-if="jobStatus.result && Object.keys(jobStatus.result).length" class="job-result-detail">
             <summary>查看执行结果</summary>
             <pre class="result-json">{{ JSON.stringify(jobStatus.result, null, 2) }}</pre>
@@ -2940,6 +3078,36 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
 }
 
+/* 数据集目录按钮与字段标签共用一行，复用页面主题配色。 */
+.feature-import-mode > select {
+  width: calc((100% - 18px) / 2);
+}
+
+.feature-dataset-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  min-height: 30px;
+}
+
+.feature-catalog-refresh {
+  flex: 0 0 auto;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  gap: 6px;
+  color: var(--theme-nav-active-text, #2563eb);
+  border-color: color-mix(in srgb, var(--theme-nav-active-border, #60a5fa) 65%, transparent);
+  white-space: nowrap;
+}
+
+.feature-catalog-refresh:focus-visible {
+  outline: 2px solid var(--theme-nav-active-border, #60a5fa);
+  outline-offset: 2px;
+}
+
 /* 维护与查询 */
 .maintain-block {
   padding: 14px 0;
@@ -3216,6 +3384,10 @@ onBeforeUnmount(() => {
 
   .form-field.span-2 {
     grid-column: span 1;
+  }
+
+  .feature-import-mode > select {
+    width: 100%;
   }
 
   .job-meta {
