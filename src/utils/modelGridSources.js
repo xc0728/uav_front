@@ -6,6 +6,7 @@ export const MODEL_GRID_SOURCES = [
   { value: 'communication', label: '通信设施', tablePrefix: 'communicationgrid_', theme: 'communication', featureType: 'communication_facility', color: '#14b8a6', queryLevel: 17 },
   { value: 'navigation', label: '导航设施', tablePrefix: 'navigationgrid_', theme: 'navigation', featureType: 'navigation_facility', color: '#8b5cf6', queryLevel: 17 },
   { value: 'surveillance', label: '监视设施', tablePrefix: 'surveillancegrid_', theme: 'surveillance', featureType: 'surveillance_facility', color: '#f43f5e', queryLevel: 17 },
+  { value: 'crane', label: '塔吊', tablePrefix: 'cranegrid_', theme: 'structure', featureType: 'tower_crane', color: '#ef4444', queryLevel: 17 },
   { value: 'power', label: '输电设施', tablePrefix: 'powergrid_', theme: 'utility', featureType: 'power_facility', color: '#f59e0b', queryLevel: 17 },
 ]
 

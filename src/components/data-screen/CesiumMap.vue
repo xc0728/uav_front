@@ -24,6 +24,8 @@ import {
   chartFeatureTypeLabel,
   filterChartDatasetTree,
   queryChartFeatures,
+  queryCompleteGridFeatures,
+  chartFeatureColor,
   queryLod13GridFeatures,
   queryModelGridFeatures,
   sortChartFeaturesForDisplay,
@@ -331,6 +333,15 @@ async function selectGridDetail(detail) {
   }
   selected.featuresLoading = true
   try {
+    if (selected.displayOnly) {
+      const data = await queryCompleteGridFeatures(selected, { signal: request.signal })
+      if (request.signal.aborted || selectedGrid.value !== selected) return
+      selected.features = sortChartFeaturesForDisplay([...new Map(data.features.map(feature => [
+        `${feature.datasetId}-${feature.featureUid}-${feature.dimensionMode}`, feature,
+      ])).values()])
+      selected.featuresError = data.errors.length ? `部分属性未加载：${data.errors.join('；')}` : ''
+      return
+    }
     const cachedSourceMask = selected.features.reduce((mask, feature) =>
       mask | (feature.datasetId === LOD13_BUILDING_DATASET_ID ? 2 : 1), 0)
     const sourceMask = Number(selected.chartSourceMask) || cachedSourceMask
@@ -410,6 +421,8 @@ function toGridDetail(cell, bounds, fallbackLevel) {
     overviewColumnBottom: cell?.overviewColumnBottom,
     overviewColumnTop: cell?.overviewColumnTop,
     chartSourceMask: cell?.chartSourceMask,
+    displayOnly: cell?.displayOnly === true,
+    displayClasses: cell?.displayClasses,
     attributeCode: cell?.attributeCode,
     attributeId: cell?.attributeId,
     attributeProperties: cell?.attributeProperties || {},
@@ -430,7 +443,11 @@ function toGridDetail(cell, bounds, fallbackLevel) {
 function syncChartFeatureLayers(cells, previous = new Map(chartFeatureLayers.value.map(layer => [layer.type, layer.enabled]))) {
   const layers = new Map()
   cells.forEach(cell => {
-    cell.chartFeatures?.forEach(feature => {
+    ;(cell.chartFeatures || cell.displayClasses)?.forEach(category => {
+      const feature = category.type ? category : {
+        ...category, type: category.datasetId, label: chartFeatureLabel(category),
+        color: chartFeatureColor(category),
+      }
       const layer = layers.get(feature.type) || { ...feature, count: 0, enabled: previous.get(feature.type) ?? true }
       layer.count += 1
       layers.set(feature.type, layer)
@@ -453,11 +470,11 @@ function syncChartLayerMetadata(layers, previous = new Map(chartFeatureLayers.va
 
 function updateChartFeatureVisibility() {
   const enabled = new Set(chartFeatureLayers.value.filter(layer => layer.enabled).map(layer => layer.type))
-  chartGridEntities.forEach(({ entity, features }) => {
-    const activeFeature = features.find(feature => enabled.has(feature.type))
+  chartGridEntities.forEach(({ entity, features, bounds }) => {
+    const activeFeature = features.find(feature => enabled.has(feature.type || feature.datasetId))
     entity.show = Boolean(activeFeature)
     if (activeFeature) {
-      const color = Cesium.Color.fromCssColorString(activeFeature.color)
+      const color = Cesium.Color.fromCssColorString(activeFeature.color || chartFeatureColor(activeFeature, bounds))
       entity.rectangle.material = color.withAlpha(0.5)
       entity.rectangle.outlineColor = color
     }
@@ -466,17 +483,18 @@ function updateChartFeatureVisibility() {
     if (!primitive.ready || typeof primitive.getGeometryInstanceAttributes !== 'function') return
     const kind = gridPrimitiveKinds.get(primitive)
     cells.forEach((cell, index) => {
-      const activeFeature = cell.chartFeatures?.find(feature => enabled.has(feature.type))
+      const activeFeature = (cell.chartFeatures || cell.displayClasses)?.find(feature => enabled.has(feature.type || feature.datasetId))
       const attributes = primitive.getGeometryInstanceAttributes(index)
       if (!attributes) return
       attributes.show = Cesium.ShowGeometryInstanceAttribute.toValue(Boolean(activeFeature), attributes.show)
       if (activeFeature) {
         const alpha = kind === 'fill' ? 0.5 : 1
-        const color = Cesium.Color.fromCssColorString(activeFeature.color).withAlpha(alpha)
+        const color = Cesium.Color.fromCssColorString(activeFeature.color || chartFeatureColor(activeFeature, cell.bounds)).withAlpha(alpha)
         attributes.color = Cesium.ColorGeometryInstanceAttribute.toValue(color, attributes.color)
       }
     })
   })
+  instancedGridRenderers.forEach(renderer => renderer.updateChartVisibility(enabled, chartFeatureColor))
   viewer?.scene.requestRender()
 }
 
@@ -803,8 +821,8 @@ function drawGridBoundary(gridInfo, options = {}) {
       entity.__chartGridDetail = {
         ...toGridDetail(cell, { west, south, east, north, bottom, top }, gridInfo.level),
       }
-      if (cell.chartFeatures?.length) {
-        chartGridEntities.push({ entity, features: cell.chartFeatures })
+      if (cell.chartFeatures?.length || cell.displayClasses?.length) {
+        chartGridEntities.push({ entity, features: cell.chartFeatures || cell.displayClasses, bounds: cell.bounds })
       }
     })
 
@@ -1534,6 +1552,7 @@ function drawGridInstanced(gridInfo, options = {}) {
   })
   viewer.scene.primitives.add(renderer)
   instancedGridRenderers.push(renderer)
+  renderer.updateChartVisibility(new Set(enabledChartFeatureIds.value), chartFeatureColor)
 
   const extent = renderer.extent
   if (!extent || !renderer.length) {

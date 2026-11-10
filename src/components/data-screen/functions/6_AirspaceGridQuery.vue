@@ -25,6 +25,7 @@ import {
   LOD13_BUILDING_DATASET_ID,
   buildChartDatasetTree,
   chartFeatureColor,
+  chartDisplayClasses,
   chartFeatureDimensionLabel,
   chartFeatureDimensionMode,
   chartFeatureLabel,
@@ -49,6 +50,7 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'showPoint', 'showGrid', 'get-view-bounds'])
 const chartMode = computed(() => props.functionName === '航图要素网格查询')
+const simplifiedChartQuery = ref(false)
 const trueAltitudeMode = computed(() => props.functionName === '真高空域网格查询')
 const trueAltitudeDatasetMode = computed(() => trueAltitudeMode.value || chartMode.value)
 
@@ -432,6 +434,15 @@ async function buildDisplayedCells(rawGrids, signal, { updateSummary = true, ren
   // 避免为数十万个格元构造 description、features 和 chartFeatures 对象。
   if (renderOnly) {
     return cells.flatMap(cell => {
+      if (cell.displayOnly) {
+        const classes = chartDisplayClasses(cell)
+        if (!classes.length) return []
+        return [{
+          code: cell.code, level: cell.level, bounds: cell.bounds,
+          displayOnly: true, displayClasses: classes,
+          color: chartFeatureColor(classes[0], cell.bounds),
+        }]
+      }
       const features = cell.features || []
       if (features.length === 0) return []
       const primaryFeature = features.find(feature => feature.dimensionMode === '3D') || features[0]
@@ -521,6 +532,8 @@ watch(gridAttributeTopicGroups, groups => {
 }, { flush: 'post' })
 
 async function queryAndRenderChartPages(basePayload, controller, options = {}) {
+  // 一次查询固定模式，切换勾选仅影响下一次请求。
+  basePayload = { ...basePayload, displayOnly: simplifiedChartQuery.value }
   const emitGrid = options.emitGrid || (payload => emit('showGrid', payload))
   let lastStats
   const setStats = stats => {
@@ -565,9 +578,11 @@ async function queryAndRenderChartPages(basePayload, controller, options = {}) {
         cell.datasetId ??= page?.data?.datasetId || basePayload.datasetId
         cell.datasetVersion ??= page?.data?.datasetVersion
       })
-      const pageFeatures = rawCells.flatMap(cell => cell.features || [])
+      const pageFeatures = rawCells.flatMap(cell => cell.displayOnly
+        ? chartDisplayClasses(cell).map(category => ({ ...category, code: cell.code }))
+        : cell.features || [])
       for (const feature of pageFeatures) {
-        const id = `${feature.datasetId || ''}\u0000${feature.featureUid || ''}`
+        const id = basePayload.displayOnly ? feature.code : `${feature.datasetId || ''}\u0000${feature.featureUid || ''}`
         if (feature.dimensionMode === '3D') feature3DIds.add(id)
         else feature2DIds.add(id)
         const dataset = datasets.get(feature.datasetId) || {
@@ -598,6 +613,7 @@ async function queryAndRenderChartPages(basePayload, controller, options = {}) {
         features2D: feature2DIds.size,
         features3D: feature3DIds.size,
         datasets: [...datasets.values()],
+        displayOnly: basePayload.displayOnly,
         baseDatasetId: page?.data?.datasetId || basePayload.datasetId,
         baseDatasetVersion: page?.data?.datasetVersion,
         mappings,
@@ -1626,6 +1642,11 @@ function clearGrids() {
       </div>
 
       <div v-if="chartSelectionRequired" class="form-group">
+        <label class="dataset-hint">
+          <input v-model="simplifiedChartQuery" type="checkbox" :disabled="loading || dynamicLoading" />
+          精简查询
+        </label>
+        <div class="dataset-hint">仅加载网格分类信息，点击查看完整关联属性；切换后下次查询生效。</div>
         <div class="dataset-title-row">
           <div class="group-title">查询要素（已选 {{ selectedDatasetIds.length }}）</div>
           <div class="dataset-actions">
@@ -1882,10 +1903,10 @@ function clearGrids() {
         </div>
         <div class="chart-summary-counts">
           <span>要素网格 <b>{{ chartSummary.grids }}</b></span>
-          <span>二维要素 <b>{{ chartSummary.features2D }}</b></span>
-          <span>三维要素 <b>{{ chartSummary.features3D }}</b></span>
+          <span>{{ chartSummary.displayOnly ? '二维覆盖格元' : '二维要素' }} <b>{{ chartSummary.features2D }}</b></span>
+          <span>{{ chartSummary.displayOnly ? '三维覆盖格元' : '三维要素' }} <b>{{ chartSummary.features3D }}</b></span>
           <span v-if="chartSummary.lod13Grids">LOD1.3网格 <b>{{ chartSummary.lod13Grids }}</b></span>
-          <span>关联映射 <b>{{ chartSummary.mappings }}</b></span>
+          <span v-if="!chartSummary.displayOnly">关联映射 <b>{{ chartSummary.mappings }}</b></span>
         </div>
         <div v-if="chartSummary.truncated" class="chart-warning">航图数据未完整返回，请检查分批查询异常。</div>
         <ChartLegend v-if="chartSummary.datasets.length" :items="chartSummary.datasets" />

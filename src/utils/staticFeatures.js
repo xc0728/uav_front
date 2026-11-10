@@ -18,6 +18,7 @@ export const CHART_THEMES = [
 
 export const LOD13_BUILDING_DATASET_ID = 'deqing_lod13_buildings'
 export const MODEL_GRID_DATASET_IDS = Object.freeze({
+  osgb: 'deqing_model_grid_osgb',
   lod13: LOD13_BUILDING_DATASET_ID,
   communication: 'deqing_model_grid_communication',
   navigation: 'deqing_model_grid_navigation',
@@ -179,6 +180,8 @@ function normalizeActiveDataset(item, index) {
   return dataset
 }
 
+let availableModelGridSources = null
+
 async function loadModelGridSources(signal) {
   const response = await fetch('/api/multiSource/triangleGrid/modelGridSources', { signal })
   // 旧部署可能没有来源目录；仅在路由缺失时探测现有建筑查询能力。
@@ -200,12 +203,14 @@ async function loadModelGridSources(signal) {
       throw new Error('建筑物查询能力检查失败：未返回有效的 ClickHouse 响应')
     }
     // 微小范围仅验证接口可查询，不推断全库是否有数据，也不伪造映射总数。
-    return [{ source: 'lod13', queryAvailable: true, levels: [LEGACY_BUILDING_MODEL_SOURCE.queryLevel] }]
+    availableModelGridSources = [{ source: 'lod13', queryAvailable: true, levels: [LEGACY_BUILDING_MODEL_SOURCE.queryLevel] }]
+    return availableModelGridSources
   }
   if (!response.ok) throw new Error(await errorMessage(response, `模型格网目录读取失败（${response.status}）`))
   const body = await response.json()
   if (body.status !== 'success' || !Array.isArray(body.data?.items)) throw new Error(body.message || '模型格网目录响应无效')
-  return body.data.items
+  availableModelGridSources = body.data.items
+  return availableModelGridSources
 }
 
 export async function loadAvailableChartDatasets({ signal, includeLod13 = true, onModelSourceError } = {}) {
@@ -425,6 +430,25 @@ function chartFeatureIdentity(feature) {
   ].map(value => String(value ?? '')).join('\u0000')
 }
 
+// 每页编号先解析为共享分类对象，再跨来源合并，避免不同页的编号发生冲突。
+const displayClassCache = new Map()
+export function chartDisplayClasses(cell) {
+  const values = cell.displayClasses || cell.features || []
+  const classes = new Map()
+  for (const value of values) {
+    const key = `${value.datasetId}\u0000${value.dimensionMode}`
+    if (!displayClassCache.has(key)) displayClassCache.set(key, {
+      datasetId: value.datasetId,
+      dimensionMode: chartFeatureDimensionMode(value),
+      modelSource: MODEL_GRID_SOURCE_BY_DATASET_ID.get(value.datasetId),
+    })
+    if (!classes.has(key)) classes.set(key, displayClassCache.get(key))
+  }
+  return [...classes.values()].sort((a, b) =>
+    Number(b.dimensionMode === '3D') - Number(a.dimensionMode === '3D')
+    || String(a.datasetId).localeCompare(String(b.datasetId)))
+}
+
 function mergeChartCells(groups) {
   const merged = new Map()
   groups.flat().forEach(cell => {
@@ -435,6 +459,11 @@ function mergeChartCells(groups) {
       merged.set(code, { ...cell, features: [...(cell.features || [])] })
       return
     }
+    if (existing.displayClasses || cell.displayClasses) {
+      existing.displayClasses = chartDisplayClasses({
+        displayClasses: [...chartDisplayClasses(existing), ...chartDisplayClasses(cell)],
+      })
+    }
     const features = [...(existing.features || []), ...(cell.features || [])]
     existing.features = [...new Map(features.map(feature => [chartFeatureIdentity(feature), feature])).values()]
   })
@@ -444,7 +473,10 @@ function mergeChartCells(groups) {
 export async function queryChartRegion(payload, { signal, cursor } = {}) {
   const body = { ...payload, ...(cursor ? { cursor } : {}) }
   if (!body.datasetIds?.length && !body.featureTypes?.length && !body.themes?.length) body.themes = CHART_THEMES
-  const response = await fetch('/api/static-features/region/grids', {
+  const endpoint = body.displayOnly === true
+    ? '/api/static-features/region/display-grids' : '/api/static-features/region/grids'
+  delete body.displayOnly
+  const response = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -582,6 +614,7 @@ export async function queryModelGridFeatures(cell, source, { signal } = {}) {
   if (body?.data?.data_source !== 'clickhouse') {
     throw new Error(`${sourceConfig.label}属性查询未使用 ClickHouse`)
   }
+  if (body?.data?.hasMore === true) throw new Error(`${sourceConfig.label}单格属性结果被截断，未作为完整结果展示`)
   const rows = (body?.data?.cells || []).filter(row => String(row?.code || '') === code.replace(/^dqg/, ''))
   return rows.flatMap(row => {
     const properties = Array.isArray(row.properties) && row.properties.length ? row.properties : [{}]
@@ -633,7 +666,21 @@ export async function queryChartSourcePages(payload, { signal, onPage } = {}) {
   async function fetchNext(state) {
     const response = await state.query(state.cursor)
     const data = response?.data || {}
-    const cells = data.cells || []
+    let cells = data.cells || []
+    if (payload.displayOnly === true) {
+      const dictionary = new Map((data.displayClasses || []).map(category => [category.id, category]))
+      cells = cells.map(cell => {
+        const { features, classIds, ...grid } = cell
+        const displayClasses = classIds
+          ? classIds.map(id => {
+              const category = dictionary.get(id)
+              if (!category) throw new Error('精简展示分类编号无效')
+              return category
+            })
+          : chartDisplayClasses(cell)
+        return { ...grid, displayOnly: true, displayClasses }
+      })
+    }
     const scannedCursor = data.scannedCursor || lastGridCode(cells) || data.nextCursor
     if (data.hasMore === true && !scannedCursor) {
       throw new Error(`${state.name} 航图分页返回 hasMore，但当前页没有可推进游标`)
@@ -683,7 +730,8 @@ export async function queryChartSourcePages(payload, { signal, onPage } = {}) {
       ...(staticResponse?.data || modelGridResponse?.data || states[0]?.response?.data || {}),
       cells,
       matchedCount: cells.length,
-      mappingCount: features.length,
+      mappingCount: payload.displayOnly ? null : features.length,
+      displayOnly: payload.displayOnly === true,
       lod13Count: new Set(features
         .filter(feature => feature.datasetId === LOD13_BUILDING_DATASET_ID)
         .map(feature => feature.code)).size,
@@ -812,7 +860,7 @@ async function postGridFeatures(payload, signal) {
   return response.json()
 }
 
-export async function queryChartFeatures(cells, { signal, includeRelatedLevels = false } = {}) {
+export async function queryChartFeatures(cells, { signal, includeRelatedLevels = false, complete = false } = {}) {
   const groups = new Map()
   for (const cell of cells) {
     const code = String(cell.code || '')
@@ -839,7 +887,23 @@ export async function queryChartFeatures(cells, { signal, includeRelatedLevels =
   await Promise.all(Array.from({ length: Math.min(MAX_CONCURRENCY, jobs.length) }, async () => {
     while (nextJob < jobs.length) {
       const index = nextJob++
-      responses[index] = await postGridFeatures(jobs[index], signal)
+      if (!complete) {
+        responses[index] = await postGridFeatures(jobs[index], signal)
+        continue
+      }
+      const combined = { features2D: [], features3D: [], truncated: false }
+      let cursor
+      do {
+        const page = await postGridFeatures({ ...jobs[index], pageSize: 1000, ...(cursor ? { cursor } : {}) }, signal)
+        combined.features2D.push(...(page?.data?.features2D || []))
+        combined.features3D.push(...(page?.data?.features3D || []))
+        if (page?.data?.hasMore !== true) break
+        const next = page.data.nextCursor
+        if (!next || (cursor && Number(next) <= Number(cursor))) throw new Error('属性分页游标未推进')
+        cursor = next
+      } while (!signal?.aborted)
+      if (signal?.aborted) throw new DOMException('查询已取消', 'AbortError')
+      responses[index] = { data: combined }
     }
   }))
 
@@ -851,6 +915,46 @@ export async function queryChartFeatures(cells, { signal, includeRelatedLevels =
   }, { features2D: [], features3D: [], truncated: false })
 }
 
+
+// 点击范围独立于勾选项；失败来源单独报告，已成功的属性仍可查看。
+export async function queryCompleteGridFeatures(cell, { signal } = {}) {
+  const features = []
+  const errors = []
+  const jobs = [async () => {
+    const data = await queryChartFeatures([cell], { signal, includeRelatedLevels: true, complete: true })
+    features.push(...data.features2D, ...data.features3D)
+  }]
+  const staticTask = jobs.shift()().catch(error => {
+    if (!signal?.aborted) errors.push(error?.message || '静态属性读取失败')
+  })
+  try {
+    const sources = availableModelGridSources || await loadModelGridSources(signal)
+    for (const item of sources) {
+      if (Array.isArray(item.levels) && !item.levels.map(Number).includes(Number(cell.level))) continue
+      if (!MODEL_GRID_SOURCES.some(source => source.value === item.source)) {
+        errors.push(`未识别的模型来源：${item.source}`)
+        continue
+      }
+      jobs.push(async () => { features.push(...await queryModelGridFeatures(cell, item.source, { signal })) })
+    }
+  } catch (error) {
+    if (signal?.aborted) throw error
+    errors.push(error?.message || '模型来源目录读取失败')
+  }
+  let next = 0
+  await Promise.all(Array.from({ length: Math.min(3, jobs.length) }, async () => {
+    while (next < jobs.length && !signal?.aborted) {
+      const job = jobs[next++]
+      try { await job() } catch (error) {
+        if (signal?.aborted) throw error
+        errors.push(error?.message || '关联属性读取失败')
+      }
+    }
+  }))
+  await staticTask
+  if (signal?.aborted) throw new DOMException('查询已取消', 'AbortError')
+  return { features, errors }
+}
 
 export function featuresByGrid(features2D, features3D) {
   const result = new Map()

@@ -101,6 +101,7 @@ uniform float u_alpha;
 uniform float u_farBrightness;
 
 void main() {
+  if (v_color.a == 0.0) discard;
   vec3 shadedColor = v_color.rgb * mix(1.05, u_farBrightness, v_depthMix);
   out_FragColor = vec4(shadedColor, v_color.a * u_alpha * v_visualAlpha);
   czm_writeLogDepth();
@@ -140,6 +141,7 @@ function packCells(cells, defaultLevel) {
   const overviewSegmentIndexes = new Uint8Array(cells.length)
   const overviewSegmentCounts = new Uint8Array(cells.length)
   const overviewColumnBounds = new Float64Array(cells.length * 2)
+  const displayClasses = new Array(cells.length)
   const chartSourceMasks = new Uint8Array(cells.length)
   const datasetIds = new Array(cells.length)
   const datasetVersions = new Float64Array(cells.length)
@@ -174,6 +176,7 @@ function packCells(cells, defaultLevel) {
     overviewSegmentCounts[validCount] = Number(cells[index].overviewSegmentCount) || 0
     overviewColumnBounds[validCount * 2] = Number(cells[index].overviewColumnBottom ?? values[4])
     overviewColumnBounds[validCount * 2 + 1] = Number(cells[index].overviewColumnTop ?? values[5])
+    displayClasses[validCount] = cells[index].displayOnly ? cells[index].displayClasses : undefined
     chartSourceMasks[validCount] = Number(cells[index].chartSourceMask) || 0
     datasetIds[validCount] = cells[index].datasetId
     datasetVersions[validCount] = Number(cells[index].datasetVersion) || 0
@@ -208,6 +211,7 @@ function packCells(cells, defaultLevel) {
     overviewSegmentIndexes: validCount === cells.length ? overviewSegmentIndexes : overviewSegmentIndexes.slice(0, validCount),
     overviewSegmentCounts: validCount === cells.length ? overviewSegmentCounts : overviewSegmentCounts.slice(0, validCount),
     overviewColumnBounds: validCount === cells.length ? overviewColumnBounds : overviewColumnBounds.slice(0, validCount * 2),
+    displayClasses: displayClasses.slice(0, validCount),
     chartSourceMasks: validCount === cells.length ? chartSourceMasks : chartSourceMasks.slice(0, validCount),
     datasetIds: datasetIds.slice(0, validCount),
     datasetVersions: validCount === cells.length ? datasetVersions : datasetVersions.slice(0, validCount),
@@ -332,6 +336,8 @@ export default class InstancedGridRenderer {
       overviewSegmentCount: this._packed.overviewSegmentCounts[instanceId],
       overviewColumnBottom: this._packed.overviewColumnBounds[instanceId * 2],
       overviewColumnTop: this._packed.overviewColumnBounds[instanceId * 2 + 1],
+      displayOnly: Boolean(this._packed.displayClasses[instanceId]),
+      displayClasses: this._packed.displayClasses[instanceId],
       chartSourceMask: this._packed.chartSourceMasks[instanceId],
       datasetId: this._packed.datasetIds[instanceId],
       datasetVersion: this._packed.datasetVersions[instanceId] || undefined,
@@ -346,10 +352,28 @@ export default class InstancedGridRenderer {
     }
   }
 
+  updateChartVisibility(enabled, colorForClass) {
+    if (!this._packed.colors || !this._packed.displayClasses.some(Boolean)) return
+    if (!this._chartVisibilityUpdated && this._packed.displayClasses.every(classes =>
+      !classes || classes.every(category => enabled.has(category.datasetId)))) return
+    this._chartVisibilityUpdated = true
+    const cache = new Map()
+    for (let index = 0; index < this.length; index++) {
+      const classes = this._packed.displayClasses[index]
+      if (!classes) continue
+      const category = classes.find(item => enabled.has(item.datasetId))
+      const bounds = this.getCell(index).bounds
+      const color = parseColor(category ? colorForClass(category, bounds) : '#00000000', cache)
+      this._packed.colors.set(color, index * 4)
+    }
+    if (this._resources) this._resources.colorBuffer.copyFromArrayView(this._packed.colors)
+  }
+
   getCellAt(longitude, latitude, height = 0) {
     if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return undefined
     const bounds = this._packed.detailBounds
     for (let index = 0; index < this.length; index++) {
+      if (this._packed.displayClasses[index] && this._packed.colors?.[index * 4 + 3] === 0) continue
       const offset = index * 6
       if (longitude >= bounds[offset] && longitude <= bounds[offset + 2]
         && latitude >= bounds[offset + 1] && latitude <= bounds[offset + 3]
@@ -395,6 +419,7 @@ export default class InstancedGridRenderer {
     }
 
     for (let index = 0; index < this.length; index++) {
+      if (this._packed.displayClasses[index] && this._packed.colors?.[index * 4 + 3] === 0) continue
       const offset = index * 6
       localBounds.minX = (bounds[offset] - centerLongitude) * longitudeMetersPerDegree
       localBounds.maxX = (bounds[offset + 2] - centerLongitude) * longitudeMetersPerDegree
@@ -489,7 +514,7 @@ export default class InstancedGridRenderer {
       usage: Cesium.BufferUsage.STATIC_DRAW,
     })
     // GPU owns the instance payload after upload; do not retain a second CPU copy.
-    this._packed.colors = null
+    if (!this._packed.displayClasses.some(Boolean)) this._packed.colors = null
     this._packed.gridIndices = null
     vertexBuffer.vertexArrayDestroyable = false
     rtcGeometryBuffer.vertexArrayDestroyable = false
@@ -634,7 +659,7 @@ export default class InstancedGridRenderer {
     this._destroyResources()
     this._packed = {
       colors: null, gridIndices: null, detailBounds: null,
-      codes: [], levels: [], gridTypes: [], chartSourceMasks: [], extent: null, validCount: 0,
+      codes: [], levels: [], gridTypes: [], displayClasses: [], chartSourceMasks: [], extent: null, validCount: 0,
     }
     this._destroyed = true
     return undefined

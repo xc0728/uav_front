@@ -131,6 +131,8 @@ export function toAirspaceMapCells(rawGrids) {
         dimensionMode: grid.dimensionMode ?? null,
         verticalInterpretation: grid.verticalInterpretation ?? null,
         fillStatus: grid.fillStatus ?? null,
+        displayOnly: cell.displayOnly === true,
+        displayClasses: cell.displayClasses,
         features: Array.isArray(cell.features) ? cell.features : null,
       }
     })
