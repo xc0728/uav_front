@@ -1,4 +1,5 @@
 import * as Cesium from 'cesium'
+import { chartGridSourceMask } from '../chartGridSources.js'
 import { rayAabbEntryDistance } from './gridPicking.js'
 
 const CUBE_VERTICES = new Float32Array([
@@ -177,7 +178,7 @@ function packCells(cells, defaultLevel) {
     overviewColumnBounds[validCount * 2] = Number(cells[index].overviewColumnBottom ?? values[4])
     overviewColumnBounds[validCount * 2 + 1] = Number(cells[index].overviewColumnTop ?? values[5])
     displayClasses[validCount] = cells[index].displayOnly ? cells[index].displayClasses : undefined
-    chartSourceMasks[validCount] = Number(cells[index].chartSourceMask) || 0
+    chartSourceMasks[validCount] = chartGridSourceMask(cells[index])
     datasetIds[validCount] = cells[index].datasetId
     datasetVersions[validCount] = Number(cells[index].datasetVersion) || 0
     attributeCodes[validCount] = cells[index].attributeCode

@@ -1,4 +1,7 @@
 <script setup>
+import { runChartProgressiveSession } from "../../../utils/chartProgressiveSession.js"
+import { progressiveChartEnabled } from "../../../utils/chartProgressiveScheduler.js"
+import { chartGridSourceMask } from '../../../utils/chartGridSources.js'
 import { isDailyWeatherField } from '../../../utils/weatherField.js'
 import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { availableGridAttributeGroups, loadGridAttributeCatalog as fetchGridAttributeCatalog, loadActiveAttributeDatasets, GRID_ATTRIBUTE_CATALOG_CHANGED } from '../../../utils/gridAttributeCatalog.js'
@@ -51,6 +54,8 @@ const props = defineProps({
 const emit = defineEmits(['close', 'showPoint', 'showGrid', 'get-view-bounds'])
 const chartMode = computed(() => props.functionName === '航图要素网格查询')
 const simplifiedChartQuery = ref(false)
+const progressiveChartQuery = ref(false)
+const progressiveSourceStatus = ref({})
 const trueAltitudeMode = computed(() => props.functionName === '真高空域网格查询')
 const trueAltitudeDatasetMode = computed(() => trueAltitudeMode.value || chartMode.value)
 
@@ -440,15 +445,14 @@ async function buildDisplayedCells(rawGrids, signal, { updateSummary = true, ren
         return [{
           code: cell.code, level: cell.level, bounds: cell.bounds,
           displayOnly: true, displayClasses: classes,
+          chartSourceMask: chartGridSourceMask(cell),
           color: chartFeatureColor(classes[0], cell.bounds),
         }]
       }
       const features = cell.features || []
       if (features.length === 0) return []
       const primaryFeature = features.find(feature => feature.dimensionMode === '3D') || features[0]
-      const chartSourceMask = features.reduce((mask, feature) => (
-        mask | (feature.datasetId === LOD13_BUILDING_DATASET_ID ? 2 : 1)
-      ), 0)
+      const chartSourceMask = chartGridSourceMask(cell)
       return [{
         code: cell.code,
         level: cell.level,
@@ -530,6 +534,70 @@ watch(gridAttributeTopicGroups, groups => {
   attributeCatalogNotice.value = '原选中属性已停用、删除或未绑定当前活动版本，请重新选择查询内容。'
   emit('showGrid', { cells: [], level: Number(airspaceGridForm.level) })
 }, { flush: 'post' })
+
+
+/// 新路径不进入原分页去重及水位合并逻辑。
+async function queryAndRenderProgressiveChart(basePayload, controller, options = {}) {
+  const startedAt = performance.now()
+  const active = () => !controller.signal.aborted
+  const payload = { ...basePayload, datasetIds: [...basePayload.datasetIds], displayOnly: true }
+  const emitGrid = value => { if (active()) emit('showGrid', value) }
+  progressiveSourceStatus.value = {}
+  chartSummary.value = null
+  result.value = null
+  queryStats.value = { total: 0, rendered: 0, complete: false, status: "loading" }
+  const outcome = await runChartProgressiveSession(payload, {
+    signal: controller.signal,
+    onStart: id => emitGrid({ progressiveChart: { id, operation: 'start' }, cells: [] }),
+    onStatus: status => {
+      if (active()) progressiveSourceStatus.value = { ...progressiveSourceStatus.value, [status.source]: status }
+    },
+    onBatch: async batch => {
+      if (!active()) return
+      const cells = toMapCells(batch.cells).map(cell => ({
+        ...cell, datasetId: cell.datasetId ?? basePayload.datasetId,
+        datasetVersion: cell.datasetVersion ?? batch.data.datasetVersion,
+        displayOnly: true, displayClasses: chartDisplayClasses(cell),
+        color: chartFeatureColor(chartDisplayClasses(cell)[0], cell.bounds),
+      }))
+      const datasets = batch.summary.datasets.map(item => ({
+        ...item, label: chartFeatureLabel(item), color: chartFeatureColor(item),
+        dimensionMode: chartFeatureDimensionMode(item),
+      }))
+      chartSummary.value = { ...batch.summary, datasets, truncated: false,
+        baseDatasetId: basePayload.datasetId, baseDatasetVersion: batch.data.datasetVersion }
+      queryStats.value = { total: batch.summary.grids, rendered: batch.summary.grids,
+        pages: batch.pages, complete: false, status: 'loading' }
+      result.value = { status: 'success', data: { ...batch.data, cells: batch.cells, hasMore: true } }
+      emitGrid({
+        progressiveChart: { id: batch.id, operation: 'upsert' },
+        cells, level: Number(payload.level), runtime: performance.now() - startedAt,
+        total: batch.summary.grids, skipFlyTo: true,
+        chartLayers: datasets.map(item => ({ ...item, type: item.id })),
+        ...getGridVisualStyle(batch.summary.grids, false),
+      })
+      await new Promise(resolve => setTimeout(resolve, 0))
+    },
+  })
+  if (!active()) return null
+  const message = outcome.failures.map(item => item.source + '：' + item.message).join('；')
+  if (message) error.value = '部分来源查询失败：' + message
+  queryStats.value = { total: outcome.summary.grids, rendered: outcome.summary.grids,
+    pages: outcome.pages, complete: outcome.complete, status: outcome.complete ? 'success' : 'error' }
+  if (result.value?.data) Object.assign(result.value.data, { hasMore: false,
+    complete: outcome.complete, sourceErrors: outcome.failures })
+  gridsData.value = []
+  return { total: outcome.summary.grids, displayed: outcome.summary.grids,
+    runtime: performance.now() - startedAt, complete: outcome.complete }
+}
+
+function queryChartPagesForSelection(payload, controller, options = {}) {
+  if (progressiveChartEnabled({ chartMode: chartMode.value, simplified: simplifiedChartQuery.value,
+    progressive: progressiveChartQuery.value, overlay: overlayChartActive.value })) {
+    return queryAndRenderProgressiveChart(payload, controller, options)
+  }
+  return queryAndRenderChartPages(payload, controller, options)
+}
 
 async function queryAndRenderChartPages(basePayload, controller, options = {}) {
   // 一次查询固定模式，切换勾选仅影响下一次请求。
@@ -1010,10 +1078,10 @@ async function onViewBoundsChanged(bounds) {
       return
     }
     if (chartMode.value) {
-      const pagedResult = await queryAndRenderChartPages(payload, controller, { skipFlyTo: true })
+      const pagedResult = await queryChartPagesForSelection(payload, controller, { skipFlyTo: true })
       if (!pagedResult || controller.signal.aborted) return
       dynamicRuntime.value = pagedResult.runtime
-      if (pagedResult.total === 0) queryStats.value = { total: 0, status: 'empty' }
+      if (pagedResult.total === 0 && pagedResult.complete !== false) queryStats.value = { total: 0, status: 'empty' }
       return
     }
 
@@ -1352,9 +1420,9 @@ async function submitAirspaceGridQuery() {
       return
     }
     if (chartMode.value) {
-      const pagedResult = await queryAndRenderChartPages(payload, controller)
+      const pagedResult = await queryChartPagesForSelection(payload, controller)
       if (!pagedResult || controller.signal.aborted) return
-      if (pagedResult.total === 0) {
+      if (pagedResult.total === 0 && pagedResult.complete !== false) {
         error.value = '未查询到航图网格数据'
         queryStats.value = { total: 0, status: 'empty' }
       }
@@ -1647,6 +1715,18 @@ function clearGrids() {
           精简查询
         </label>
         <div class="dataset-hint">仅加载网格分类信息，点击查看完整关联属性；切换后下次查询生效。</div>
+        <label class="dataset-hint">
+          <input v-model="progressiveChartQuery" type="checkbox"
+            :disabled="!simplifiedChartQuery || !chartMode || overlayChartActive || loading || dynamicLoading" />
+          渐进加载
+        </label>
+        <div class="dataset-hint">需同时勾选精简查询；各来源先到先显示，后续补齐分类。叠加查询沿用原策略。</div>
+        <div v-if="progressiveChartQuery && simplifiedChartQuery && chartMode && !overlayChartActive" class="dataset-hint">
+          <div v-for="status in Object.values(progressiveSourceStatus)" :key="status.source">
+            {{ status.source }}：{{ status.status === 'error' ? status.message : status.status === 'success' ? '已完成' : '加载中' }}
+            （{{ status.pages }} 页）
+          </div>
+        </div>
         <div class="dataset-title-row">
           <div class="group-title">查询要素（已选 {{ selectedDatasetIds.length }}）</div>
           <div class="dataset-actions">

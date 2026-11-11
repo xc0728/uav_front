@@ -25,6 +25,7 @@ import {
   filterChartDatasetTree,
   queryChartFeatures,
   queryCompleteGridFeatures,
+  queryChartCellFeatures,
   chartFeatureColor,
   queryLod13GridFeatures,
   queryModelGridFeatures,
@@ -35,6 +36,7 @@ import ChartLegend from './functions/ChartLegend.vue'
 import ConflictCheckOptions from './functions/ConflictCheckOptions.vue'
 import ConflictCheckResult from './functions/ConflictCheckResult.vue'
 import { createConflictForm, buildConflictPayload, requestConflictCheck, conflictDisplayGrids, conflictReasonsText, buildAstarPayload, requestAstarPath } from '../../utils/conflictCheck.js'
+import ProgressiveChartLayer from '../../utils/cesium/ProgressiveChartLayer.js'
 import InstancedGridRenderer from '../../utils/cesium/InstancedGridRenderer.js'
 import GridRendererManager, { GRID_RENDERER } from '../../utils/cesium/GridRendererManager.js'
 import { buildGridHighlightPaths } from '../../utils/cesium/gridHighlight.js'
@@ -161,6 +163,8 @@ let gridPrimitives = []
 let gridPrimitiveCells = new Map()
 let gridPrimitiveKinds = new Map()
 let instancedGridRenderers = []
+let progressiveChartLayer = null
+let progressiveChartId = null
 let chartGridEntities = []
 let selectedGridHighlight = null
 const gridRendererManager = new GridRendererManager()
@@ -342,31 +346,13 @@ async function selectGridDetail(detail) {
       selected.featuresError = data.errors.length ? `部分属性未加载：${data.errors.join('；')}` : ''
       return
     }
-    const cachedSourceMask = selected.features.reduce((mask, feature) =>
-      mask | (feature.datasetId === LOD13_BUILDING_DATASET_ID ? 2 : 1), 0)
-    const sourceMask = Number(selected.chartSourceMask) || cachedSourceMask
-    const [staticData, lod13Features] = await Promise.all([
-      !selected.modelSource && (sourceMask === 0 || (sourceMask & 1) !== 0)
-        ? queryChartFeatures([selected], {
-            signal: request.signal,
-            includeRelatedLevels: true,
-          })
-        : Promise.resolve({ features2D: [], features3D: [], truncated: false }),
-      selected.modelSource
-        ? queryModelGridFeatures(selected, selected.modelSource, { signal: request.signal })
-        : (sourceMask & 2) !== 0
-          ? queryLod13GridFeatures(selected, { signal: request.signal })
-          : Promise.resolve([]),
-    ])
+    const data = await queryChartCellFeatures(selected, {
+      signal: request.signal,
+      includeRelatedLevels: true,
+    })
     if (request.signal.aborted || selectedGrid.value !== selected) return
-    selected.features = sortChartFeaturesForDisplay([...new Map([
-      ...staticData.features2D,
-      ...staticData.features3D,
-      ...lod13Features,
-    ].map(feature => [
-      `${feature.datasetId}-${feature.featureUid}-${feature.dimensionMode}`, feature,
-    ])).values()])
-    selected.featuresTruncated = staticData.truncated
+    selected.features = data.features
+    selected.featuresTruncated = data.truncated
   } catch (error) {
     if (!request.signal.aborted && selectedGrid.value === selected) {
       selected.featuresError = error?.message || '航图要素属性加载失败'
@@ -697,9 +683,52 @@ function flyToPoint(lon, lat, height = 0) {
   }
 }
 
+
+/// 渐进消息独立于原空数组清屏及 append 分支。
+function drawProgressiveChart(gridInfo) {
+  const { id, operation } = gridInfo.progressiveChart
+  if (operation === 'start') {
+    clearGridVisual()
+    progressiveChartId = id
+    progressiveChartLayer = new ProgressiveChartLayer({
+      createRenderer: (cells, options) => {
+        const renderer = new InstancedGridRenderer({ ...options, cells })
+        viewer.scene.primitives.add(renderer)
+        instancedGridRenderers.push(renderer)
+        renderer.updateChartVisibility(new Set(enabledChartFeatureIds.value), chartFeatureColor)
+        return renderer
+      },
+      removeRenderer: renderer => {
+        instancedGridRenderers = instancedGridRenderers.filter(item => item !== renderer)
+        viewer.scene.primitives.remove(renderer)
+      },
+    })
+    gridResultState.visible = false
+    return
+  }
+  if (id !== progressiveChartId || !progressiveChartLayer) return
+  syncChartLayerMetadata(gridInfo.chartLayers)
+  progressiveChartLayer.apply(colorizeGridCells(gridInfo.cells || []), gridInfo)
+  // 原实例列表继续负责拾取和分类显隐；更新后的批次只注册一次。
+  const enabled = new Set(enabledChartFeatureIds.value)
+  instancedGridRenderers.forEach(renderer => renderer.updateChartVisibility(enabled, chartFeatureColor))
+  gridResultState.levels = collectGridLevels(gridInfo.cells || [], gridInfo.level)
+    .map(item => ({ ...item, count: gridInfo.total }))
+  gridResultState.total = gridInfo.total
+  gridResultState.runtime = formatRuntime(gridInfo.runtime)
+  gridResultState.visible = gridInfo.total > 0
+  applyGridResultMetadata(gridInfo)
+  viewer.scene.requestRender()
+}
+
 function drawGridBoundary(gridInfo, options = {}) {
   if (!viewer || !gridInfo) {
     console.log('[CesiumMap] drawGridBoundary: viewer 或 gridInfo 不存在')
+    return
+  }
+
+  if (gridInfo.progressiveChart) {
+    drawProgressiveChart(gridInfo)
     return
   }
 
@@ -1482,6 +1511,9 @@ function clearPolygonVisual() {
 
 function clearGridVisual() {
   if (!viewer) return
+  progressiveChartLayer?.destroy()
+  progressiveChartLayer = null
+  progressiveChartId = null
 
   instancedGridRenderers.forEach(renderer => viewer.scene.primitives.remove(renderer))
   instancedGridRenderers = []
@@ -5031,6 +5063,9 @@ onBeforeUnmount(() => {
     handler = null
   }
   if (viewer) {
+    progressiveChartLayer?.destroy()
+    progressiveChartLayer = null
+    progressiveChartId = null
     viewer.destroy()
     viewer = null
     deqingBoundaryEntity = null

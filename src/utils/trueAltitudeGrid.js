@@ -117,6 +117,8 @@ export function toAirspaceMapCells(rawGrids) {
         datasetVersion: grid.dataset_version,
         lod: grid.lod === true,
         sourceCellCount: Number(grid.source_cell_count ?? 1),
+        chartSourceMask: cell.chartSourceMask,
+        modelSources: cell.modelSources,
         modelSource: grid.modelSource ?? cell.modelSource,
         modelSourceLabel: grid.modelSourceLabel ?? cell.modelSourceLabel,
         attributeId: grid.attributeId ?? cell?.data?.attributeId,

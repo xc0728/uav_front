@@ -1,5 +1,8 @@
 import { queryManagedCells } from './elementMaintenance.js'
 import { errorMessage } from './http.js'
+import { LOD13_BUILDING_DATASET_ID, MODEL_GRID_DATASET_IDS, chartGridSourceMask,
+  chartGridModelSources, chartGridHasStaticSource } from './chartGridSources.js'
+export { LOD13_BUILDING_DATASET_ID, MODEL_GRID_DATASET_IDS } from './chartGridSources.js'
 import { getModelGridSource, LEGACY_BUILDING_MODEL_SOURCE, MODEL_GRID_SOURCES } from './modelGridSources.js'
 
 export const CHART_THEMES = [
@@ -15,17 +18,6 @@ export const CHART_THEMES = [
   'landuse',
   'landcover',
 ]
-
-export const LOD13_BUILDING_DATASET_ID = 'deqing_lod13_buildings'
-export const MODEL_GRID_DATASET_IDS = Object.freeze({
-  osgb: 'deqing_model_grid_osgb',
-  lod13: LOD13_BUILDING_DATASET_ID,
-  communication: 'deqing_model_grid_communication',
-  navigation: 'deqing_model_grid_navigation',
-  surveillance: 'deqing_model_grid_surveillance',
-  power: 'deqing_model_grid_power',
-  crane: 'deqing_model_grid_crane',
-})
 
 const MODEL_GRID_SOURCE_BY_DATASET_ID = new Map(
   Object.entries(MODEL_GRID_DATASET_IDS).map(([source, datasetId]) => [datasetId, source]),
@@ -375,14 +367,16 @@ export function chartFeatureColor(feature, bounds) {
   const datasetId = feature?.datasetId
   const featureType = feature?.featureType || dataset?.featureType
 
-  // 连接通道优先使用统一蓝色，不参与航路高度渐变。
+// 起降点通道和连接通道固定为金黄色，不参与高度渐变。
   const isConnection =
+      featureType === 'takeoff_channel' ||
       featureType === 'route_connection' ||
       featureType === 'connection_channel' ||
+      datasetId === 'deqing_chart_l17_takeoff_channels' ||
+      datasetId === 'deqing_chart_l17_shouchangqiao_channels' ||
       datasetId === 'deqing_air_route_l17_connections' ||
       datasetId === 'deqing_route_20261104_connectors_l17'
 
-  //if (isConnection) return connectionHeightColor(feature, bounds)
   if (isConnection) return '#FFD700'
 
   if ((feature?.theme || dataset?.theme) === 'air_route') {
@@ -456,9 +450,10 @@ function mergeChartCells(groups) {
     if (!code) return
     const existing = merged.get(code)
     if (!existing) {
-      merged.set(code, { ...cell, features: [...(cell.features || [])] })
+      merged.set(code, { ...cell, chartSourceMask: chartGridSourceMask(cell), features: [...(cell.features || [])] })
       return
     }
+    existing.chartSourceMask |= chartGridSourceMask(cell)
     if (existing.displayClasses || cell.displayClasses) {
       existing.displayClasses = chartDisplayClasses({
         displayClasses: [...chartDisplayClasses(existing), ...chartDisplayClasses(cell)],
@@ -954,6 +949,24 @@ export async function queryCompleteGridFeatures(cell, { signal } = {}) {
   await staticTask
   if (signal?.aborted) throw new DOMException('查询已取消', 'AbortError')
   return { features, errors }
+}
+
+// 兼容旧版按格元来源补查入口，不扩大旧调用的查询范围。
+export async function queryChartCellFeatures(cell, { signal, includeRelatedLevels = true } = {}) {
+  const sources = chartGridModelSources(cell)
+  const [staticData, ...modelFeatures] = await Promise.all([
+    chartGridHasStaticSource(cell)
+      ? queryChartFeatures([cell], { signal, includeRelatedLevels })
+      : Promise.resolve({ features2D: [], features3D: [], truncated: false }),
+    ...sources.map(source => queryModelGridFeatures(cell, source, { signal })),
+  ])
+  const features = [...staticData.features2D, ...staticData.features3D, ...modelFeatures.flat()]
+  return {
+    features: sortChartFeaturesForDisplay([...new Map(features.map(feature => [
+      `${feature.datasetId}-${feature.featureUid}-${feature.dimensionMode}`, feature,
+    ])).values()]),
+    truncated: staticData.truncated,
+  }
 }
 
 export function featuresByGrid(features2D, features3D) {
