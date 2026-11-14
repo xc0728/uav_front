@@ -9,6 +9,7 @@ import PolygonGrid from './functions/3_3PolygonGrid.vue'
 import RangeGrid from './functions/3_4RangeGrid.vue'
 import PathPlanning from './functions/4_PathPlanning.vue'
 import AirspaceGridQuery from './functions/6_AirspaceGridQuery.vue'
+import ConeRegionQueryPanel from './functions/ConeRegionQueryPanel.vue'
 import GridAggregation from './functions/7_Aggregation.vue'
 import DemGrid from './functions/8_DemGrid.vue'
 import NoFlyZone from './functions/9_NoFlyZone.vue'
@@ -89,6 +90,7 @@ const services = [
       '真高空域网格查询',
       '空域网格查询',
       '航图要素网格查询',
+      '锥形区域查询',
     ],
   },
   {
@@ -143,6 +145,8 @@ const activeComponentRef = ref(null)
 const routePointPicking = computed(() => panelMode.value === 'calc'
   && activeServiceId.value === 'path-planning'
   && ['A星航路规划', '路径冲突检测（所有冲突）', '路径冲突检测（首个冲突）'].includes(activeFunctionName.value))
+const conePointPicking = computed(() => panelMode.value === 'calc' && !isControlPanelCollapsed.value
+  && activeFunctionName.value === '锥形区域查询' && Boolean(activeComponentRef.value?.picking))
 
 
 // 切换控制面板折叠/展开
@@ -222,6 +226,7 @@ const activeComponent = computed(() => {
     return TiltPhotogrammetry
   }
   if (activeServiceId.value === 'airspace-grid-query') {
+    if (activeFunctionName.value === '锥形区域查询') return ConeRegionQueryPanel
     return AirspaceGridQuery
   }
   if (activeServiceId.value === 'grid-aggregation') {
@@ -359,6 +364,8 @@ function onActiveServiceViewBoundsChanged(bounds) {
 }
 
 defineExpose({
+  conePointPicking,
+  selectConeCell: detail => activeComponentRef.value?.selectConeCell?.(detail),
   routePointPicking,
   applyMapPointToActiveService,
   applyBoundsToActiveService,

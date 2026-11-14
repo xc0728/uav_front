@@ -138,6 +138,8 @@ export function buildCatalogRules(form, timestamp) {
 export function buildAstarPayload(form, points, aircraft = {}) {
   const payload = buildConflictPayload(form, points, 'ALL')
   delete payload.mode
+  // 兼容仍使用 airspaceId 命名的 ClickHouse A* 服务，保持与数据集一致。
+  payload.airspaceId = payload.datasetId
   payload.planeRadius = finiteNumber(aircraft.planeRadius ?? 0.75, '无人机半径')
   payload.cruisingSpeed = finiteNumber(aircraft.speed ?? 15, '飞行速度')
   if (payload.planeRadius < 0 || payload.cruisingSpeed <= 0) throw new Error('半径不能为负数，飞行速度必须为正数')

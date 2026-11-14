@@ -2,7 +2,9 @@ import * as Cesium from 'cesium'
 
 // 天地图浏览器端 key，可通过 VITE_TDT_KEY 环境变量覆盖
 //const TDT_KEY = import.meta.env?.VITE_TDT_KEY || '165bf7b260b0e00a80b6aa3071b41ba8'
-const TDT_KEY = import.meta.env?.VITE_TDT_KEY || '91e6ca15ca5586151980961a7b1039b7'
+//const TDT_KEY = import.meta.env?.VITE_TDT_KEY || '91e6ca15ca5586151980961a7b1039b7' //WJL
+const TDT_KEY = import.meta.env?.VITE_TDT_KEY || '7cefd86338cbcd0d18bf8a63ed6e413e' //LYF
+
 
 export const DEFAULT_BASE_LAYER_TYPE = 'img'
 export const DEFAULT_OSGB_VISIBLE = false

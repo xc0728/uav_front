@@ -38,6 +38,7 @@ import ConflictCheckResult from './functions/ConflictCheckResult.vue'
 import { createConflictForm, buildConflictPayload, requestConflictCheck, conflictDisplayGrids, conflictReasonsText, buildAstarPayload, requestAstarPath } from '../../utils/conflictCheck.js'
 import ProgressiveChartLayer from '../../utils/cesium/ProgressiveChartLayer.js'
 import InstancedGridRenderer from '../../utils/cesium/InstancedGridRenderer.js'
+import ConeRegionRenderer from '../../utils/cesium/ConeRegionRenderer.js'
 import GridRendererManager, { GRID_RENDERER } from '../../utils/cesium/GridRendererManager.js'
 import { buildGridHighlightPaths } from '../../utils/cesium/gridHighlight.js'
 import {
@@ -589,7 +590,8 @@ let sphereGridCells = [] // 球形围栏网格数据
 let lineGridCells = [] // 线状围栏网格数据
 const onFenceConfirmCallback = ref(null)
 
-const emit = defineEmits(['point-selected', 'fence-confirm', 'box-select-start', 'box-select-end', 'get-view-bounds', 'flight-start', 'flight-end', 'view-bounds-changed'])
+const emit = defineEmits(['point-selected', 'fence-confirm', 'box-select-start', 'box-select-end', 'get-view-bounds', 'flight-start', 'flight-end', 'view-bounds-changed', 'cone-region-selected'])
+let coneRegionLayer = null
 
 const props = defineProps({
   routePointPicking: { type: Boolean, default: false },
@@ -722,6 +724,15 @@ function drawProgressiveChart(gridInfo) {
 }
 
 function drawGridBoundary(gridInfo, options = {}) {
+  if (gridInfo?.coneRegion && viewer) {
+    if (!coneRegionLayer) coneRegionLayer = new ConeRegionRenderer(viewer)
+    const message = gridInfo.coneRegion
+    if (message.operation === 'clear') coneRegionLayer.clear()
+    else if (message.operation === 'remove') coneRegionLayer.remove(message.id)
+    else if (message.operation === 'point') coneRegionLayer.point(message)
+    else if (message.operation === 'region') coneRegionLayer.region(message)
+    return
+  }
   if (!viewer || !gridInfo) {
     console.log('[CesiumMap] drawGridBoundary: viewer 或 gridInfo 不存在')
     return
@@ -2254,7 +2265,7 @@ function doFlightAnimation(droneImg, centers) {
       scale,
     } : undefined,
     model: droneImg ? undefined : {
-      uri: '/DXY1.glb',
+      uri: '/models/aircraft/dxy1.glb',
       scale,
       minimumPixelSize: 32,
       maximumScale: 50000,
@@ -4604,7 +4615,7 @@ function startUavAnimation(pathData, routeId, flyCamera = true) {
     position: new Cesium.CallbackProperty(() => anim.pos, false),
     orientation: new Cesium.CallbackProperty(() => anim.ori, false),
     model: {
-      uri: '/DXY1.glb',
+      uri: '/models/aircraft/dxy1.glb',
       scale,
       minimumPixelSize: 64,
       maximumScale: 50000,
@@ -4862,7 +4873,7 @@ onMounted(async () => {
     switchBaseLayer(viewer, currentBaseLayer.value)
     void loadDeqingBoundary()
 
-    tileset = await Cesium.Cesium3DTileset.fromUrl('/dq3dtiles/tileset.json')
+    tileset = await Cesium.Cesium3DTileset.fromUrl('/models/osgb/deqing/tileset.json')
     viewer.scene.primitives.add(tileset)
     tileset.show = show3DTiles.value
   } catch (error) {
@@ -4961,6 +4972,11 @@ onMounted(async () => {
     }
 
     const picked = viewer.scene.pick(movement.position)
+    const coneSelection = coneRegionLayer?.pick(picked, viewer.camera.getPickRay(movement.position))
+    if (coneSelection) {
+      emit('cone-region-selected', coneSelection)
+      return
+    }
     const pickedEntity = picked?.id
     let lod13Attributes = null
     for (const dataset of LOD13_DATASETS) {
@@ -5046,6 +5062,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   scenarioConflictController?.abort()
+  coneRegionLayer?.clear()
+  coneRegionLayer = null
   window.removeEventListener('object-attributes-updated', refreshEditedObjectAttributes)
   gridFeatureRequest?.abort()
   clearSelectedGridSelection()

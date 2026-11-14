@@ -38,7 +38,13 @@ __screenshots__/
 # Vite
 *.timestamp-*-*.mjs
 
-/public/
+# 大型 public 数据保持忽略；保留原已跟踪无人机模型迁移后的新位置。
+/public/*
+!/public/models/
+/public/models/*
+!/public/models/aircraft/
+/public/models/aircraft/*
+!/public/models/aircraft/dxy1.glb
 
 /test/*
 !/test/object-attribute-selection.test.js

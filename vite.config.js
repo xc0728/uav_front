@@ -21,6 +21,10 @@ export default defineConfig({
     vue(),
     cesium(),
   ],
+  build: {
+    // public 数据由服务器独立托管，不复制到构建产物中。
+    copyPublicDir: false,
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
