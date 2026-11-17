@@ -1711,16 +1711,19 @@ function clearGrids() {
 
       <div v-if="chartSelectionRequired" class="form-group">
         <label class="dataset-hint">
-          <input v-model="simplifiedChartQuery" type="checkbox" :disabled="loading || dynamicLoading" />
-          精简查询
+          <input v-model="simplifiedChartQuery" type="checkbox" :disabled="loading || dynamicLoading"
+            aria-describedby="simplified-chart-query-hint chart-query-options-hint" />
+          按需加载详情（精简查询）
         </label>
-        <div class="dataset-hint">仅加载网格分类信息，点击查看完整关联属性；切换后下次查询生效。</div>
+        <div id="simplified-chart-query-hint" class="dataset-hint">勾选后，先显示网格及要素类别，点击地图中的网格时再加载该网格的完整关联属性，减少首次查询的数据量。不勾选则在查询时一并加载详情。</div>
         <label class="dataset-hint">
           <input v-model="progressiveChartQuery" type="checkbox"
+            aria-describedby="progressive-chart-query-hint chart-query-options-hint"
             :disabled="!simplifiedChartQuery || !chartMode || overlayChartActive || loading || dynamicLoading" />
-          渐进加载
+          边加载边显示（渐进加载）
         </label>
-        <div class="dataset-hint">需同时勾选精简查询；各来源先到先显示，后续补齐分类。叠加查询沿用原策略。</div>
+        <div id="progressive-chart-query-hint" class="dataset-hint">勾选后，各数据来源每返回一批网格就显示一批，无需等待其他来源；加载期间，网格的要素类别和颜色可能继续更新。需先勾选“按需加载详情”，叠加查询时不可用。</div>
+        <div id="chart-query-options-hint" class="dataset-hint">以上选项修改后，在下次查询时生效。</div>
         <div v-if="progressiveChartQuery && simplifiedChartQuery && chartMode && !overlayChartActive" class="dataset-hint">
           <div v-for="status in Object.values(progressiveSourceStatus)" :key="status.source">
             {{ status.source }}：{{ status.status === 'error' ? status.message : status.status === 'success' ? '已完成' : '加载中' }}

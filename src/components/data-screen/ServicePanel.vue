@@ -1,9 +1,10 @@
 <script setup>
 import { ref, computed, defineProps, watch } from 'vue'
-import { ChevronRight, ChevronLeft, ChevronDown, X, Grid3X3, Navigation, Map, Calculator, Boxes, Settings2, Database, Mountain, ShieldBan } from 'lucide-vue-next'
+import { ChevronRight, PanelLeft, ChevronDown, X, Grid3X3, Navigation, Map, Calculator, Boxes, Settings2, Database, Mountain, ShieldBan } from 'lucide-vue-next'
 import InteropFusion from './functions/1_GridInterop.vue'
 import TiltPhotogrammetry from './functions/2_Osgb_Grid.vue'
 import GridSplit from './functions/3_1PointGrid.vue'
+import ConeGrid from './functions/3_5ConeGrid.vue'
 import LineGrid from './functions/3_2LineGrid.vue'
 import PolygonGrid from './functions/3_3PolygonGrid.vue'
 import RangeGrid from './functions/3_4RangeGrid.vue'
@@ -60,6 +61,7 @@ const services = [
     functions: [
       '点网格化',
       '点缓冲区（球体）网格化',
+      '点缓冲区（锥形）网格化',
       '三维线网格化',
       '线矩形缓冲区（管道）网格化',
       '多边形网格化',
@@ -145,8 +147,9 @@ const activeComponentRef = ref(null)
 const routePointPicking = computed(() => panelMode.value === 'calc'
   && activeServiceId.value === 'path-planning'
   && ['A星航路规划', '路径冲突检测（所有冲突）', '路径冲突检测（首个冲突）'].includes(activeFunctionName.value))
+const geometricConePointPicking = computed(() => conePointPicking.value && activeFunctionName.value === '点缓冲区（锥形）网格化')
 const conePointPicking = computed(() => panelMode.value === 'calc' && !isControlPanelCollapsed.value
-  && activeFunctionName.value === '锥形区域查询' && Boolean(activeComponentRef.value?.picking))
+  && ['锥形区域查询','点缓冲区（锥形）网格化'].includes(activeFunctionName.value) && Boolean(activeComponentRef.value?.picking))
 
 
 // 切换控制面板折叠/展开
@@ -209,6 +212,7 @@ const activeService = computed(() => {
 const activeComponent = computed(() => {
   if (activeServiceId.value === 'grid-split') {
     const fn = activeFunctionName.value
+    if (fn === '点缓冲区（锥形）网格化') return ConeGrid
     if (fn === '点网格化' || fn === '点缓冲区（球体）网格化') {
       return GridSplit
     }
@@ -254,6 +258,7 @@ function applyMapPointToActiveService(lon, lat, height) {
     activeServiceId.value === 'grid-split'
     && (activeFunctionName.value === '点网格化'
       || activeFunctionName.value === '点缓冲区（球体）网格化'
+      || activeFunctionName.value === '点缓冲区（锥形）网格化'
       || activeFunctionName.value === '三维线网格化'
       || activeFunctionName.value === '线矩形缓冲区（管道）网格化'
       || activeFunctionName.value === '多边形网格化'
@@ -364,6 +369,7 @@ function onActiveServiceViewBoundsChanged(bounds) {
 }
 
 defineExpose({
+  geometricConePointPicking,
   conePointPicking,
   selectConeCell: detail => activeComponentRef.value?.selectConeCell?.(detail),
   routePointPicking,
@@ -400,23 +406,25 @@ defineExpose({
             <button
               v-if="panelMode === 'list'"
               type="button"
-              class="icon-btn"
+              class="icon-btn panel-toggle-btn"
               @click="toggleControlPanelCollapse"
               :title="isControlPanelCollapsed ? '展开面板' : '折叠面板'"
+              :aria-label="isControlPanelCollapsed ? '展开面板' : '折叠面板'"
+              :aria-expanded="!isControlPanelCollapsed"
             >
-              <ChevronLeft v-if="!isControlPanelCollapsed" :size="18" />
-              <ChevronRight v-else :size="18" />
+              <PanelLeft :size="18" :stroke-width="1.6" />
             </button>
             <!-- 控制面板收起/展开按钮 - 计算模式下始终显示 -->
             <button
               v-if="panelMode === 'calc'"
               type="button"
-              class="icon-btn"
+              class="icon-btn panel-toggle-btn"
               @click="toggleControlPanelCollapse"
               :title="isControlPanelCollapsed ? '展开面板' : '折叠面板'"
+              :aria-label="isControlPanelCollapsed ? '展开面板' : '折叠面板'"
+              :aria-expanded="!isControlPanelCollapsed"
             >
-              <ChevronLeft v-if="!isControlPanelCollapsed" :size="18" />
-              <ChevronRight v-else :size="18" />
+              <PanelLeft :size="18" :stroke-width="1.6" />
             </button>
             <!-- 关闭按钮 - 仅在计算模式下展开时显示 -->
             <button
@@ -866,6 +874,21 @@ defineExpose({
   background: var(--panel-primary-soft);
   border-color: var(--panel-primary-soft-border);
   color: var(--panel-primary);
+}
+
+.icon-btn.panel-toggle-btn {
+  border-color: transparent;
+  background: transparent;
+  border-radius: 5px;
+}
+
+.icon-btn.panel-toggle-btn:hover {
+  background: var(--panel-primary-soft);
+}
+
+.icon-btn:focus-visible {
+  outline: 2px solid var(--panel-primary);
+  outline-offset: 2px;
 }
 
 .icon-btn.close-btn:hover {

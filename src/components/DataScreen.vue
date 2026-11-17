@@ -476,6 +476,7 @@ function handleViewBoundsChanged(bounds) {
         :left-panel-width="servicePanelWidth"
         :show-scenario-demo="false"
         :route-point-picking="Boolean(servicePanelRef?.routePointPicking || servicePanelRef?.conePointPicking)"
+        :geometric-cone-point-picking="Boolean(servicePanelRef?.geometricConePointPicking)"
         @cone-region-selected="detail => servicePanelRef?.selectConeCell?.(detail)"
         @point-selected="handleMapPointSelected"
         @box-select-start="handleBoxSelectStart"

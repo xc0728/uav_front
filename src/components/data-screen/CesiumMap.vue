@@ -33,6 +33,7 @@ import {
 } from '../../utils/staticFeatures.js'
 import ChartDatasetTreeNode from './functions/ChartDatasetTreeNode.vue'
 import ChartLegend from './functions/ChartLegend.vue'
+import ResizableChartPanel from './functions/ResizableChartPanel.vue'
 import ConflictCheckOptions from './functions/ConflictCheckOptions.vue'
 import ConflictCheckResult from './functions/ConflictCheckResult.vue'
 import { createConflictForm, buildConflictPayload, requestConflictCheck, conflictDisplayGrids, conflictReasonsText, buildAstarPayload, requestAstarPath } from '../../utils/conflictCheck.js'
@@ -173,7 +174,9 @@ const gridRendererManager = new GridRendererManager()
 const lon = ref(null)
 const lat = ref(null)
 const height = ref(null)
-const show3DTiles = ref(DEFAULT_OSGB_VISIBLE)
+// 离线部署未携带倾斜摄影数据时，在构建环境中显式关闭该入口。
+const osgbEnabled = import.meta.env.VITE_ENABLE_OSGB !== 'false'
+const show3DTiles = ref(osgbEnabled && DEFAULT_OSGB_VISIBLE)
 const showBuildings = ref(false) // 建筑白膜开关
 const loadedLod13Ids = ref([])
 const visibleLod13Ids = ref([])
@@ -184,6 +187,7 @@ const showLod13Panel = ref(false)
 const isMapReady = ref(false) // 地图是否准备就绪
 const chartFeatureLayers = ref([])
 const chartFeatureTree = computed(() => filterChartDatasetTree(chartFeatureLayers.value))
+const chartPanelWidth = ref(360)
 const enabledChartFeatureIds = computed(() => (
   chartFeatureLayers.value.filter(layer => layer.enabled).map(layer => layer.type)
 ))
@@ -191,6 +195,18 @@ const selectedGrid = ref(null)
 const displayedGridFeatures = computed(() => selectedGrid.value?.attributeGrid
   ? []
   : sortChartFeaturesForDisplay(selectedGrid.value?.features || []))
+const gridFeaturesSection = ref(null)
+
+function setAllGridFeaturesExpanded(expanded) {
+  const section = gridFeaturesSection.value
+  if (!section) return
+  // 批量操作原生折叠项，单项仍可独立展开或收起。
+  if (expanded) section.open = true
+  section.querySelectorAll('details.selected-grid-feature').forEach(item => {
+    item.open = expanded
+  })
+}
+
 const selectedLod13Feature = ref(null)
 let gridFeatureRequest = null
 
@@ -595,6 +611,7 @@ let coneRegionLayer = null
 
 const props = defineProps({
   routePointPicking: { type: Boolean, default: false },
+  geometricConePointPicking: { type: Boolean, default: false },
   show3DToggle: {
     type: Boolean,
     default: true,
@@ -4873,9 +4890,11 @@ onMounted(async () => {
     switchBaseLayer(viewer, currentBaseLayer.value)
     void loadDeqingBoundary()
 
-    tileset = await Cesium.Cesium3DTileset.fromUrl('/models/osgb/deqing/tileset.json')
-    viewer.scene.primitives.add(tileset)
-    tileset.show = show3DTiles.value
+    if (osgbEnabled) {
+      tileset = await Cesium.Cesium3DTileset.fromUrl('/models/osgb/deqing/tileset.json')
+      viewer.scene.primitives.add(tileset)
+      tileset.show = show3DTiles.value
+    }
   } catch (error) {
     console.error('[CesiumMap] 初始化错误:', error)
   }
@@ -4925,7 +4944,7 @@ onMounted(async () => {
     pickedHeight = cartographic.height
 
     // 如果高度无效或为0，尝试从地形获取
-    if (!pickedHeight || pickedHeight < 0 || !isFinite(pickedHeight)) {
+    if (!props.geometricConePointPicking && (!pickedHeight || pickedHeight < 0 || !isFinite(pickedHeight))) {
       try {
         const terrainHeight = viewer.scene.globe.getHeight(cartographic)
         if (terrainHeight && isFinite(terrainHeight)) {
@@ -4937,9 +4956,12 @@ onMounted(async () => {
     }
 
     // 确保高度有效且为正数
-    if (!pickedHeight || pickedHeight <= 0 || !isFinite(pickedHeight)) {
+    if (!props.geometricConePointPicking && (!pickedHeight || pickedHeight <= 0 || !isFinite(pickedHeight))) {
       pickedHeight = 100
     }
+
+    // 锥形中心使用真实拾取高程，0 米有效，不套用旧功能的 100 米兜底。
+    if (props.geometricConePointPicking && !Number.isFinite(pickedHeight)) return
 
     // 保留高精度小数位
     pickedLon = Number(pickedLon.toFixed(10))
@@ -5092,10 +5114,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="cesium-map-container">
+  <section class="cesium-map-container" :style="{ '--chart-panel-width': `${chartPanelWidth}px` }">
     <div ref="cesiumEl" class="cesium-viewer" />
 
-    <aside v-if="isMapReady" class="chart-feature-panel">
+    <ResizableChartPanel v-if="isMapReady" class="chart-feature-panel" @resize="chartPanelWidth = $event">
       <div class="chart-feature-panel-title">
         <span>航图要素 · 图例</span>
         <small>{{ gridResultState.attributeCode ? '已加载专题' : (chartFeatureLayers.length ? `${chartFeatureLayers.length} 类` : '未加载') }}</small>
@@ -5118,7 +5140,7 @@ onBeforeUnmount(() => {
           @toggle="setChartFeatureIdsEnabled"
         />
       </div>
-    </aside>
+    </ResizableChartPanel>
 
     <aside v-if="selectedGrid || selectedLod13Feature" class="selection-detail-popup">
       <section v-if="selectedGrid" class="selected-grid-detail">
@@ -5142,8 +5164,8 @@ onBeforeUnmount(() => {
         <div>经纬度：{{ selectedGrid.bounds.west.toFixed(6) }}, {{ selectedGrid.bounds.south.toFixed(6) }} ～ {{ selectedGrid.bounds.east.toFixed(6) }}, {{ selectedGrid.bounds.north.toFixed(6) }}</div>
         <div>{{ selectedGrid.overviewSegmentCount ? '当前段高度' : '高度' }}：{{ selectedGrid.bounds.bottom.toFixed(2) }} ～ {{ selectedGrid.bounds.top.toFixed(2) }} m</div>
         <div v-if="selectedGrid.overviewSegmentCount">整列高度：{{ selectedGrid.overviewColumnBottom.toFixed(2) }} ～ {{ selectedGrid.overviewColumnTop.toFixed(2) }} m</div>
-        <section class="selected-grid-field-attributes">
-          <div class="selected-grid-features">场相关属性</div>
+        <details class="selected-grid-collapse selected-grid-field-attributes">
+          <summary class="selected-grid-features">场相关属性</summary>
           <div v-if="selectedGrid.attributeGrid" class="selected-attribute-current">
             <div>分类代码：{{ selectedGrid.classificationCode ?? selectedGrid.attributeProperties?.['分类代码'] ?? '未设置' }}</div>
             当前专题：{{ selectedGrid.attributeProperties?.name || noiseAttributeLabel(selectedGrid.attributeCode) }} ·
@@ -5169,9 +5191,15 @@ onBeforeUnmount(() => {
           </dl>
           <div v-else-if="!selectedGrid.datasetId">该网格未关联真高空域数据集，暂无可查询的场属性。</div>
           <div v-else>该网格暂无已入库的场属性。</div>
-        </section>
-        <template v-if="!selectedGrid.attributeGrid">
-          <div class="selected-grid-features">关联要素（{{ selectedGrid.features.length }}）</div>
+        </details>
+        <details v-if="!selectedGrid.attributeGrid" ref="gridFeaturesSection" class="selected-grid-collapse">
+          <summary class="selected-grid-features">
+            关联要素（{{ selectedGrid.features.length }}）
+            <span class="grid-feature-collapse-actions">
+              <button type="button" :disabled="!displayedGridFeatures.length" @click.stop.prevent="setAllGridFeaturesExpanded(true)">全部展开</button>
+              <button type="button" :disabled="!displayedGridFeatures.length" @click.stop.prevent="setAllGridFeaturesExpanded(false)">全部折叠</button>
+            </span>
+          </summary>
           <div v-if="selectedGrid.featuresLoading">正在加载航图要素属性…</div>
           <div v-else-if="selectedGrid.featuresError" role="alert">
             {{ selectedGrid.featuresError }}
@@ -5179,24 +5207,26 @@ onBeforeUnmount(() => {
           </div>
           <div v-else-if="!selectedGrid.features.length">该网格范围内暂无关联航图要素。</div>
           <div v-if="selectedGrid.featuresTruncated">关联映射较多，当前仅显示前 10,000 条映射中的要素。</div>
-        </template>
-        <article v-for="feature in displayedGridFeatures" :key="`${feature.datasetId}-${feature.featureUid}`" class="selected-grid-feature">
-          <b>{{ chartFeatureLabel(feature) }}</b>
-          <span v-if="feature.datasetId">数据集：{{ chartFeatureDatasetLabel(feature) }}</span>
-          <span v-if="feature.featureUid">系统要素ID：{{ feature.featureUid }}</span>
-          <span>分类代码：{{ feature.properties?.['分类代码'] ?? '未设置' }}</span>
-          <span v-if="feature.featureType">要素分类：{{ chartFeatureTypeLabel(feature.featureType) }}</span>
-          <span v-if="featureBusinessType(feature.properties)">类型：{{ featureBusinessType(feature.properties) }}</span>
-          <span>{{ chartFeatureDimensionLabel(feature) }}</span>
-          <span v-if="feature.minHeight !== null && feature.minHeight !== undefined">高度：{{ feature.minHeight }} ～ {{ feature.maxHeight }} m</span>
-          <dl v-if="visibleChartAttributes(feature.properties).length" class="grid-property-list">
-            <div v-for="[key, value] in visibleChartAttributes(feature.properties)" :key="key" class="grid-property-row">
-              <dt>{{ chartAttributeLabel(key) }}</dt>
-              <dd>{{ formatPropertyValue(value) }}</dd>
+          <details v-for="feature in displayedGridFeatures" :key="`${feature.datasetId}-${feature.featureUid}`" class="selected-grid-collapse selected-grid-feature">
+            <summary class="selected-grid-feature-title">{{ chartFeatureLabel(feature) }}</summary>
+            <div class="selected-grid-feature-body">
+              <span v-if="feature.datasetId">数据集：{{ chartFeatureDatasetLabel(feature) }}</span>
+              <span v-if="feature.featureUid">系统要素ID：{{ feature.featureUid }}</span>
+              <span>分类代码：{{ feature.properties?.['分类代码'] ?? '未设置' }}</span>
+              <span v-if="feature.featureType">要素分类：{{ chartFeatureTypeLabel(feature.featureType) }}</span>
+              <span v-if="featureBusinessType(feature.properties)">类型：{{ featureBusinessType(feature.properties) }}</span>
+              <span>{{ chartFeatureDimensionLabel(feature) }}</span>
+              <span v-if="feature.minHeight !== null && feature.minHeight !== undefined">高度：{{ feature.minHeight }} ～ {{ feature.maxHeight }} m</span>
+              <dl v-if="visibleChartAttributes(feature.properties).length" class="grid-property-list">
+                <div v-for="[key, value] in visibleChartAttributes(feature.properties)" :key="key" class="grid-property-row">
+                  <dt>{{ chartAttributeLabel(key) }}</dt>
+                  <dd>{{ formatPropertyValue(value) }}</dd>
+                </div>
+              </dl>
+              <span v-else class="grid-property-empty">暂无附加属性</span>
             </div>
-          </dl>
-          <span v-else class="grid-property-empty">暂无附加属性</span>
-        </article>
+          </details>
+        </details>
       </section>
       <section v-if="selectedLod13Feature" class="selected-grid-detail">
         <div class="selected-grid-title">
@@ -5309,7 +5339,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- OSGB 模型单行开关 -->
-      <div v-if="props.show3DToggle" class="single-toggle-card" @click="toggle3DTiles">
+      <div v-if="osgbEnabled && props.show3DToggle" class="single-toggle-card" @click="toggle3DTiles">
         <span class="layer-label">OSGB模型</span>
         <div class="toggle-switch" :class="{ active: show3DTiles }">
           <div class="toggle-slider" />
@@ -5617,10 +5647,11 @@ onBeforeUnmount(() => {
   position: absolute;
   top: 80px;
   right: 16px;
-  width: 230px;
-  max-height: calc(100vh - 260px);
-  overflow-y: auto;
-  padding: 12px;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: min(360px, calc(100% - 32px));
+  max-width: min(560px, calc(100% - 32px));
+  max-height: calc(100% - 100px);
   background: rgba(15, 23, 42, 0.9);
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 10px;
@@ -5654,8 +5685,10 @@ onBeforeUnmount(() => {
 .selection-detail-popup {
   position: absolute;
   top: 80px;
-  right: 270px;
-  width: min(440px, calc(100vw - 320px));
+  right: calc(var(--chart-panel-width, 360px) + 32px);
+  box-sizing: border-box;
+  width: min(440px, max(240px, calc(100% - var(--chart-panel-width, 360px) - 48px)));
+  max-width: calc(100% - 32px);
   max-height: calc(100vh - 150px);
   overflow-y: auto;
   padding: 16px 18px;
@@ -5743,6 +5776,22 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 
+.selected-grid-collapse > summary {
+  padding: 6px 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.selected-grid-collapse > summary:hover {
+  color: #bfdbfe;
+}
+
+.selected-grid-collapse > summary:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 .selected-attribute-current {
   margin: 6px 0;
   padding: 8px 10px;
@@ -5756,14 +5805,49 @@ onBeforeUnmount(() => {
 }
 
 .selected-grid-feature {
-  display: flex;
-  flex-direction: column;
   margin-top: 8px;
   padding: 10px 12px;
   border-radius: 7px;
   background: rgba(255, 255, 255, 0.06);
   font-size: 14px;
   overflow-wrap: anywhere;
+}
+
+.grid-feature-collapse-actions {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: 8px;
+}
+
+.grid-feature-collapse-actions button {
+  padding: 2px 6px;
+  border: 1px solid rgba(147, 197, 253, 0.35);
+  border-radius: 4px;
+  background: rgba(59, 130, 246, 0.12);
+  color: #bfdbfe;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.grid-feature-collapse-actions button:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.28);
+}
+
+.grid-feature-collapse-actions button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.selected-grid-feature-title {
+  color: #93c5fd;
+  font-weight: 600;
+}
+
+.selected-grid-feature-body {
+  display: flex;
+  flex-direction: column;
+  padding-top: 6px;
 }
 
 .grid-property-list {

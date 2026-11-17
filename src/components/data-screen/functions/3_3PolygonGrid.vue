@@ -117,7 +117,6 @@ const currentHolePoints = ref([])
 const loadingHoles = ref(false)
 const errorHoles = ref('')
 const resultHoles = ref(null)
-const loadingDemo = ref(false)
 
 const canSubmitHoles = computed(() => {
   // 检查是否有未完成的洞
@@ -246,42 +245,6 @@ function resetFormHoles() {
   errorHoles.value = ''
   resultHoles.value = null
   emit('show-polygon', null)
-}
-
-// 加载演示数据
-async function loadDemoData() {
-  loadingDemo.value = true
-  try {
-    const t0 = performance.now()
-    const resp = await fetch('/response(1).json')
-    if (!resp.ok) throw new Error('加载失败')
-    const data = await resp.json()
-    const runtime = performance.now() - t0
-
-    if (data?.data?.cells?.length) {
-      emit('show-polygon', null)
-      emit('showGrid', {
-        cells: data.data.cells.map(cell => ({
-          bounds: {
-            north: cell.maxlat,
-            south: cell.minlat,
-            east: cell.maxlon,
-            west: cell.minlon,
-            top: cell.top,
-            bottom: cell.bottom,
-          },
-          code: cell.code,
-          center: cell.center,
-        })),
-        level: Number(polygonWithHolesForm.level),
-        runtime,
-      })
-    }
-  } catch (err) {
-    errorHoles.value = err?.message || '加载演示数据失败'
-  } finally {
-    loadingDemo.value = false
-  }
 }
 
 function setPointFromMapHoles(lon, lat, height) {
