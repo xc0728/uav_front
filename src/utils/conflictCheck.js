@@ -22,7 +22,7 @@ const REASONS = {
 }
 export const MODEL_SOURCE_LABELS = {
   osgb: '实景三维', lod13: '建筑物', communication: '通信设施', navigation: '导航设施',
-  surveillance: '监视设施', power: '输电设施',
+  surveillance: '监视设施', power: '输电设施', crane: '塔吊',
 }
 export function conflictReasonLabel(reason) { return REASONS[reason] || reason }
 export function conflictReasonsText(reasons = []) { return reasons.map(conflictReasonLabel).join('、') }
@@ -143,6 +143,8 @@ export function buildAstarPayload(form, points, aircraft = {}) {
   payload.planeRadius = finiteNumber(aircraft.planeRadius ?? 0.75, '无人机半径')
   payload.cruisingSpeed = finiteNumber(aircraft.speed ?? 15, '飞行速度')
   if (payload.planeRadius < 0 || payload.cruisingSpeed <= 0) throw new Error('半径不能为负数，飞行速度必须为正数')
+  payload.searchTimeoutMs = positiveInteger(aircraft.searchTimeoutMs ?? 30000, '搜索时限')
+  if (payload.searchTimeoutMs < 100 || payload.searchTimeoutMs > 60000) throw new Error('搜索时限必须在 100～60000 毫秒之间')
   payload.startTime = payload.timestamp || Math.floor(Date.now() / 1000)
   return payload
 }

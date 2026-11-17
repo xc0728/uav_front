@@ -27,6 +27,7 @@ const pathPoints = ref([])
 const astarForm = reactive({
   level: 17, // 与目录规则和冲突检测统一
   planeRadius: 0.75, // 默认无人机半径
+  searchTimeoutMs: 30000, // 候选规则查询与搜索共用的时间预算
   speed: 15.0, // 默认飞行速度
 })
 
@@ -50,6 +51,22 @@ const storeRouteName = ref('')
 const storeLoading = ref(false)
 const storeError = ref('')
 const storeSuccess = ref(false)
+
+// 复用冲突检测的地图点/线渲染；单点也显示，手工编辑和删除同步更新。
+watch(pathPoints, () => {
+  if (props.functionName !== 'A星航路规划') return
+  const hadResult = astarResult.value || astarLoading.value
+  cancelAstarRequest()
+  if (hadResult) emit('showGrid', { cells: [] })
+  astarLoading.value = false
+  astarResult.value = null
+  astarVerification.value = null
+  pathStats.value = null
+  emit('showLine', pathPoints.value.map(point => ({ ...point })))
+}, { deep: true })
+onBeforeUnmount(() => {
+  if (props.functionName === 'A星航路规划') emit('showLine', [])
+})
 
 /** 高度快选：10–50 整十 */
 const heightPresetOptions = Array.from({ length: 5 }, (_, i) => (i + 1) * 10)
@@ -89,6 +106,7 @@ function normalizePoint(p) {
 // 重置表单
 function resetForm() {
   if (props.functionName === 'A星航路规划') {
+    emit('showGrid', { cells: [] })
     astarError.value = ''
     astarResult.value = null
     pathStats.value = null
@@ -96,6 +114,7 @@ function resetForm() {
     cancelAstarRequest()
     astarVerification.value = null
     Object.assign(astarRules, createConflictForm())
+    astarForm.searchTimeoutMs = 30000
     astarForm.level = 17
     astarForm.planeRadius = 0.75
     astarForm.speed = 15.0
@@ -550,6 +569,10 @@ async function submitAstarPath() {
         </div>
       </div>
 
+      <div class="param-line">
+        <span class="param-label">搜索时限(ms)</span>
+        <input v-model.number="astarForm.searchTimeoutMs" type="number" min="100" max="60000" step="100" class="param-input">
+      </div>
       <ConflictCheckOptions :form="astarRules" :disabled="astarLoading" />
       <p class="empty-hint">搜索与最终复检使用相同目录规则。查询时间为整条航迹共用的 UTC Unix 秒，不计算逐格到达时刻。</p>
       <p class="empty-hint">新增禁飞区请通过正式要素维护发布；发布后作为强制约束参与规划。</p>

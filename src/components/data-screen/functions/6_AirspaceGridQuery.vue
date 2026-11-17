@@ -203,6 +203,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   stopAttributeCatalogLoad()
+  resetResultAggregation()
   chartDatasetRequest?.abort()
   cancelManualQuery()
   abortController?.abort()
@@ -641,16 +642,13 @@ async function queryAndRenderChartPages(basePayload, controller, options = {}) {
         updateSummary: false,
         renderOnly: true,
       })
-      if (controller.signal.aborted) return
       cells.forEach((cell) => {
         cell.datasetId ??= page?.data?.datasetId || basePayload.datasetId
         cell.datasetVersion ??= page?.data?.datasetVersion
       })
-      const pageFeatures = rawCells.flatMap(cell => cell.displayOnly
-        ? chartDisplayClasses(cell).map(category => ({ ...category, code: cell.code }))
-        : cell.features || [])
+      const pageFeatures = rawCells.flatMap(cell => cell.features || [])
       for (const feature of pageFeatures) {
-        const id = basePayload.displayOnly ? feature.code : `${feature.datasetId || ''}\u0000${feature.featureUid || ''}`
+        const id = `${feature.datasetId || ''}\u0000${feature.featureUid || ''}`
         if (feature.dimensionMode === '3D') feature3DIds.add(id)
         else feature2DIds.add(id)
         const dataset = datasets.get(feature.datasetId) || {
@@ -740,6 +738,107 @@ async function queryAndRenderChartPages(basePayload, controller, options = {}) {
     runtime: performance.now() - startedAt,
     pageCount,
   }
+}
+
+// 查询后手动聚合：只缓存接口允许的数量，不截取分页结果冒充完整输入。
+const aggregationOriginalDisplay = shallowRef(null)
+const aggregationInputCount = ref(0)
+const resultAggregationLoading = ref(false)
+const resultAggregationError = ref('')
+const resultAggregationCount = ref(null)
+const MAX_RESULT_AGGREGATION_CODES = 100000
+let resultAggregationController = null
+const canAggregateResult = computed(() => trueAltitudeMode.value
+  && !loading.value && !dynamicLoading.value && !dynamicZoomEnabled.value
+  && queryStats.value?.complete === true && queryStats.value?.status === 'success'
+  && Boolean(aggregationOriginalDisplay.value?.cells.length)
+  && resultAggregationCount.value === null && !resultAggregationLoading.value)
+
+function resetResultAggregation() {
+  resultAggregationController?.abort()
+  resultAggregationController = null
+  resultAggregationLoading.value = false
+  resultAggregationError.value = ''
+  resultAggregationCount.value = null
+  aggregationOriginalDisplay.value = null
+  aggregationInputCount.value = 0
+}
+
+function showTrueAltitudeGrid(display) {
+  if (trueAltitudeMode.value) {
+    const count = (display.append ? aggregationInputCount.value : 0) + display.cells.length
+    aggregationInputCount.value = count
+    if (count <= MAX_RESULT_AGGREGATION_CODES) {
+      const cells = display.append
+        ? [...(aggregationOriginalDisplay.value?.cells || []), ...display.cells]
+        : display.cells
+      aggregationOriginalDisplay.value = { ...display, cells, append: false, skipFlyTo: true }
+    } else {
+      aggregationOriginalDisplay.value = null
+    }
+  }
+  emit('showGrid', display)
+}
+
+async function aggregateTrueAltitudeResult() {
+  if (!canAggregateResult.value) return
+  const original = aggregationOriginalDisplay.value
+  const gridCodes = original.cells.map(cell => cell.code)
+  if (gridCodes.some(code => typeof code !== 'string' || !/^[0-7]{1,21}$/.test(code))) {
+    resultAggregationError.value = '查询结果含无效的局部三维网格编码，请重新查询'
+    return
+  }
+  const controller = new AbortController()
+  resultAggregationController = controller
+  resultAggregationLoading.value = true
+  resultAggregationError.value = ''
+  try {
+    const startedAt = performance.now()
+    const response = await fetch('/api/multiSource/basicGrid/aggregateGrids', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gridCodes, experimentalMixedResolution: true }),
+      signal: controller.signal,
+    })
+    if (!response.ok) throw new Error(await errorMessage(response, `聚合失败，状态码 ${response.status}`))
+    const data = await response.json()
+    if (controller.signal.aborted || resultAggregationController !== controller) return
+    if (data?.status !== 'success') throw new Error(data?.message || '网格聚合失败')
+    const cells = data?.data?.cells
+    if (!Array.isArray(cells) || !cells.length || cells.some(cell =>
+      typeof cell?.code !== 'string' || !/^[0-7]{1,21}$/.test(cell.code) || cell.level !== cell.code.length ||
+      ![cell.minlon, cell.maxlon, cell.minlat, cell.maxlat, cell.bottom, cell.top].every(Number.isFinite) ||
+      cell.minlon >= cell.maxlon || cell.minlat >= cell.maxlat || cell.bottom >= cell.top)) {
+      throw new Error('聚合网格响应缺少有效的编码、层级或几何信息')
+    }
+    emit('showGrid', {
+      ...original,
+      cells: toMapCells(cells),
+      level: undefined,
+      append: false,
+      enablePicking: false,
+      runtime: performance.now() - startedAt,
+      legendTitle: '真高空域聚合网格',
+    })
+    resultAggregationCount.value = cells.length
+  } catch (err) {
+    if (controller.signal.aborted || resultAggregationController !== controller || err?.name === 'AbortError') return
+    resultAggregationError.value = err?.message || '网格聚合失败，请稍后重试'
+  } finally {
+    if (resultAggregationController === controller) {
+      resultAggregationController = null
+      resultAggregationLoading.value = false
+    }
+  }
+}
+
+function restoreTrueAltitudeResult() {
+  resultAggregationController?.abort()
+  resultAggregationController = null
+  resultAggregationLoading.value = false
+  resultAggregationError.value = ''
+  resultAggregationCount.value = null
+  if (aggregationOriginalDisplay.value) emit('showGrid', aggregationOriginalDisplay.value)
 }
 
 async function queryAndRenderTrueAltitudePages(basePayload, controller, options = {}) {
@@ -998,6 +1097,8 @@ async function onViewBoundsChanged(bounds) {
   if (chartSelectionRequired.value && selectedDatasetIds.value.length === 0) return
   if (trueAltitudeDatasetMode.value && !airspaceGridForm.datasetId) return
 
+  resetResultAggregation()
+
   // 1. 取消上一次未完成的请求（避免旧响应覆盖新响应）
   if (abortController) {
     abortController.abort()
@@ -1160,10 +1261,12 @@ function toggleDynamicZoom() {
   }
   dynamicZoomEnabled.value = !dynamicZoomEnabled.value
   if (dynamicZoomEnabled.value) {
+    resetResultAggregation()
     // 开启时立即触发一次查询
     emit('get-view-bounds')
   } else {
     // 关闭时取消未完成的请求
+    dynamicLoading.value = false
     if (abortController) {
       abortController.abort()
       abortController = null
@@ -1172,6 +1275,8 @@ function toggleDynamicZoom() {
 }
 
 function resetForm() {
+  resetResultAggregation()
+  dynamicLoading.value = false
   cancelManualQuery()
   loading.value = false
   error.value = ''
@@ -1244,6 +1349,7 @@ function setViewBounds(bounds) {
 defineExpose({ resetForm, setPointFromMap, setViewBounds, onViewBoundsChanged })
 
 async function submitAirspaceGridQuery() {
+  resetResultAggregation()
   error.value = ''
   result.value = null
   queryStats.value = null
@@ -1540,6 +1646,11 @@ async function submitAirspaceGridQuery() {
 
 function clearGrids() {
   resetForm()
+  resetResultAggregation()
+  cancelManualQuery()
+  abortController?.abort()
+  abortController = null
+  dynamicLoading.value = false
   emit('showGrid', { cells: [] })
 }
 </script>
@@ -1912,6 +2023,25 @@ function clearGrids() {
         </button>
       </div>
 
+      <template v-if="trueAltitudeMode">
+        <div class="btn-row">
+          <button class="btn-query" @click="aggregateTrueAltitudeResult" :disabled="!canAggregateResult">
+            {{ resultAggregationLoading ? '聚合中...' : '聚合网格（试验）' }}
+          </button>
+          <button v-if="resultAggregationCount !== null" class="btn-query" @click="restoreTrueAltitudeResult">
+            恢复查询网格
+          </button>
+        </div>
+        <div class="dataset-hint">
+          查询完成后可聚合本次显示的网格，命中统计保持不变；LOD 查询聚合的是本次 LOD 格元。
+        </div>
+        <div v-if="dynamicZoomEnabled" class="dataset-hint">请先关闭动态缩放，再聚合查询结果。</div>
+        <div v-if="aggregationInputCount > MAX_RESULT_AGGREGATION_CODES" class="dataset-hint">
+          本次显示超过 10 万个网格，请缩小查询范围后重试；不会截取部分网格提交聚合。
+        </div>
+        <div v-if="resultAggregationError" class="error-box">{{ resultAggregationError }}；当前网格显示保留。</div>
+      </template>
+
       <!-- 错误提示 -->
       <div v-if="error" class="error-box">{{ error }}</div>
 
@@ -1934,8 +2064,12 @@ function clearGrids() {
           <span class="result-label">{{ queryStats.countExact ? (queryStats.complete ? '精确命中' : '累计命中') : (queryStats.lod ? 'LOD 覆盖' : '原始命中') }}</span>
           <span class="result-num">{{ Number(queryStats.total).toLocaleString() }}</span>
         </div>
+        <div v-if="trueAltitudeMode && resultAggregationCount !== null" class="result-row">
+          <span class="result-label">聚合后显示节点</span>
+          <span class="result-num">{{ resultAggregationCount.toLocaleString() }}</span>
+        </div>
         <div v-if="queryStats.lod" class="result-row">
-          <span class="result-label">显示节点</span>
+          <span class="result-label">{{ trueAltitudeMode && resultAggregationCount !== null ? '聚合前显示节点' : '显示节点' }}</span>
           <span class="result-num">{{ Number(queryStats.displayed).toLocaleString() }}</span>
         </div>
         <div v-if="queryStats.lod" class="result-meta">{{ queryStats.mixedResolution ? queryStats.levels : `预生成 L${queryStats.renderLevel}` }} · 权威层 L{{ queryStats.sourceLevel }}</div>
