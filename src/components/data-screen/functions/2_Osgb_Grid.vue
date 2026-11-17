@@ -1,5 +1,5 @@
 <script setup>
-import { reactive, ref } from 'vue'
+import { onBeforeUnmount, reactive, ref, shallowRef } from 'vue'
 import { errorMessage } from '../../../utils/http'
 import { getModelGridSource, MODEL_GRID_SOURCES } from '../../../utils/modelGridSources.js'
 
@@ -134,6 +134,22 @@ const triangleGridResult = ref(null)
 const queryStats = ref(null)
 const gridsData = ref([])
 const queryBounds = ref(null)
+// 保留原查询几何，聚合仅替换显示，不覆盖原始查询结果。
+const originalGridDisplay = shallowRef(null)
+const modelAggregationLoading = ref(false)
+const modelAggregationError = ref('')
+const aggregatedCellCount = ref(null)
+const maxAggregationCodes = 100000
+let modelGridRequest = null
+
+function cancelModelGridRequest() {
+  modelGridRequest?.abort()
+  modelGridRequest = null
+  triangleGridLoading.value = false
+  modelAggregationLoading.value = false
+}
+
+onBeforeUnmount(cancelModelGridRequest)
 
 function resetForm() {
   if (props.functionName === '模型网格化（直接入库）') {
@@ -145,10 +161,7 @@ function resetForm() {
     aggregationResult.value = null
   }
   if (props.functionName === '模型网格查询') {
-    triangleGridError.value = ''
-    triangleGridResult.value = null
-    queryStats.value = null
-    gridsData.value = []
+    clearGrids()
     queryBounds.value = null
   }
 }
@@ -243,6 +256,11 @@ async function submitAggregation() {
 
 // ==================== 模型网格查询提交 ====================
 async function submitTriangleGridQuery() {
+  cancelModelGridRequest()
+  originalGridDisplay.value = null
+  gridsData.value = []
+  modelAggregationError.value = ''
+  aggregatedCellCount.value = null
   triangleGridError.value = ''
   triangleGridResult.value = null
   queryStats.value = null
@@ -260,6 +278,8 @@ async function submitTriangleGridQuery() {
   }
 
   triangleGridLoading.value = true
+  const request = new AbortController()
+  modelGridRequest = request
 
   try {
     const payload = {
@@ -271,10 +291,12 @@ async function submitTriangleGridQuery() {
       maxLat: queryBounds.value.north,
     }
 
+    const sourceConfig = getModelGridSource(payload.source)
     console.log('[模型网格查询] 发送 payload:', payload)
 
     const t0 = performance.now()
     const resp = await fetch('/api/multiSource/triangleGrid/queryOsgbGrid', {
+      signal: request.signal,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -285,6 +307,7 @@ async function submitTriangleGridQuery() {
     }
 
     const data = await resp.json()
+    if (modelGridRequest !== request) return
     const runtime = performance.now() - t0
     console.log('[模型网格查询] 原始返回:', data)
     if (data?.status === 'error') throw new Error(data.message || '模型网格查询失败')
@@ -322,7 +345,7 @@ async function submitTriangleGridQuery() {
 
     console.log('[模型网格查询] 最终解析的 gridsData 长度:', parsedCount)
 
-    const sourceConfig = getModelGridSource(triangleGridForm.source)
+    if (!Array.isArray(gridsData.value)) throw new Error('模型网格响应格式不正确')
     queryStats.value = {
       total: Number(data?.data?.count ?? parsedCount),
       status: data?.status || 'unknown',
@@ -331,60 +354,122 @@ async function submitTriangleGridQuery() {
       hasMore: data?.data?.hasMore === true,
     }
 
-    // 如果返回了格网数据，通知地图组件显示
-    if (gridsData.value.length > 0) {
-      const cells = gridsData.value.map(cell => {
-        console.log('[模型网格查询] 处理单个 cell:', JSON.stringify(cell).slice(0, 200))
-        return {
-          ...cell,
-          bounds: cell.bounds || {
-            north: cell.maxlat,
-            south: cell.minlat,
-            east: cell.maxlon,
-            west: cell.minlon,
-            top: cell.top !== undefined ? cell.top : (cell.center ? cell.center[2] : 0),
-            bottom: cell.bottom !== undefined ? cell.bottom : 0,
-          },
-          code: cell.code ?? cell.gridCode ?? cell.grid_code,
-          level: Number(triangleGridForm.level),
-          x: cell.x,
-          y: cell.y,
-          z: cell.z,
-          row: cell.row,
-          column: cell.column,
-          layer: cell.layer,
-          center: cell.center,
-          color: sourceConfig.color,
-          modelSource: sourceConfig.value,
-          modelSourceLabel: sourceConfig.label,
-        }
-      })
-
-      console.log('[模型网格查询] 转换后的 cells 前3条:', JSON.stringify(cells.slice(0, 3)))
-      emit('showGrid', {
-        cells,
-        level: Number(triangleGridForm.level),
-        runtime,
-        modelSource: sourceConfig.value,
-        modelSourceLabel: sourceConfig.label,
-        legendTitle: `${sourceConfig.label}网格`,
-      })
-    } else {
-      console.log('[模型网格查询] gridsData 为空，不发送 showGrid 事件')
-      emit('showGrid', { cells: [] })
+    // 首次查询始终直接渲染原始格元，只有点击聚合按钮才请求聚合接口。
+    const cells = modelGridCells(gridsData.value, sourceConfig, payload.level)
+    originalGridDisplay.value = {
+      cells,
+      level: payload.level,
+      runtime,
+      modelSource: sourceConfig.value,
+      modelSourceLabel: sourceConfig.label,
+      legendTitle: `${sourceConfig.label}网格`,
     }
+    emit('showGrid', originalGridDisplay.value)
   } catch (err) {
+    if (modelGridRequest !== request || err?.name === 'AbortError') return
     console.error('[模型网格查询] 请求错误:', err)
     triangleGridError.value = err?.message || '请求失败，请稍后重试'
   } finally {
-    triangleGridLoading.value = false
+    if (modelGridRequest === request) {
+      modelGridRequest = null
+      triangleGridLoading.value = false
+    }
   }
 }
 
+function modelGridCells(cells, sourceConfig, fallbackLevel) {
+  return cells.map(cell => ({
+    ...cell,
+    code: cell.code ?? cell.gridCode ?? cell.grid_code,
+    level: Number(cell.level ?? fallbackLevel),
+    bounds: cell.bounds || {
+      north: cell.maxlat,
+      south: cell.minlat,
+      east: cell.maxlon,
+      west: cell.minlon,
+      top: cell.top ?? cell.center?.[2] ?? 0,
+      bottom: cell.bottom ?? 0,
+    },
+    color: sourceConfig.color,
+    modelSource: sourceConfig.value,
+    modelSourceLabel: sourceConfig.label,
+  }))
+}
+
+async function aggregateQueriedGrids() {
+  const original = originalGridDisplay.value
+  if (!original?.cells.length || triangleGridLoading.value || modelAggregationLoading.value) return
+  modelAggregationError.value = ''
+  if (original.cells.length > maxAggregationCodes) {
+    modelAggregationError.value = '本次结果超过 10 万个网格，请缩小地图范围后重新查询再聚合'
+    return
+  }
+  const gridCodes = original.cells.map(cell => cell.code)
+  if (gridCodes.some(code => typeof code !== 'string' || !/^[0-7]{1,21}$/.test(code))) {
+    modelAggregationError.value = '查询结果含无效的局部三维网格编码，请重新查询'
+    return
+  }
+
+  const request = new AbortController()
+  modelGridRequest = request
+  modelAggregationLoading.value = true
+  try {
+    const t0 = performance.now()
+    const resp = await fetch('/api/multiSource/basicGrid/aggregateGrids', {
+      signal: request.signal,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gridCodes, experimentalMixedResolution: true }),
+    })
+    if (!resp.ok) throw new Error(await errorMessage(resp, `聚合失败，状态码 ${resp.status}`))
+    const data = await resp.json()
+    if (modelGridRequest !== request) return
+    if (data?.status !== 'success') throw new Error(data?.message || '网格聚合失败')
+    const cells = data?.data?.cells
+    if (!Array.isArray(cells) || !cells.length || cells.some(cell =>
+      typeof cell?.code !== 'string' || !/^[0-7]{1,21}$/.test(cell.code) ||
+      cell.level !== cell.code.length ||
+      ![cell.minlon, cell.maxlon, cell.minlat, cell.maxlat, cell.bottom, cell.top].every(Number.isFinite) ||
+      cell.minlon >= cell.maxlon || cell.minlat >= cell.maxlat || cell.bottom >= cell.top)) {
+      throw new Error('聚合网格响应缺少有效的编码、层级或几何信息')
+    }
+    // 每个格元沿用接口返回的实际层级，不能套用原查询的统一层级。
+    emit('showGrid', {
+      ...original,
+      cells: modelGridCells(cells, getModelGridSource(original.modelSource)),
+      level: undefined,
+      runtime: performance.now() - t0,
+      legendTitle: `${original.modelSourceLabel}聚合网格`,
+    })
+    aggregatedCellCount.value = cells.length
+  } catch (err) {
+    if (modelGridRequest !== request || err?.name === 'AbortError') return
+    modelAggregationError.value = err?.message || '网格聚合失败，请稍后重试'
+  } finally {
+    if (modelGridRequest === request) {
+      modelGridRequest = null
+      modelAggregationLoading.value = false
+    }
+  }
+}
+
+function restoreOriginalGrids() {
+  cancelModelGridRequest()
+  if (originalGridDisplay.value) emit('showGrid', originalGridDisplay.value)
+  aggregatedCellCount.value = null
+  modelAggregationError.value = ''
+}
+
 function clearGrids() {
+  cancelModelGridRequest()
   emit('showGrid', { cells: [] })
   triangleGridResult.value = null
+  triangleGridError.value = ''
   queryStats.value = null
+  gridsData.value = []
+  originalGridDisplay.value = null
+  modelAggregationError.value = ''
+  aggregatedCellCount.value = null
 }
 </script>
 
@@ -603,8 +688,22 @@ function clearGrids() {
         </button>
       </div>
 
+      <div class="btn-row">
+        <button class="btn-query" @click="aggregateQueriedGrids"
+          :disabled="!originalGridDisplay?.cells.length || triangleGridLoading || modelAggregationLoading || aggregatedCellCount !== null || originalGridDisplay.cells.length > maxAggregationCodes">
+          <span>{{ modelAggregationLoading ? '聚合中...' : '聚合网格（试验）' }}</span>
+        </button>
+        <button v-if="aggregatedCellCount !== null" class="btn-query" @click="restoreOriginalGrids">
+          恢复原始网格
+        </button>
+      </div>
+      <div v-if="originalGridDisplay?.cells.length > maxAggregationCodes" class="query-warning">
+        本次返回超过 10 万个网格，请缩小地图范围后重新查询再聚合。
+      </div>
+
       <!-- 错误提示 -->
       <div v-if="triangleGridError" class="error-box">{{ triangleGridError }}</div>
+      <div v-if="modelAggregationError" class="error-box">{{ modelAggregationError }}；当前网格显示保留。</div>
 
       <!-- 查询结果统计 -->
       <div v-if="queryStats" class="result-box">
@@ -613,8 +712,12 @@ function clearGrids() {
           <span class="result-status success">{{ queryStats.sourceLabel }}</span>
         </div>
         <div class="result-row">
-          <span class="result-label">网格数量</span>
+          <span class="result-label">查询网格数量</span>
           <span class="result-num">{{ queryStats.total }}</span>
+        </div>
+        <div v-if="aggregatedCellCount !== null" class="result-row">
+          <span class="result-label">聚合后显示数量</span>
+          <span class="result-num">{{ aggregatedCellCount }}</span>
         </div>
         <div class="result-row">
           <span class="result-label">查询状态</span>
@@ -627,7 +730,7 @@ function clearGrids() {
           <span class="result-status success">{{ queryStats.dataSource === 'clickhouse' ? 'ClickHouse' : queryStats.dataSource }}</span>
         </div>
         <div v-if="queryStats.hasMore" class="query-warning">
-          当前视野命中数量超过单次返回上限，仅渲染本次返回的网格，请缩小地图范围后重试。
+          当前视野命中数量超过单次返回上限，仅渲染和聚合本次返回的网格，请缩小地图范围后重试。
         </div>
       </div>
 
