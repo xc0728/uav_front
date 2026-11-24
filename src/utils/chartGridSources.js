@@ -1,5 +1,5 @@
 // 渲染和拾取共享来源位标记，避免为每个格元保留完整模型属性。
-// 保留历史位：1=静态要素，2=建筑物。当前全部来源可放入 Uint8Array。
+// 保留历史位：1=静态要素，2=建筑物。新增来源使用 Uint16Array，保持原有来源位不变。
 export const CHART_STATIC_SOURCE = 1
 export const MODEL_GRID_SOURCE_BITS = Object.freeze({
   lod13: 2,
@@ -9,6 +9,9 @@ export const MODEL_GRID_SOURCE_BITS = Object.freeze({
   surveillance: 32,
   power: 64,
   crane: 128,
+  wenming_tower: 256,
+  shouchang_bridge: 512,
+  drone_dock: 1024,
 })
 
 export const LOD13_BUILDING_DATASET_ID = 'deqing_lod13_buildings'
@@ -20,6 +23,9 @@ export const MODEL_GRID_DATASET_IDS = Object.freeze({
   surveillance: 'deqing_model_grid_surveillance',
   power: 'deqing_model_grid_power',
   crane: 'deqing_model_grid_crane',
+  wenming_tower: 'deqing_model_grid_wenming_tower',
+  shouchang_bridge: 'deqing_model_grid_shouchang_bridge',
+  drone_dock: 'deqing_model_grid_drone_dock',
 })
 
 const sourceByDatasetId = new Map(

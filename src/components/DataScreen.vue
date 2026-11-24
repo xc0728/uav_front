@@ -77,7 +77,7 @@ function handleMapPointSelected(payload) {
   const { lon, lat, height } = payload
   const panel = servicePanelRef.value
   if (panel && typeof panel.applyMapPointToActiveService === 'function') {
-    panel.applyMapPointToActiveService(lon, lat, height)
+    panel.applyMapPointToActiveService(lon, lat, height, payload)
   }
 }
 
@@ -477,6 +477,8 @@ function handleViewBoundsChanged(bounds) {
         :show-scenario-demo="false"
         :route-point-picking="Boolean(servicePanelRef?.routePointPicking || servicePanelRef?.conePointPicking)"
         :geometric-cone-point-picking="Boolean(servicePanelRef?.geometricConePointPicking)"
+        :cone-query-point-picking="Boolean(servicePanelRef?.coneQueryPointPicking)"
+        :cone-building-id="servicePanelRef?.coneBuildingId || ''"
         @cone-region-selected="detail => servicePanelRef?.selectConeCell?.(detail)"
         @point-selected="handleMapPointSelected"
         @box-select-start="handleBoxSelectStart"
@@ -487,6 +489,7 @@ function handleViewBoundsChanged(bounds) {
       <main class="app-main">
         <ServicePanel
           ref="servicePanelRef"
+          :load-building-model="id => cesiumMapRef?.loadConeBuildingModel(id)"
           panel-type="control"
           :theme="currentTheme"
           @panel-width-change="servicePanelWidth = $event"

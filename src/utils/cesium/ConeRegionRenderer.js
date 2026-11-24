@@ -2,6 +2,7 @@ import * as Cesium from 'cesium'
 import InstancedGridRenderer from './InstancedGridRenderer.js'
 import { toAirspaceMapCells } from '../trueAltitudeGrid.js'
 import { planningColor } from '../coneRegionQuery.js'
+import { coneTopicColor } from '../coneRegionTopics.js'
 
 /// 圆锥台专属图层；不操作已有网格、模型或航图集合。
 export default class ConeRegionRenderer {
@@ -30,8 +31,9 @@ export default class ConeRegionRenderer {
     entity.coneRegionId = id
     this.layers.set(id, { entities: [entity], primitives: [] })
   }
-  region({ id, region, cells = [], mode = 'surface', selected = false, cellColor = null, labelText = id }) {
+  region({ id, region, cells = [], mode = 'surface', selected = false, cellColor = null, labelText = id, attributeCode = 'planning_suitability_level', topic = null }) {
     this.remove(id)
+    const colorFor = cell => topic ? coneTopicColor(cell, attributeCode, topic) : planningColor(cell?.attributeValue)
     const layer = { entities: [], primitives: [], cells }
     this.layers.set(id, layer)
     const phi = Cesium.Math.toRadians(region.latitude), e2 = 0.00669438002290, a = 6378137
@@ -59,7 +61,7 @@ export default class ConeRegionRenderer {
         pixelOffset: new Cesium.Cartesian2(0, 18), fillColor: Cesium.Color.WHITE, showBackground: true } })
     marker.coneRegionId = id; layer.entities.push(marker)
     if (mode === 'cells' && cells.length) {
-      const mapped = toAirspaceMapCells(cells).map(cell => ({ ...cell, color: cellColor || planningColor(cell.attributeValue) }))
+      const mapped = toAirspaceMapCells(cells).map((cell, i) => ({ ...cell, color: cellColor || colorFor(cells[i]) }))
       const renderer = new InstancedGridRenderer({ cells: mapped, fillAlpha: 0.55, enablePicking: true, denseOutline: false })
       layer.boxRenderer = renderer
       layer.primitives.push(this.viewer.scene.primitives.add(renderer))
@@ -78,7 +80,7 @@ export default class ConeRegionRenderer {
         }) }, indices: new Uint16Array(vertices.length === 3 ? [0,1,2] : [0,1,2,0,2,3]),
         primitiveType: Cesium.PrimitiveType.TRIANGLES, boundingSphere: Cesium.BoundingSphere.fromVertices(values) })
         instances.push(new Cesium.GeometryInstance({ geometry, id: { coneRegionId: id, coneCell: cell || null },
-          attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(Cesium.Color.fromCssColorString(planningColor(cell?.attributeValue)).withAlpha(0.8)) } }))
+          attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(Cesium.Color.fromCssColorString(colorFor(cell)).withAlpha(0.8)) } }))
       }
       for (let j = 0; j < bands; j++) for (let i = 0; i < segments; i++) {
         const z0 = j * region.height / bands, z1 = (j+1) * region.height / bands

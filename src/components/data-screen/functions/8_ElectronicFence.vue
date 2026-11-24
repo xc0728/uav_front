@@ -1,4 +1,5 @@
 <script setup>
+import HelpTooltip from '../HelpTooltip.vue'
 import { reactive, ref, computed } from 'vue'
 
 const props = defineProps({
@@ -249,9 +250,9 @@ defineExpose({
         <div v-if="!canDrawSphere" class="form-tip error">
           半径必须大于0
         </div>
-        <div class="form-tip">
+        <HelpTooltip target=".form-row:first-child label, .form-row:first-child input">
           请在地图上点击选择球心位置
-        </div>
+        </HelpTooltip>
       </div>
 
       <div v-if="currentMode === FENCE_TYPE_LINE" class="fence-form">
@@ -287,9 +288,9 @@ defineExpose({
         <div v-if="!canDrawLine" class="form-tip error">
           半宽和半高必须大于0
         </div>
-        <div class="form-tip">
+        <HelpTooltip target=".form-row:first-child label, .form-row:first-child input">
           请在地图上点击添加多个点组成线段
-        </div>
+        </HelpTooltip>
       </div>
 
       <div class="draw-controls">

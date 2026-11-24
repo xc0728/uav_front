@@ -1,4 +1,5 @@
 <script setup>
+import HelpTooltip from '../HelpTooltip.vue'
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { createCatalogRule, requestConflictCatalog } from '../../../utils/conflictCheck.js'
 import { loadActiveAttributeDatasets } from '../../../utils/gridAttributeCatalog.js'
@@ -116,7 +117,7 @@ onBeforeUnmount(() => { datasetController?.abort(); catalogController?.abort() }
     <p v-if="loadingCatalog" class="hint" role="status">正在读取已发布要素和可用判定方式…</p>
     <p v-if="catalogError" role="alert" class="error">{{ catalogError }}</p>
     <p v-if="selectionNotice" role="status" class="hint">{{ selectionNotice }}</p>
-    <p class="hint">勾选要素后配置判定方式和参数。只执行所选规则及正式维护强制约束，阈值不由系统猜测。</p>
+    <HelpTooltip target=".catalog-group > summary">勾选要素后配置判定方式和参数。只执行所选规则及正式维护强制约束，阈值不由系统猜测。</HelpTooltip>
     <div v-for="rule in orphanRules" :key="rule.elementId" class="error">
       已选要素不在当前目录：{{ rule.elementId }}
       <button type="button" @click="form.rules = form.rules.filter(item => item.elementId !== rule.elementId)">移除此规则</button>
@@ -129,7 +130,7 @@ onBeforeUnmount(() => { datasetController?.abort(); catalogController?.abort() }
           <span>{{ item.name }}{{ item.unit ? `（${item.unit}）` : '' }}<small v-if="item.mandatory">正式约束，服务端始终检查</small></span>
         </label>
         <p v-if="!item.available" class="error">{{ item.unavailableReason }}</p>
-        <p v-if="item.description" class="hint">{{ item.description }}</p>
+        <HelpTooltip target=":scope > label.check" v-if="item.description">{{ item.description }}</HelpTooltip>
         <template v-if="selectedRule(item) && !item.mandatory">
           <p v-if="selectedRule(item).elementRevision !== item.revision" class="error">版本已变化，请取消后重新选择并复核参数。</p>
           <label>判定方式<select :value="selectedRule(item).method" :disabled="loadingCatalog" @change="changeMethod(item, $event.target.value)"><option v-for="method in item.methods" :key="method.id" :value="method.id">{{ method.name }}</option></select></label>
@@ -144,10 +145,10 @@ onBeforeUnmount(() => { datasetController?.abort(); catalogController?.abort() }
       </div>
     </details>
     <p v-if="form.catalogLoaded && !form.rules.length" class="hint">未选择可选要素，本次仅执行已启用的正式维护强制约束。</p>
-    <p class="hint">建筑、禁飞区可通过“正式要素维护”发布。二维水平避让与实体三维碰撞分别报告；目录未声明的距离缓冲方式尚不支持。</p>
+    <HelpTooltip target=".catalog-group > summary">建筑、禁飞区可通过“正式要素维护”发布。二维水平避让与实体三维碰撞分别报告；目录未声明的距离缓冲方式尚不支持。</HelpTooltip>
     <label>环境查询时间（UTC Unix 秒）<input v-model="form.timestamp" type="number" min="1" step="1" :required="temporal" placeholder="时变属性必填，其余可留空"></label>
     <button type="button" @click="form.timestamp = Math.floor(Date.now() / 1000)">使用当前时刻</button>
-    <p class="hint">整条航迹按同一时刻查询时变属性，不推算逐格到达时间。</p>
+    <HelpTooltip target="label:has(input[type=&quot;number&quot;][min=&quot;1&quot;]), button:last-of-type">整条航迹按同一时刻查询时变属性，不推算逐格到达时间。</HelpTooltip>
   </fieldset>
 </template>
 

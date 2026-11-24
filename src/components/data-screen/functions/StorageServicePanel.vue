@@ -1,4 +1,5 @@
 <script setup>
+import HelpTooltip from '../HelpTooltip.vue'
 import { ref, reactive, computed, onBeforeUnmount, watch } from 'vue'
 import { Loader2, RefreshCw, ChevronDown, ChevronUp, Box, Building2, Mountain, Cloud, Search, Layers, Waypoints, Radar, Wrench, FileSpreadsheet } from 'lucide-vue-next'
 import FeatureDatasetManager from './FeatureDatasetManager.vue'
@@ -1468,8 +1469,8 @@ onBeforeUnmount(() => {
       <!-- 模型网格化 -->
       <section v-show="activeTab === 'osgb'" class="storage-card">
         <div class="card-title">OSGB / 3D Tiles 模型网格化入库</div>
-        <p class="card-desc">读取指定目录中的 OSGB 或 3D Tiles 模型，将三角面映射为指定层级的网格并写入数据库。任务提交后异步执行，将自动跟踪执行进度。</p>
-        <p v-if="osgbForm.mode === 'sync'" class="card-desc">标准入库默认自动同步 ClickHouse；任务成功后重新查询航图要素即可显示。同步失败时 PostgreSQL 数据保留，只需重试同步，无需重新网格化。</p>
+        <HelpTooltip target=":scope > .card-title">读取指定目录中的 OSGB 或 3D Tiles 模型，将三角面映射为指定层级的网格并写入数据库。任务提交后异步执行，将自动跟踪执行进度。</HelpTooltip>
+        <HelpTooltip target=".mode-row label:has(input[value=&quot;sync&quot;])" v-if="osgbForm.mode === 'sync'">标准入库默认自动同步 ClickHouse；任务成功后重新查询航图要素即可显示。同步失败时 PostgreSQL 数据保留，只需重试同步，无需重新网格化。</HelpTooltip>
 
         <div class="mode-row">
           <span class="mode-label">入库模式</span>
@@ -1527,7 +1528,7 @@ onBeforeUnmount(() => {
             <label>最小聚合层级（0-21） <span class="req">*</span></label>
             <input v-model.number="osgbForm.minLevel" type="number" min="0" max="21" @blur="validateField('minLevel')" />
             <span v-if="errors.minLevel" class="field-error">{{ errors.minLevel }}</span>
-            <span v-else class="field-hint">不得大于目标网格层级</span>
+            <HelpTooltip v-else>不得大于目标网格层级</HelpTooltip>
           </div>
         </div>
 
@@ -1536,14 +1537,14 @@ onBeforeUnmount(() => {
             <Loader2 v-if="submittingMap.osgb" :size="14" class="spin" />
             <span>{{ submittingMap.osgb ? '提交中...' : '提交入库' }}</span>
           </button>
-          <span class="submit-hint">提交后任务进入异步队列，将自动跟踪进度</span>
+          <HelpTooltip target="button">提交后任务进入异步队列，将自动跟踪进度</HelpTooltip>
         </div>
       </section>
 
       <!-- 建筑白模 -->
       <section v-show="activeTab === 'building'" class="storage-card">
         <div class="card-title">建筑白模网格化入库</div>
-        <p class="card-desc">将单外环 Polygon 建筑白模 GeoJSON 网格化并异步写入 PostgreSQL。表名必须与层级一致。</p>
+        <HelpTooltip target=":scope > .card-title">将单外环 Polygon 建筑白模 GeoJSON 网格化并异步写入 PostgreSQL。表名必须与层级一致。</HelpTooltip>
 
         <div class="form-grid">
           <div class="form-field" :class="{ 'has-error': errors.table }">
@@ -1555,7 +1556,7 @@ onBeforeUnmount(() => {
               @blur="validateField('table')"
             />
             <span v-if="errors.table" class="field-error">{{ errors.table }}</span>
-            <span v-else class="field-hint">格式：white_model_grid_&lt;层级&gt;</span>
+            <HelpTooltip v-else>格式：white_model_grid_&lt;层级&gt;</HelpTooltip>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.level }">
             <label>网格层级（1-21）</label>
@@ -1594,14 +1595,14 @@ onBeforeUnmount(() => {
             <Loader2 v-if="submittingMap.building" :size="14" class="spin" />
             <span>{{ submittingMap.building ? '提交中...' : '提交入库任务' }}</span>
           </button>
-          <span class="submit-hint">提交后任务进入异步队列，将自动跟踪进度</span>
+          <HelpTooltip target="button">提交后任务进入异步队列，将自动跟踪进度</HelpTooltip>
         </div>
       </section>
 
       <!-- DEM 地面网格 -->
       <section v-show="activeTab === 'dem'" class="storage-card">
         <div class="card-title">DEM 地面网格构建</div>
-        <p class="card-desc">流式读取 GDAL 可识别且可转换到 EPSG:4490 的单波段 DEM GeoTIFF，按目标 DQG 网格中心双线性采样并批量写入 PostgreSQL。相同 buildId 可从检查点继续。</p>
+        <HelpTooltip target=":scope > .card-title">流式读取 GDAL 可识别且可转换到 EPSG:4490 的单波段 DEM GeoTIFF，按目标 DQG 网格中心双线性采样并批量写入 PostgreSQL。相同 buildId 可从检查点继续。</HelpTooltip>
 
         <div class="form-grid">
           <div class="form-field" :class="{ 'has-error': errors.buildId }">
@@ -1613,7 +1614,7 @@ onBeforeUnmount(() => {
               @blur="validateField('buildId')"
             />
             <span v-if="errors.buildId" class="field-error">{{ errors.buildId }}</span>
-            <span v-else class="field-hint">字母/数字/下划线，字母或下划线开头，最长 24 字符；失败后可用相同值恢复</span>
+            <HelpTooltip v-else>字母/数字/下划线，字母或下划线开头，最长 24 字符；失败后可用相同值恢复</HelpTooltip>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.inputPath }">
             <label>DEM 文件路径 <span class="req">*</span></label>
@@ -1624,13 +1625,13 @@ onBeforeUnmount(() => {
               @blur="validateField('inputPath')"
             />
             <span v-if="errors.inputPath" class="field-error">{{ errors.inputPath }}</span>
-            <span v-else class="field-hint">项目根目录下的相对路径</span>
+            <HelpTooltip v-else>项目根目录下的相对路径</HelpTooltip>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.table }">
             <label>目标表名</label>
             <input v-model="demForm.table" type="text" placeholder="demgrid_16" @blur="validateField('table')" />
             <span v-if="errors.table" class="field-error">{{ errors.table }}</span>
-            <span v-else class="field-hint">demgrid 或 demgrid_&lt;层级&gt;，须与层级一致</span>
+            <HelpTooltip v-else>demgrid 或 demgrid_&lt;层级&gt;，须与层级一致</HelpTooltip>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.level }">
             <label>网格层级（1-21）</label>
@@ -1654,21 +1655,21 @@ onBeforeUnmount(() => {
             <Loader2 v-if="submittingMap.dem" :size="14" class="spin" />
             <span>{{ submittingMap.dem ? '提交中...' : '提交构建任务' }}</span>
           </button>
-          <span class="submit-hint">提交后任务进入异步队列，将自动跟踪进度</span>
+          <HelpTooltip target="button">提交后任务进入异步队列，将自动跟踪进度</HelpTooltip>
         </div>
       </section>
 
       <!-- DEM 地形分类 -->
       <section v-show="activeTab === 'demClassify'" class="storage-card">
         <div class="card-title">DEM 地表/地下网格分类</div>
-        <p class="card-desc">保持 PostgreSQL DEM 数据不变，将 ClickHouse 当前活动空域中与 DEM 同层的网格标记为 terrain_surface，更低网格标记为 underground，并设置 flyable=0。</p>
+        <HelpTooltip target=":scope > .card-title">保持 PostgreSQL DEM 数据不变，将 ClickHouse 当前活动空域中与 DEM 同层的网格标记为 terrain_surface，更低网格标记为 underground，并设置 flyable=0。</HelpTooltip>
 
         <div class="form-grid">
           <div class="form-field" :class="{ 'has-error': errors.sourceTable }">
             <label>DEM 源表</label>
             <input v-model="demClassifyForm.sourceTable" type="text" placeholder="demgrid_16" @blur="validateField('sourceTable')" />
             <span v-if="errors.sourceTable" class="field-error">{{ errors.sourceTable }}</span>
-            <span v-else class="field-hint">demgrid 或 demgrid_&lt;层级&gt;</span>
+            <HelpTooltip v-else>demgrid 或 demgrid_&lt;层级&gt;</HelpTooltip>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.level }">
             <label>DQG 层级（1-21）</label>
@@ -1700,14 +1701,14 @@ onBeforeUnmount(() => {
             <Loader2 v-if="submittingMap.demClassify" :size="14" class="spin" />
             <span>{{ submittingMap.demClassify ? '提交中...' : '提交分类任务' }}</span>
           </button>
-          <span class="submit-hint">提交后任务进入异步队列，将自动跟踪进度</span>
+          <HelpTooltip target="button">提交后任务进入异步队列，将自动跟踪进度</HelpTooltip>
         </div>
       </section>
 
       <!-- 真高空域 -->
       <section v-show="activeTab === 'trueAltitude'" class="storage-card">
         <div class="card-title">真高空域网格剖分入库</div>
-        <p class="card-desc">从 PostgreSQL DEM 地面网格读取地面高程，生成地面以上指定真高范围的三维 DQG 网格并写入 ClickHouse。不填写空间范围时处理整个源表。</p>
+        <HelpTooltip target=":scope > .card-title">从 PostgreSQL DEM 地面网格读取地面高程，生成地面以上指定真高范围的三维 DQG 网格并写入 ClickHouse。不填写空间范围时处理整个源表。</HelpTooltip>
 
         <div class="form-grid">
           <div class="form-field" :class="{ 'has-error': errors.datasetId }">
@@ -1719,7 +1720,7 @@ onBeforeUnmount(() => {
               @blur="validateField('datasetId')"
             />
             <span v-if="errors.datasetId" class="field-error">{{ errors.datasetId }}</span>
-            <span v-else class="field-hint">同一标识的后续任务将生成新版本</span>
+            <HelpTooltip v-else>同一标识的后续任务将生成新版本</HelpTooltip>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.sourceTable }">
             <label>源 DEM 网格表</label>
@@ -1745,7 +1746,7 @@ onBeforeUnmount(() => {
               @blur="validateField('polygon')"
             ></textarea>
             <span v-if="errors.polygon" class="field-error">{{ errors.polygon }}</span>
-            <span v-else class="field-hint">JSON 数组，[[经度,纬度],...] 单外环至少 3 点；留空处理整个源表</span>
+            <HelpTooltip v-else>JSON 数组，[[经度,纬度],...] 单外环至少 3 点；留空处理整个源表</HelpTooltip>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.minAgl }">
             <label>最低真高（米）</label>
@@ -1756,7 +1757,7 @@ onBeforeUnmount(() => {
             <label>最高真高（米）</label>
             <input v-model.number="trueAltForm.maxAgl" type="number" min="0" max="100000" step="any" @blur="validateField('maxAgl')" />
             <span v-if="errors.maxAgl" class="field-error">{{ errors.maxAgl }}</span>
-            <span v-else class="field-hint">不得小于最低真高</span>
+            <HelpTooltip v-else>不得小于最低真高</HelpTooltip>
           </div>
         </div>
 
@@ -1795,7 +1796,7 @@ onBeforeUnmount(() => {
             <label>续跑版本号 resumeVersion</label>
             <input v-model.number="trueAltForm.resumeVersion" type="number" min="1" placeholder="留空表示新任务" @blur="validateField('resumeVersion')" />
             <span v-if="errors.resumeVersion" class="field-error">{{ errors.resumeVersion }}</span>
-            <span v-else class="field-hint">仅可续跑该数据集下失败/构建中的版本，参数须与原任务一致</span>
+            <HelpTooltip v-else>仅可续跑该数据集下失败/构建中的版本，参数须与原任务一致</HelpTooltip>
           </div>
         </div>
 
@@ -1804,14 +1805,14 @@ onBeforeUnmount(() => {
             <Loader2 v-if="submittingMap.trueAltitude" :size="14" class="spin" />
             <span>{{ submittingMap.trueAltitude ? '提交中...' : '提交剖分任务' }}</span>
           </button>
-          <span class="submit-hint">提交后任务进入异步队列，将自动跟踪进度</span>
+          <HelpTooltip target="button">提交后任务进入异步队列，将自动跟踪进度</HelpTooltip>
         </div>
       </section>
 
       <!-- Parquet 网格属性导入 -->
       <section v-show="activeTab === 'parquetAttribute'" class="storage-card">
         <div class="card-title">Parquet 网格属性批量导入</div>
-        <p class="card-desc">通过通用字段映射把 Parquet 属性挂载到已有网格。水平 L17 数据可按离地高度范围动态覆盖三维格元，不需要为每一种专题开发新模板；旧噪声数据仍可选择兼容预设。</p>
+        <HelpTooltip target=":scope > .card-title">通过通用字段映射把 Parquet 属性挂载到已有网格。水平 L17 数据可按离地高度范围动态覆盖三维格元，不需要为每一种专题开发新模板；旧噪声数据仍可选择兼容预设。</HelpTooltip>
 
         <div class="form-grid">
           <div class="form-field" :class="{ 'has-error': errors.importMode }">
@@ -1822,7 +1823,7 @@ onBeforeUnmount(() => {
               <option value="dqg_noise_v1">兼容预设：DQG 噪声 v1</option>
             </select>
             <span v-if="errors.importMode" class="field-error">{{ errors.importMode }}</span>
-            <span v-else class="field-hint">气象等准二维场选择通用方式；只有旧噪声文件选择兼容预设</span>
+            <HelpTooltip v-else>气象等准二维场选择通用方式；只有旧噪声文件选择兼容预设</HelpTooltip>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.level }">
             <label>网格层级</label>
@@ -1833,7 +1834,7 @@ onBeforeUnmount(() => {
             <label>目标数据集标识 <span class="req">*</span></label>
             <input v-model="parquetAttributeForm.datasetId" type="text" placeholder="deqing_true_altitude_l17" @blur="validateField('datasetId')" />
             <span v-if="errors.datasetId" class="field-error">{{ errors.datasetId }}</span>
-            <span v-else class="field-hint">必须是当前已激活的 L17 真高网格数据集</span>
+            <HelpTooltip v-else>必须是当前已激活的 L17 真高网格数据集</HelpTooltip>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.datasetVersion }">
             <label>目标活动版本号 <span class="req">*</span></label>
@@ -1844,24 +1845,24 @@ onBeforeUnmount(() => {
             <label>Parquet 文件路径 <span class="req">*</span></label>
             <input v-model="parquetAttributeForm.input" type="text" placeholder="data/dqg_noise/dqg_native_noise_l17.parquet" @blur="validateField('input')" />
             <span v-if="errors.input" class="field-error">{{ errors.input }}</span>
-            <span v-else class="field-hint">项目根目录下的相对路径，不允许绝对路径、.. 或符号链接</span>
+            <HelpTooltip v-else>项目根目录下的相对路径，不允许绝对路径、.. 或符号链接</HelpTooltip>
           </div>
 
           <template v-if="parquetAttributeForm.importMode === 'grid_code_exact'">
             <div class="form-field span-2">
               <label>选择正式入库文件</label>
               <select v-model="parquetAttributeForm.planningFile" @change="fillPlanningFile(parquetAttributeForm.planningFile)"><option v-for="file in PLANNING_PARQUET_FILES" :key="file.value" :value="file.value">{{ file.label }}</option></select>
-              <span class="field-hint">直接读取原文件，自动填写正式属性映射；提交后先校验完整文件，通过后入库。03 不重复写入 02 的得分。目标已有同名绑定时拒绝覆盖。</span>
+              <HelpTooltip>直接读取原文件，自动填写正式属性映射；提交后先校验完整文件，通过后入库。03 不重复写入 02 的得分。目标已有同名绑定时拒绝覆盖。</HelpTooltip>
             </div>
             <div v-for="axis in ['x', 'y', 'z']" :key="axis" class="form-field">
               <label>{{ axis }} 坐标字段</label><input v-model="parquetAttributeForm[axis + 'Field']" type="text" />
               <span v-if="errors[axis + 'Field']" class="field-error">{{ errors[axis + 'Field'] }}</span>
             </div>
             <div class="form-field"><label class="checkbox-item"><input v-model="parquetAttributeForm.verifyCoordinates" type="checkbox" />核对 x/y/z 与目标网格一致</label></div>
-            <div class="form-field"><label>属性空值处理</label><select v-model="parquetAttributeForm.nullValuePolicy"><option value="REJECT">拒绝空值</option><option value="KEEP_NULL">保留空值，不删除网格行</option></select><span class="field-hint">第三个文件的生长代价存在空值，选择保留；不补零，其他字段照常入库。NaN、无穷大及类型异常仍拒绝。</span></div>
-            <div class="form-field"><label>统一分类代码（可选，按文本保存）</label><input v-model="parquetAttributeForm.classificationCode" type="text" placeholder="按分类标准填写；留空不设置" /><span class="field-hint">映射项可单独填写 classificationCode；已有非空分类保留，新增分类通过属性维护批次确认。</span></div>
+            <div class="form-field"><label>属性空值处理</label><select v-model="parquetAttributeForm.nullValuePolicy"><option value="REJECT">拒绝空值</option><option value="KEEP_NULL">保留空值，不删除网格行</option></select><HelpTooltip>第三个文件的生长代价存在空值，选择保留；不补零，其他字段照常入库。NaN、无穷大及类型异常仍拒绝。</HelpTooltip></div>
+            <div class="form-field"><label>统一分类代码（可选，按文本保存）</label><input v-model="parquetAttributeForm.classificationCode" type="text" placeholder="按分类标准填写；留空不设置" /><HelpTooltip>映射项可单独填写 classificationCode；已有非空分类保留，新增分类通过属性维护批次确认。</HelpTooltip></div>
             <div v-if="!parquetAttributeForm.autoPreflight" class="form-field"><label>成功预检任务编号</label><input v-model="parquetAttributeForm.preflightJobId" type="text" placeholder="预检成功自动回填，也可从结果复制" /><span v-if="errors.preflightJobId" class="field-error">{{ errors.preflightJobId }}</span></div>
-            <div v-if="!parquetAttributeForm.dryRun" class="form-field span-2"><label>输入“确认导入”</label><input v-model="parquetAttributeForm.exactConfirmation" type="text" placeholder="确认导入" /><span v-if="errors.exactConfirmation" class="field-error">{{ errors.exactConfirmation }}</span><span class="field-hint">自动校验完整文件后添加本次新属性绑定；发现目标版本变化、编码不匹配或已有绑定时停止，保护其他场数据。</span></div>
+            <div v-if="!parquetAttributeForm.dryRun" class="form-field span-2"><label>输入“确认导入”</label><input v-model="parquetAttributeForm.exactConfirmation" type="text" placeholder="确认导入" /><span v-if="errors.exactConfirmation" class="field-error">{{ errors.exactConfirmation }}</span><HelpTooltip>自动校验完整文件后添加本次新属性绑定；发现目标版本变化、编码不匹配或已有绑定时停止，保护其他场数据。</HelpTooltip></div>
           </template>
           <template v-if="parquetAttributeForm.importMode !== 'dqg_noise_v1'">
             <div class="form-field" :class="{ 'has-error': errors.codeField }">
@@ -1900,13 +1901,13 @@ onBeforeUnmount(() => {
                 <option value="SKIP">跳过，只导入与目标空域的交集（环境场推荐）</option>
                 <option value="REJECT">发现任一目标外编码即拒绝</option>
               </select>
-              <span class="field-hint">跳过的数量会记录在任务结果中，不会生成属性事实</span>
+              <HelpTooltip>跳过的数量会记录在任务结果中，不会生成属性事实</HelpTooltip>
             </div>
             <div class="form-field span-2" :class="{ 'has-error': errors.attributeMappingsText }">
               <label>属性字段映射（JSON） <span class="req">*</span></label>
               <textarea v-model="parquetAttributeForm.attributeMappingsText" rows="13" spellcheck="false" @blur="validateField('attributeMappingsText')"></textarea>
               <span v-if="errors.attributeMappingsText" class="field-error">{{ errors.attributeMappingsText }}</span>
-              <span v-else class="field-hint">时间字段不在映射中，因此本次数据按静态属性导入</span>
+              <HelpTooltip v-else>时间字段不在映射中，因此本次数据按静态属性导入</HelpTooltip>
             </div>
             <div v-if="parquetAttributeForm.importMode === 'generic_horizontal_agl'" class="form-field span-2">
               <label class="checkbox-item">
@@ -1963,14 +1964,14 @@ onBeforeUnmount(() => {
             <Loader2 v-if="submittingMap.parquetAttribute" :size="14" class="spin" />
             <span>{{ submittingMap.parquetAttribute ? '提交中...' : (parquetAttributeForm.dryRun ? '提交全量校验' : parquetAttributeForm.importMode === 'grid_code_exact' ? '校验并正式入库' : '提交正式导入') }}</span>
           </button>
-          <span class="submit-hint">任务提交后进入异步队列，并自动跳转到任务进度页面</span>
+          <HelpTooltip target="button">任务提交后进入异步队列，并自动跳转到任务进度页面</HelpTooltip>
         </div>
       </section>
 
       <!-- 多维场重采样 -->
       <section v-show="activeTab === 'fieldResample'" class="storage-card">
         <div class="card-title">多维场数据重采样与网格属性挂载</div>
-        <p class="card-desc">三维场支持 NetCDF 点剖面和经纬度规则网格静态切片；二维气象场按规则经纬网读取单日切片，在权威 L17 水平中心双线性取样，每个水平码只存一份值，查询时再投影到三维空域。</p>
+        <HelpTooltip target=":scope > .card-title">三维场支持 NetCDF 点剖面和经纬度规则网格静态切片；二维气象场按规则经纬网读取单日切片，在权威 L17 水平中心双线性取样，每个水平码只存一份值，查询时再投影到三维空域。</HelpTooltip>
 
         <div class="form-grid">
           <div class="form-field" :class="{ 'has-error': errors.datasetId }">
@@ -1987,7 +1988,7 @@ onBeforeUnmount(() => {
             <label>NetCDF 文件路径 <span class="req">*</span></label>
             <input v-model="fieldResampleForm.input" type="text" placeholder="data/field/source.nc" @blur="validateField('input')" />
             <span v-if="errors.input" class="field-error">{{ errors.input }}</span>
-            <span v-else class="field-hint">项目根目录下的 .nc/.nc4 相对路径</span>
+            <HelpTooltip v-else>项目根目录下的 .nc/.nc4 相对路径</HelpTooltip>
           </div>
           <div class="form-field span-2">
             <label>维度模式</label>
@@ -1995,7 +1996,7 @@ onBeforeUnmount(() => {
               <option value="3D">三维场（多高度，挂到格元属性）</option>
               <option value="2D">二维气象场（近地面日尺度，水平值只存一次）</option>
             </select>
-            <span v-if="isSurfaceField" class="field-hint">二维模式不使用垂直场参数；关联离地范围只决定查询作用域，不是气象垂直观测层。</span>
+            <HelpTooltip v-if="isSurfaceField">二维模式不使用垂直场参数；关联离地范围只决定查询作用域，不是气象垂直观测层。</HelpTooltip>
           </div>
           <div v-if="!isSurfaceField" class="form-field span-2">
             <label>源数据布局</label>
@@ -2049,7 +2050,7 @@ onBeforeUnmount(() => {
           <div v-if="isStructuredSnapshot3D" class="form-field span-2">
             <label>垂直覆盖方式</label>
             <input value="覆盖目标活动版本中实际存在的全部真高空域" type="text" disabled />
-            <span class="field-hint">高度上下限从目标 L17 网格逐水平列聚合，不需要手工输入，也不会生成目标库中不存在的格元。</span>
+            <HelpTooltip>高度上下限从目标 L17 网格逐水平列聚合，不需要手工输入，也不会生成目标库中不存在的格元。</HelpTooltip>
           </div>
           <template v-if="isSurfaceField">
             <div class="form-field span-2">
@@ -2058,19 +2059,19 @@ onBeforeUnmount(() => {
                 <option value="">不套用（手工填写属性编码）</option>
                 <option v-for="item in WEATHER_ATTRIBUTE_PRESETS" :key="item.code" :value="item.code">{{ item.label }}（{{ item.code }}）</option>
               </select>
-              <span class="field-hint">套用后写入前端图例已识别的属性编码，导入完成即可直接着色；同步填写 deqing_weather.nc 对应源变量，五项需分别提交任务。</span>
+              <HelpTooltip>套用后写入前端图例已识别的属性编码，导入完成即可直接着色；同步填写 deqing_weather.nc 对应源变量，五项需分别提交任务。</HelpTooltip>
             </div>
             <div class="form-field" :class="{ 'has-error': errors.sourceDate }">
               <label>源统计日期 <span class="req">*</span></label>
               <input v-model="fieldResampleForm.sourceDate" type="date" @blur="validateField('sourceDate')" />
               <span v-if="errors.sourceDate" class="field-error">{{ errors.sourceDate }}</span>
-              <span v-else class="field-hint">必须与所选时间切片按源时间基准解码出的日期一致，是日尺度统计标签而非瞬时实况。</span>
+              <HelpTooltip v-else>必须与所选时间切片按源时间基准解码出的日期一致，是日尺度统计标签而非瞬时实况。</HelpTooltip>
             </div>
             <div class="form-field" :class="{ 'has-error': errors.timeIndex }">
               <label>时间切片索引 <span class="req">*</span></label>
               <input v-model.number="fieldResampleForm.timeIndex" type="number" min="0" step="1" @blur="validateField('timeIndex')" />
               <span v-if="errors.timeIndex" class="field-error">{{ errors.timeIndex }}</span>
-              <span v-else class="field-hint">零起始。单日文件填 0；多日文件需填该日期在时间轴上的实际序号。</span>
+              <HelpTooltip v-else>零起始。单日文件填 0；多日文件需填该日期在时间轴上的实际序号。</HelpTooltip>
             </div>
             <div class="form-field" :class="{ 'has-error': errors.minAgl }">
               <label>关联离地下限（米） <span class="req">*</span></label>
@@ -2081,7 +2082,7 @@ onBeforeUnmount(() => {
               <label>关联离地上限（米） <span class="req">*</span></label>
               <input v-model.number="fieldResampleForm.maxAgl" type="number" min="0" max="100000" step="any" @blur="validateField('maxAgl')" />
               <span v-if="errors.maxAgl" class="field-error">{{ errors.maxAgl }}</span>
-              <span v-else class="field-hint">必须大于下限。只界定查询关联作用域，不表示该高度上真有气象观测。</span>
+              <HelpTooltip v-else>必须大于下限。只界定查询关联作用域，不表示该高度上真有气象观测。</HelpTooltip>
             </div>
           </template>
           <div class="form-field" :class="{ 'has-error': errors.valueVariable }">
@@ -2102,7 +2103,7 @@ onBeforeUnmount(() => {
           <div class="form-field">
             <label>单位</label>
             <input v-model="fieldResampleForm.unit" type="text" :placeholder="isSurfaceField ? '留空采用源文件单位' : 'dBμV/m'" />
-            <span v-if="isSurfaceField" class="field-hint">留空即采用源文件单位。填写与源不一致的单位而又未配置数值换算会被后端拒绝，不能只改单位标签。</span>
+            <HelpTooltip v-if="isSurfaceField">留空即采用源文件单位。填写与源不一致的单位而又未配置数值换算会被后端拒绝，不能只改单位标签。</HelpTooltip>
           </div>
           <div class="form-field span-2">
             <label>数值保存方式</label>
@@ -2112,9 +2113,9 @@ onBeforeUnmount(() => {
               <option value="emfAmplitude">电磁场强 V/m → dBμV/m</option>
               <option value="custom">自定义换算</option>
             </select>
-            <span v-if="fieldValuePreset === 'emfSquared'" class="field-hint">适用于本次 *_profiles.nc 的 field_total（单位为 (V/m)²），自动使用 log10、10、120。</span>
-            <span v-else-if="fieldValuePreset === 'emfAmplitude'" class="field-hint">适用于单位为 V/m 的场强值，例如原文件的 E_V_M，自动使用 log10、20、120。</span>
-            <span v-else-if="fieldValuePreset === 'original'" class="field-hint">插值结果直接保存，自动使用 identity、1、0；二维场单位可留空，由后端读取源单位。</span>
+            <HelpTooltip v-if="fieldValuePreset === 'emfSquared'">适用于本次 *_profiles.nc 的 field_total（单位为 (V/m)²），自动使用 log10、10、120。</HelpTooltip>
+            <HelpTooltip v-else-if="fieldValuePreset === 'emfAmplitude'">适用于单位为 V/m 的场强值，例如原文件的 E_V_M，自动使用 log10、20、120。</HelpTooltip>
+            <HelpTooltip v-else-if="fieldValuePreset === 'original'">插值结果直接保存，自动使用 identity、1、0；二维场单位可留空，由后端读取源单位。</HelpTooltip>
           </div>
           <div v-if="fieldValuePreset === 'custom'" class="form-field">
             <label>数值变换</label>
@@ -2140,7 +2141,7 @@ onBeforeUnmount(() => {
             <input v-model="fieldResampleForm.dryRun" type="checkbox" />
             <span>只执行重采样和权威网格成员校验，不激活属性（推荐先勾选）</span>
           </label>
-          <p class="card-desc">预检仍会创建、写入并清理 ClickHouse 暂存表，不注册属性、不建投影元数据、不切换活动绑定。确认结果和容量后再取消勾选正式发布。</p>
+          <HelpTooltip target="label">预检仍会创建、写入并清理 ClickHouse 暂存表，不注册属性、不建投影元数据、不切换活动绑定。确认结果和容量后再取消勾选正式发布。</HelpTooltip>
         </div>
 
         <button class="advanced-toggle" type="button" @click="fieldResampleForm.showAdvanced = !fieldResampleForm.showAdvanced">
@@ -2181,8 +2182,8 @@ onBeforeUnmount(() => {
             <label>最大有效目标格元数</label>
             <input v-model.number="fieldResampleForm.maxTargetCells" type="number" min="1" max="1000000000" @blur="validateField('maxTargetCells')" />
             <span v-if="errors.maxTargetCells" class="field-error">{{ errors.maxTargetCells }}</span>
-            <span v-else-if="isSurfaceField" class="field-hint">二维模式限制关联离地范围内去重后的权威水平格数；超限会拒绝入库并清理临时数据，需收窄范围或调高上限。</span>
-            <span v-else class="field-hint">限制插值有效且属于目标空域的输出数量，不限制读取批次数；超限会报错，不会截断入库。</span>
+            <HelpTooltip v-else-if="isSurfaceField">二维模式限制关联离地范围内去重后的权威水平格数；超限会拒绝入库并清理临时数据，需收窄范围或调高上限。</HelpTooltip>
+            <HelpTooltip v-else>限制插值有效且属于目标空域的输出数量，不限制读取批次数；超限会报错，不会截断入库。</HelpTooltip>
           </div>
           <div class="form-field">
             <label class="checkbox-item">
@@ -2197,15 +2198,15 @@ onBeforeUnmount(() => {
             <Loader2 v-if="submittingMap.fieldResample" :size="14" class="spin" />
             <span>{{ submittingMap.fieldResample ? '提交中...' : (fieldResampleForm.dryRun ? '提交重采样预检' : '提交重采样挂载') }}</span>
           </button>
-          <span v-if="isSurfaceField" class="submit-hint">二维水平值只写一次；发布先写水平事实并核验行数，再在事务内复核目标活动版本后切换绑定。</span>
-          <span v-else class="submit-hint">L17 权威格元分批重采样，按批次限制内存，保留最终成员校验和属性写入计数核验。</span>
+          <HelpTooltip target="button" v-if="isSurfaceField">二维水平值只写一次；发布先写水平事实并核验行数，再在事务内复核目标活动版本后切换绑定。</HelpTooltip>
+          <HelpTooltip target="button" v-else>L17 权威格元分批重采样，按批次限制内存，保留最终成员校验和属性写入计数核验。</HelpTooltip>
         </div>
       </section>
 
       <!-- 静态 Feature 导入 -->
       <section v-show="activeTab === 'featureImport'" class="storage-card">
         <div class="card-title">静态业务 Feature-DQG 导入</div>
-        <p class="card-desc">把 Shapefile/GeoJSON 通用业务要素转换为水平 DQG 稀疏关系：PostgreSQL 保存原始 Feature 与 Geometry，ClickHouse 保存查询投影。选择“追加已有数据集”保留旧要素，只对新文件网格化；全量替换需明确确认。</p>
+        <HelpTooltip target=":scope > .card-title">把 Shapefile/GeoJSON 通用业务要素转换为水平 DQG 稀疏关系：PostgreSQL 保存原始 Feature 与 Geometry，ClickHouse 保存查询投影。选择“追加已有数据集”保留旧要素，只对新文件网格化；全量替换需明确确认。</HelpTooltip>
 
         <div class="form-grid">
           <div class="form-field span-2 feature-import-mode">
@@ -2237,7 +2238,7 @@ onBeforeUnmount(() => {
               <option v-for="dataset in featureImportDatasets" :key="dataset.datasetId" :value="dataset.datasetId">{{ dataset.datasetName }}（{{ dataset.datasetId }}）</option>
             </select>
             <span v-if="errors.datasetId" class="field-error">{{ errors.datasetId }}</span>
-            <span v-else class="field-hint">字母/数字/下划线/点/短横线，最长 128 字符</span>
+            <HelpTooltip v-else>字母/数字/下划线/点/短横线，最长 128 字符</HelpTooltip>
             <template v-if="featureForm.importMode !== 'CREATE'">
               <span v-if="featureImportCatalogError" class="field-error">{{ featureImportCatalogError }}</span>
               <span v-else-if="!featureImportCatalogLoading && !featureImportDatasets.length" class="field-hint">暂无可追加的活动静态 Feature 数据集。</span>
@@ -2274,13 +2275,13 @@ onBeforeUnmount(() => {
             <label>OGR 数据服务器路径 <span class="req">*</span></label>
             <input v-model="featureForm.input" type="text" placeholder="data/static/road.shp" @blur="validateField('input')" />
             <span v-if="errors.input" class="field-error">{{ errors.input }}</span>
-            <span v-else class="field-hint">服务端 projectRoot 下相对路径，支持 .shp/.json/.geojson</span>
+            <HelpTooltip v-else>服务端 projectRoot 下相对路径，支持 .shp/.json/.geojson</HelpTooltip>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.featureType }">
             <label>固定 Feature 类型</label>
             <input v-model="featureForm.featureType" type="text" placeholder="road" @blur="validateField('featureType')" />
             <span v-if="errors.featureType" class="field-error">{{ errors.featureType }}</span>
-            <span v-else class="field-hint">与"类型字段"二选一</span>
+            <HelpTooltip v-else>与"类型字段"二选一</HelpTooltip>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.featureTypeField }">
             <label>Feature 类型字段</label>
@@ -2302,12 +2303,12 @@ onBeforeUnmount(() => {
               <label>离地高度上限字段（米） <span class="req">*</span></label>
               <input v-model="featureForm.aglHeightField" type="text" placeholder="Descriptio" @blur="validateField('aglHeightField')" />
               <span v-if="errors.aglHeightField" class="field-error">{{ errors.aglHeightField }}</span>
-              <span v-else class="field-hint">从地面至该离地高度禁飞，支持纯数值字符串；不读取几何 Z 值</span>
+              <HelpTooltip v-else>从地面至该离地高度禁飞，支持纯数值字符串；不读取几何 Z 值</HelpTooltip>
             </div>
             <div class="form-field">
               <label>地面高程来源</label>
               <input :value="featureForm.demGridTable || 'demgrid_17'" type="text" readonly />
-              <span class="field-hint">读取 L17 demgrid_17 表的 ST_Z(center)；请确保其与真高剖分使用的 sourceTable 和数据版本一致</span>
+              <HelpTooltip>读取 L17 demgrid_17 表的 ST_Z(center)；请确保其与真高剖分使用的 sourceTable 和数据版本一致</HelpTooltip>
             </div>
             <div class="form-field" :class="{ 'has-error': errors.demNoDataPolicy }">
               <label>地面高程缺测处理</label>
@@ -2316,7 +2317,7 @@ onBeforeUnmount(() => {
                 <option value="ERROR">报错并停止整批</option>
               </select>
               <span v-if="errors.demNoDataPolicy" class="field-error">{{ errors.demNoDataPolicy }}</span>
-              <span v-else class="field-hint">跳过单位为 L17 水平格；缺少有效 ST_Z(center) 的格不入库，不用零高程填补</span>
+              <HelpTooltip v-else>跳过单位为 L17 水平格；缺少有效 ST_Z(center) 的格不入库，不用零高程填补</HelpTooltip>
             </div>
           </template>
         </div>
@@ -2324,7 +2325,7 @@ onBeforeUnmount(() => {
         <div v-if="featureForm.importMode !== 'CREATE'" class="form-field">
           <label>业务唯一编号字段（可选）</label>
           <input v-model="featureForm.sourceIdField" type="text" placeholder="如 OBJECT_ID；同编号内容不同则停止追加" />
-          <span class="field-hint">无业务编号时只跳过完全相同的几何、属性及高度；同格网的不同要素允许共存。高度来源可以重新选择，最终均使用绝对高程（米）。</span>
+          <HelpTooltip>无业务编号时只跳过完全相同的几何、属性及高度；同格网的不同要素允许共存。高度来源可以重新选择，最终均使用绝对高程（米）。</HelpTooltip>
         </div>
         <label v-if="featureForm.importMode === 'REPLACE'" class="field-hint">
           <input v-model="featureForm.confirmReplace" type="checkbox" />我确认替换该数据集全部要素（含历次追加）
@@ -2345,7 +2346,7 @@ onBeforeUnmount(() => {
               @blur="validateField('featureTypeMapping')"
             ></textarea>
             <span v-if="errors.featureTypeMapping" class="field-error">{{ errors.featureTypeMapping }}</span>
-            <span v-else class="field-hint">可选：把字段中的中文业务值映射为 ASCII feature_type code</span>
+            <HelpTooltip v-else>可选：把字段中的中文业务值映射为 ASCII feature_type code</HelpTooltip>
           </div>
           <div class="form-field span-2" :class="{ 'has-error': errors.propertyFields }">
             <label>保留属性字段（JSON 数组）</label>
@@ -2356,7 +2357,7 @@ onBeforeUnmount(() => {
               @blur="validateField('propertyFields')"
             ></textarea>
             <span v-if="errors.propertyFields" class="field-error">{{ errors.propertyFields }}</span>
-            <span v-else class="field-hint">可选：留空保存全部源属性；填写后只保存数组中列出的字段</span>
+            <HelpTooltip v-else>可选：留空保存全部源属性；填写后只保存数组中列出的字段</HelpTooltip>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.minHeightField }">
             <label>RANGE 最小高度字段</label>
@@ -2380,7 +2381,7 @@ onBeforeUnmount(() => {
             <Loader2 v-if="submittingMap.featureImport" :size="14" class="spin" />
             <span>{{ submittingMap.featureImport ? '提交中...' : featureForm.importMode === 'APPEND' ? '提交追加任务' : '提交导入任务' }}</span>
           </button>
-          <span class="submit-hint">提交后任务进入异步队列，将自动跟踪进度</span>
+          <HelpTooltip target="button">提交后任务进入异步队列，将自动跟踪进度</HelpTooltip>
         </div>
       </section>
 
@@ -2392,7 +2393,7 @@ onBeforeUnmount(() => {
       <!-- 空域网格入库 -->
       <section v-show="activeTab === 'saveGrid'" class="storage-card">
         <div class="card-title">空域网格入库（saveGrid）</div>
-        <p class="card-desc">按多边形、高度范围和层级列表生成 DQG 空域网格并写入 ClickHouse。响应同时包含 jobId（通用任务）与 task_code（空域持久任务），task_code 可在"维护与查询"页跟踪详细状态。</p>
+        <HelpTooltip target=":scope > .card-title">按多边形、高度范围和层级列表生成 DQG 空域网格并写入 ClickHouse。响应同时包含 jobId（通用任务）与 task_code（空域持久任务），task_code 可在"维护与查询"页跟踪详细状态。</HelpTooltip>
 
         <div class="form-grid">
           <div class="form-field" :class="{ 'has-error': errors.airspaceId }">
@@ -2404,7 +2405,7 @@ onBeforeUnmount(() => {
             <label>DQG 层级列表 <span class="req">*</span></label>
             <input v-model="saveGridForm.levels" type="text" placeholder="16,17" @blur="validateField('levels')" />
             <span v-if="errors.levels" class="field-error">{{ errors.levels }}</span>
-            <span v-else class="field-hint">逗号分隔，每项 0-21，不得重复</span>
+            <HelpTooltip v-else>逗号分隔，每项 0-21，不得重复</HelpTooltip>
           </div>
           <div class="form-field span-2" :class="{ 'has-error': errors.polygon }">
             <label>空域多边形边界 <span class="req">*</span></label>
@@ -2415,7 +2416,7 @@ onBeforeUnmount(() => {
               @blur="validateField('polygon')"
             ></textarea>
             <span v-if="errors.polygon" class="field-error">{{ errors.polygon }}</span>
-            <span v-else class="field-hint">JSON 数组，[[经度,纬度],...] 单外环至少 3 点</span>
+            <HelpTooltip v-else>JSON 数组，[[经度,纬度],...] 单外环至少 3 点</HelpTooltip>
           </div>
           <div class="form-field" :class="{ 'has-error': errors.top }">
             <label>顶部高度（米） <span class="req">*</span></label>
@@ -2462,18 +2463,18 @@ onBeforeUnmount(() => {
             <Loader2 v-if="submittingMap.saveGrid" :size="14" class="spin" />
             <span>{{ submittingMap.saveGrid ? '提交中...' : '提交入库任务' }}</span>
           </button>
-          <span class="submit-hint">提交后任务进入异步队列，将自动跟踪进度</span>
+          <HelpTooltip target="button">提交后任务进入异步队列，将自动跟踪进度</HelpTooltip>
         </div>
       </section>
 
       <!-- 维护与查询 -->
       <section v-show="activeTab === 'maintain'" class="storage-card">
         <div class="card-title">维护与查询</div>
-        <p class="card-desc">ClickHouse 空域网格相关的同步维护操作与状态查询。危险操作（初始化存储 / 激活版本 / 旧版分块名回填）不在本页面提供，请使用 DataTaskConsole。</p>
+        <HelpTooltip target=":scope > .card-title">ClickHouse 空域网格相关的同步维护操作与状态查询。危险操作（初始化存储 / 激活版本 / 旧版分块名回填）不在本页面提供，请使用 DataTaskConsole。</HelpTooltip>
 
         <div class="maintain-block">
           <div class="maintain-title">导入 OSGB 稀疏映射（推荐）</div>
-          <p class="maintain-desc">从所选来源的 PG 模型网格表全量导入 ClickHouse osgb_grid_chunk_map 的 (level, source) 分区，不修改 grid_current。</p>
+          <HelpTooltip target=":scope > .maintain-title, :scope > button, :scope > .maintain-row">从所选来源的 PG 模型网格表全量导入 ClickHouse osgb_grid_chunk_map 的 (level, source) 分区，不修改 grid_current。</HelpTooltip>
           <div class="maintain-row">
             <div class="form-field">
               <label>网格层级</label>
@@ -2502,7 +2503,7 @@ onBeforeUnmount(() => {
 
         <div class="maintain-block">
           <div class="maintain-title">构建 Block 汇总表</div>
-          <p class="maintain-desc">ClickHouse 端先删除旧汇总，再按 (airspace_id, version, level, block_id, z) 聚合写入 grid_block_summary。</p>
+          <HelpTooltip target=":scope > .maintain-title, :scope > button, :scope > .maintain-row">ClickHouse 端先删除旧汇总，再按 (airspace_id, version, level, block_id, z) 聚合写入 grid_block_summary。</HelpTooltip>
           <div class="maintain-row">
             <div class="form-field">
               <label>全局版本号</label>
@@ -2517,7 +2518,7 @@ onBeforeUnmount(() => {
 
         <div class="maintain-block">
           <div class="maintain-title">空域任务状态查询</div>
-          <p class="maintain-desc">按 task_code 查询空域持久任务（saveGrid 双任务体系）的详细状态。</p>
+          <HelpTooltip target=":scope > .maintain-title, :scope > button, :scope > .maintain-row">按 task_code 查询空域持久任务（saveGrid 双任务体系）的详细状态。</HelpTooltip>
           <div class="maintain-row">
             <div class="form-field grow">
               <label>任务编码 task_code</label>
@@ -2544,7 +2545,7 @@ onBeforeUnmount(() => {
 
         <div class="maintain-block">
           <div class="maintain-title">真高数据集查询</div>
-          <p class="maintain-desc">数据集列表 → 版本列表 → 版本详情 三级查询。</p>
+          <HelpTooltip target=":scope > .maintain-title, :scope > button, :scope > .maintain-row">数据集列表 → 版本列表 → 版本详情 三级查询。</HelpTooltip>
           <div class="maintain-row">
             <div class="form-field">
               <label>datasetId</label>
@@ -2583,7 +2584,7 @@ onBeforeUnmount(() => {
       <!-- 任务查询 -->
       <section v-show="activeTab === 'job'" class="storage-card">
         <div class="card-title">入库任务状态查询</div>
-        <p class="card-desc">查询异步数据处理任务的当前状态与进度。</p>
+        <HelpTooltip target=":scope > .card-title">查询异步数据处理任务的当前状态与进度。</HelpTooltip>
 
         <div class="job-query-row">
           <div class="form-field grow" :class="{ 'has-error': errors.jobId }">

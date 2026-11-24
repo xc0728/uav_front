@@ -1,4 +1,5 @@
 <script setup>
+import HelpTooltip from '../HelpTooltip.vue'
 import { reactive, ref, computed, onBeforeUnmount, watch } from 'vue'
 import { Loader2, Trash2, Search, Navigation, Database, X, Check } from 'lucide-vue-next'
 import { errorMessage } from '../../../utils/http'
@@ -574,8 +575,8 @@ async function submitAstarPath() {
         <input v-model.number="astarForm.searchTimeoutMs" type="number" min="100" max="60000" step="100" class="param-input">
       </div>
       <ConflictCheckOptions :form="astarRules" :disabled="astarLoading" />
-      <p class="empty-hint">搜索与最终复检使用相同目录规则。查询时间为整条航迹共用的 UTC Unix 秒，不计算逐格到达时刻。</p>
-      <p class="empty-hint">新增禁飞区请通过正式要素维护发布；发布后作为强制约束参与规划。</p>
+      <HelpTooltip target=".btn-query">搜索与最终复检使用相同目录规则。查询时间为整条航迹共用的 UTC Unix 秒，不计算逐格到达时刻。</HelpTooltip>
+      <HelpTooltip target=".conflict-options .catalog-group summary">新增禁飞区请通过正式要素维护发布；发布后作为强制约束参与规划。</HelpTooltip>
 
       <!-- 操作按钮 -->
       <div class="btn-row">

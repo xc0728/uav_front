@@ -35,6 +35,8 @@ export const queryConeRegions = (payload, signal) => read('/api/true-altitude-ai
 /// 固定摘要快照，并验证游标确实前进，禁止静默拼接不同版本的明细。
 export async function loadConeCells(payload, region, summary, signal, onPage) {
   let cursor = null
+  const seen = new Set()
+  let lastCode = null
   do {
     const data = await queryConeRegions({ ...payload, resultMode: 'cells', pageSize: 1000,
       regions: [{ ...region, expectedFingerprint: summary.queryFingerprint, ...(cursor ? { cursor } : {}) }],
@@ -43,7 +45,13 @@ export async function loadConeCells(payload, region, summary, signal, onPage) {
     if (result?.status !== 'success') throw new Error(result?.message || '区域明细查询失败')
     if (result.queryFingerprint !== summary.queryFingerprint) throw new Error('区域快照已变化，请重新查询')
     if (result.hasMore && (!result.nextCursor || result.nextCursor === cursor)) throw new Error('区域游标未前进')
-    await onPage(result.cells || [])
+    if (signal?.aborted) throw new DOMException('查询已取消', 'AbortError')
+    const cells = result.cells || []
+    for (const cell of cells) {
+      if (typeof cell.code !== 'string' || seen.has(cell.code) || (lastCode && cell.code <= lastCode)) throw new Error('明细编码重复或顺序错误，请重新查询')
+      seen.add(cell.code); lastCode = cell.code
+    }
+    await onPage(cells)
     cursor = result.hasMore ? result.nextCursor : null
   } while (cursor)
 }

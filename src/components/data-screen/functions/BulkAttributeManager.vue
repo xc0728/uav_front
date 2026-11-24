@@ -1,4 +1,5 @@
 <script setup>
+import HelpTooltip from '../HelpTooltip.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { Upload, RefreshCw, Download, Pause, Play, FileSpreadsheet } from 'lucide-vue-next'
 import { attributeRequest } from '../../../utils/objectAttributes.js'
@@ -147,7 +148,7 @@ onBeforeUnmount(() => { mounted = false; ++generation; clearTimeout(timer); life
         <label><span>操作原因</span><input v-model="reason" maxlength="500" placeholder="例如：根据核实资料批量补全地址描述" /></label>
       </div>
       <label class="inline"><input v-model="overwrite" type="checkbox" />我允许 update/upsert 行覆盖已有非空值（默认关闭）</label>
-      <p class="hint">单文件只操作一个数据集或模型来源、每对象一行。模型须使用永久 object_uid 和带类型的 external_key，不能用名称或格网编码。空单元格不修改；delete 行在 unset 列填写 JSON 字段名数组。关闭页面不终止已确认任务。</p>
+      <HelpTooltip target="input[type=&quot;file&quot;], .actions button">单文件只操作一个数据集或模型来源、每对象一行。模型须使用永久 object_uid 和带类型的 external_key，不能用名称或格网编码。空单元格不修改；delete 行在 unset 列填写 JSON 字段名数组。关闭页面不终止已确认任务。</HelpTooltip>
       <div class="actions"><button type="button" :disabled="!scopeId || !csv || !reason.trim() || !token.trim()" @click="upload"><Upload :size="14" />上传并预检</button><button type="button" :disabled="!objects.some(v => v.editable)" @click="template"><Download :size="14" />下载当前页空白模板</button></div>
     </fieldset>
     <label v-if="tasks.length" class="task-selector"><span>已保存任务（最近30个，可重新打开）</span><select :value="selectedId" :disabled="busy" @change="run(() => open($event.target.value))"><option value="" disabled>选择任务</option><option v-for="item in tasks" :key="item.job_id" :value="item.job_id">{{ item.task_type === 'ROLLBACK' ? '整文件回滚' : item.object_kind === 'MODEL_OBJECT' ? '3D模型导入' : '静态导入' }} · {{ statuses[item.status] }} · {{ item.file_name }} · {{ item.scope_id }} · {{ item.job_id }}</option></select></label>

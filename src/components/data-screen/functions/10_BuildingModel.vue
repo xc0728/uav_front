@@ -1,4 +1,5 @@
 <script setup>
+import HelpTooltip from '../HelpTooltip.vue'
 import { reactive, ref, onMounted, onUnmounted } from 'vue'
 import { Loader2 } from 'lucide-vue-next'
 
@@ -183,9 +184,9 @@ onUnmounted(() => {
     </div>
 
     <!-- 提示 -->
-    <div class="tip-box">
-      <p>从 SHP/DBF 文件加载德清区域建筑白膜数据，生成带高度的建筑物三维模型并叠加到地图上显示。</p>
-    </div>
+    <HelpTooltip target=".panel-title, .btn-group button">
+      <span>从 SHP/DBF 文件加载德清区域建筑白膜数据，生成带高度的建筑物三维模型并叠加到地图上显示。</span>
+    </HelpTooltip>
   </div>
 </template>
 

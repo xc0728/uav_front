@@ -1,9 +1,10 @@
 <script setup>
+import HelpTooltip from '../HelpTooltip.vue'
 import { runChartProgressiveSession } from "../../../utils/chartProgressiveSession.js"
 import { progressiveChartEnabled } from "../../../utils/chartProgressiveScheduler.js"
 import { chartGridSourceMask } from '../../../utils/chartGridSources.js'
 import { isDailyWeatherField } from '../../../utils/weatherField.js'
-import { computed, onMounted, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onBeforeUnmount, reactive, ref, shallowRef, watch } from 'vue'
 import { availableGridAttributeGroups, loadGridAttributeCatalog as fetchGridAttributeCatalog, loadActiveAttributeDatasets, GRID_ATTRIBUTE_CATALOG_CHANGED } from '../../../utils/gridAttributeCatalog.js'
 import { ZoomIn, Loader2 } from 'lucide-vue-next'
 import ChartDatasetTreeNode from './ChartDatasetTreeNode.vue'
@@ -611,7 +612,6 @@ async function queryAndRenderChartPages(basePayload, controller, options = {}) {
     else queryStats.value = stats
   }
   const startedAt = performance.now()
-  const renderedCodes = new Set()
   const feature2DIds = new Set()
   const feature3DIds = new Set()
   const datasets = new Map()
@@ -619,6 +619,8 @@ async function queryAndRenderChartPages(basePayload, controller, options = {}) {
   let rendered = 0
   let mappings = 0
   let lod13Grids = 0
+  let display2DGrids = 0
+  let display3DGrids = 0
   let lastData = null
 
   // 立即清除上一次查询结果；后续页面即使因高度过滤暂时为空，也不会残留旧网格。
@@ -633,11 +635,9 @@ async function queryAndRenderChartPages(basePayload, controller, options = {}) {
     signal: controller.signal,
     onPage: async (page) => {
       if (controller.signal.aborted) return
-      const rawCells = (page?.data?.cells || []).filter(cell => {
-        if (renderedCodes.has(cell.code)) return false
-        renderedCodes.add(cell.code)
-        return true
-      })
+      // 分页器已按编码归并去重，并按游标边界输出互不重叠的批次。
+      // 不再保存整次查询的编码 Set，避免其随总格元数增长触及引擎上限。
+      const rawCells = page?.data?.cells || []
       const cells = await buildDisplayedCells(rawCells, controller.signal, {
         updateSummary: false,
         renderOnly: true,
@@ -646,11 +646,21 @@ async function queryAndRenderChartPages(basePayload, controller, options = {}) {
         cell.datasetId ??= page?.data?.datasetId || basePayload.datasetId
         cell.datasetVersion ??= page?.data?.datasetVersion
       })
-      const pageFeatures = rawCells.flatMap(cell => cell.features || [])
+      // 精简响应仅有分类信息；图层元数据必须从分类恢复，不能依赖完整要素。
+      const pageFeatures = rawCells.flatMap(cell => {
+        if (!basePayload.displayOnly) return cell.features || []
+        const classes = chartDisplayClasses(cell)
+        // 每个格元按维度计数，不累计保存整次查询的网格编码。
+        if (classes.some(category => chartFeatureDimensionMode(category) === '2D')) display2DGrids += 1
+        if (classes.some(category => chartFeatureDimensionMode(category) === '3D')) display3DGrids += 1
+        return classes
+      })
       for (const feature of pageFeatures) {
-        const id = `${feature.datasetId || ''}\u0000${feature.featureUid || ''}`
-        if (feature.dimensionMode === '3D') feature3DIds.add(id)
-        else feature2DIds.add(id)
+        if (!basePayload.displayOnly) {
+          const id = `${feature.datasetId || ''}\u0000${feature.featureUid || ''}`
+          if (chartFeatureDimensionMode(feature) === '3D') feature3DIds.add(id)
+          else feature2DIds.add(id)
+        }
         const dataset = datasets.get(feature.datasetId) || {
           id: feature.datasetId,
           label: chartFeatureLabel(feature),
@@ -662,10 +672,15 @@ async function queryAndRenderChartPages(basePayload, controller, options = {}) {
         datasets.set(feature.datasetId, dataset)
       }
       mappings += pageFeatures.length
-      lod13Grids += Number(page?.data?.lod13Count) || 0
+      lod13Grids += rawCells.filter(cell => (basePayload.displayOnly
+        ? chartDisplayClasses(cell) : cell.features || []).some(
+        feature => feature.datasetId === LOD13_BUILDING_DATASET_ID)).length
       rendered += cells.length
-      lastData = page
-      result.value = page
+      lastData = { ...page, data: { ...page.data, cells: rawCells,
+        matchedCount: rawCells.length, mappingCount: basePayload.displayOnly ? null : pageFeatures.length,
+        hasMore: page?.data?.hasMore === true, truncated: page?.data?.truncated === true,
+        complete: page?.data?.hasMore !== true } }
+      result.value = lastData
       totalCount = rendered
       setStats({
         total: rendered,
@@ -676,15 +691,15 @@ async function queryAndRenderChartPages(basePayload, controller, options = {}) {
       })
       chartSummary.value = {
         grids: rendered,
-        features2D: feature2DIds.size,
-        features3D: feature3DIds.size,
+        features2D: basePayload.displayOnly ? display2DGrids : feature2DIds.size,
+        features3D: basePayload.displayOnly ? display3DGrids : feature3DIds.size,
         datasets: [...datasets.values()],
         displayOnly: basePayload.displayOnly,
         baseDatasetId: page?.data?.datasetId || basePayload.datasetId,
         baseDatasetVersion: page?.data?.datasetVersion,
         mappings,
         lod13Grids,
-        truncated: false,
+        truncated: page?.data?.truncated === true,
       }
 
       if (cells.length > 0) {
@@ -733,6 +748,7 @@ async function queryAndRenderChartPages(basePayload, controller, options = {}) {
   gridsData.value = []
   return {
     data: lastData,
+    complete: true,
     total: rendered,
     displayed: rendered,
     runtime: performance.now() - startedAt,
@@ -1621,7 +1637,7 @@ async function submitAirspaceGridQuery() {
       console.warn('[空域网格查询] 请求被中止:', manualTimedOut ? '超时' : '用户取消')
       queryStats.value = {
         ...(queryStats.value || { total: 0 }),
-        complete: true,
+        complete: false,
         status: manualTimedOut ? 'timeout' : 'cancelled',
       }
     } else {
@@ -1629,7 +1645,7 @@ async function submitAirspaceGridQuery() {
       error.value = err?.message || '请求失败，请稍后重试'
       queryStats.value = {
         ...(queryStats.value || { total: 0 }),
-        complete: true,
+        complete: false,
         status: 'error',
       }
     }
@@ -1730,9 +1746,9 @@ function clearGrids() {
           </div>
         </template>
         <div v-if="datasetError" class="error-box dataset-error">{{ datasetError }}</div>
-        <div v-if="chartMode && !trueAltitudeDatasets.length" class="dataset-hint">
+        <HelpTooltip target="input[list=&quot;true-altitude-dataset-options&quot;]" v-if="chartMode && !trueAltitudeDatasets.length">
           未加载到数据集清单时仍可手动输入 datasetId。
-        </div>
+        </HelpTooltip>
         <template v-if="chartMode">
           <div class="dataset-title-row attribute-layer-row">
             <div class="group-title">查询内容</div>
@@ -1791,10 +1807,10 @@ function clearGrids() {
             <div>默认显示最低离地带；全高度关联仍是同一地表日统计量，不代表各飞行高度实况。</div>
             <div v-if="chartSummary?.sourceMetadata">源日期：{{ chartSummary.sourceMetadata.sourceDate }}；源变量：{{ chartSummary.sourceMetadata.sourceVariable }}；单位：{{ chartSummary.sourceMetadata.unit }}</div>
           </div>
-          <div v-if="GRID_ATTRIBUTE_TOPICS.find(item => item.code === selectedGridAttributeCode)?.kind === 'emf'" class="dataset-hint">
+          <HelpTooltip target="select.level-select:has(option[value=&quot;&quot;])" v-if="GRID_ATTRIBUTE_TOPICS.find(item => item.code === selectedGridAttributeCode)?.kind === 'emf'">
             颜色表示信号覆盖强度：数值越大，信号越好；红色表示较弱，黄色表示中间档，绿色表示较强。
             请先完成对应属性的入库和激活；无结果时请核对场数据目录、空域绑定及查询范围。
-          </div>
+          </HelpTooltip>
         </template>
         <label v-if="trueAltitudeMode && trueAltitudeLodEnabled" class="dataset-hint">
           <input v-model="experimentalMixedResolution" type="checkbox" :disabled="loading || dynamicZoomEnabled || Boolean(selectedGridAttributeCode)" />
@@ -1826,15 +1842,15 @@ function clearGrids() {
             aria-describedby="simplified-chart-query-hint chart-query-options-hint" />
           按需加载详情（精简查询）
         </label>
-        <div id="simplified-chart-query-hint" class="dataset-hint">勾选后，先显示网格及要素类别，点击地图中的网格时再加载该网格的完整关联属性，减少首次查询的数据量。不勾选则在查询时一并加载详情。</div>
+        <HelpTooltip target="label:has(input[aria-describedby~=&quot;simplified-chart-query-hint&quot;])" id="simplified-chart-query-hint">勾选后，先显示网格及要素类别，点击地图中的网格时再加载该网格的完整关联属性，减少首次查询的数据量。不勾选则在查询时一并加载详情。</HelpTooltip>
         <label class="dataset-hint">
           <input v-model="progressiveChartQuery" type="checkbox"
             aria-describedby="progressive-chart-query-hint chart-query-options-hint"
             :disabled="!simplifiedChartQuery || !chartMode || overlayChartActive || loading || dynamicLoading" />
           边加载边显示（渐进加载）
         </label>
-        <div id="progressive-chart-query-hint" class="dataset-hint">勾选后，各数据来源每返回一批网格就显示一批，无需等待其他来源；加载期间，网格的要素类别和颜色可能继续更新。需先勾选“按需加载详情”，叠加查询时不可用。</div>
-        <div id="chart-query-options-hint" class="dataset-hint">以上选项修改后，在下次查询时生效。</div>
+        <HelpTooltip target="label:has(input[aria-describedby~=&quot;progressive-chart-query-hint&quot;])" id="progressive-chart-query-hint">勾选后，各数据来源每返回一批网格就显示一批，无需等待其他来源；加载期间，网格的要素类别和颜色可能继续更新。需先勾选“按需加载详情”，叠加查询时不可用。</HelpTooltip>
+        <HelpTooltip target="label:has(input[aria-describedby~=&quot;chart-query-options-hint&quot;])" id="chart-query-options-hint">以上选项修改后，在下次查询时生效。</HelpTooltip>
         <div v-if="progressiveChartQuery && simplifiedChartQuery && chartMode && !overlayChartActive" class="dataset-hint">
           <div v-for="status in Object.values(progressiveSourceStatus)" :key="status.source">
             {{ status.source }}：{{ status.status === 'error' ? status.message : status.status === 'success' ? '已完成' : '加载中' }}
@@ -1872,9 +1888,9 @@ function clearGrids() {
             <label class="coord-line">最低<input v-model.number="airspaceGridForm.bottom" type="number" min="0" step="10" class="airspace-id-input" :disabled="loading || dynamicZoomEnabled" /></label>
             <label class="coord-line">最高<input v-model.number="airspaceGridForm.top" type="number" min="0" step="10" class="airspace-id-input" :disabled="loading || dynamicZoomEnabled" /></label>
           </div>
-          <div class="dataset-hint">场属性保留原查询边界，静态要素向四周外扩。两类数据同时查询，分别使用 AGL 真高与 MSL 海拔范围，格网单元保持原样。</div>
+          <HelpTooltip target=".height-grid, select:has(option[value=&quot;0&quot;])">场属性保留原查询边界，静态要素向四周外扩。两类数据同时查询，分别使用 AGL 真高与 MSL 海拔范围，格网单元保持原样。</HelpTooltip>
         </template>
-        <div class="dataset-hint">静态要素来自已有 Feature 和网格映射的活动 Dataset；建筑物来自后端已入库模型格网，不依赖本地模型文件。仅查询已勾选项。</div>
+        <HelpTooltip target=".dataset-title-row, .dataset-tree">静态要素来自已有 Feature 和网格映射的活动 Dataset；建筑物来自后端已入库模型格网，不依赖本地模型文件。仅查询已勾选项。</HelpTooltip>
       </div>
 
       <!-- 查询边界 -->
@@ -2027,7 +2043,7 @@ function clearGrids() {
       </div>
 
       <template v-if="trueAltitudeMode">
-        <div class="btn-row">
+        <div class="btn-row result-aggregation-controls">
           <button class="btn-query" @click="aggregateTrueAltitudeResult" :disabled="!canAggregateResult">
             {{ resultAggregationLoading ? '聚合中...' : '聚合网格（试验）' }}
           </button>
@@ -2035,9 +2051,9 @@ function clearGrids() {
             恢复查询网格
           </button>
         </div>
-        <div class="dataset-hint">
+        <HelpTooltip target=".result-aggregation-controls button">
           查询完成后可聚合本次显示的网格，命中统计保持不变；LOD 查询聚合的是本次 LOD 格元。
-        </div>
+        </HelpTooltip>
         <div v-if="dynamicZoomEnabled" class="dataset-hint">请先关闭动态缩放，再聚合查询结果。</div>
         <div v-if="aggregationInputCount > MAX_RESULT_AGGREGATION_CODES" class="dataset-hint">
           本次显示超过 10 万个网格，请缩小查询范围后重试；不会截取部分网格提交聚合。
@@ -2125,7 +2141,7 @@ function clearGrids() {
           <span v-if="chartSummary.lod13Grids">LOD1.3网格 <b>{{ chartSummary.lod13Grids }}</b></span>
           <span v-if="!chartSummary.displayOnly">关联映射 <b>{{ chartSummary.mappings }}</b></span>
         </div>
-        <div v-if="chartSummary.truncated" class="chart-warning">航图数据未完整返回，请检查分批查询异常。</div>
+        <div v-if="chartSummary.truncated" class="chart-warning">航图数据未完整加载，当前统计仅代表已加载部分。请缩小区域或检查查询提示。</div>
         <ChartLegend v-if="chartSummary.datasets.length" :items="chartSummary.datasets" />
       </div>
 

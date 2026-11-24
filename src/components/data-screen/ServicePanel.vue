@@ -16,6 +16,7 @@ import DemGrid from './functions/8_DemGrid.vue'
 import NoFlyZone from './functions/9_NoFlyZone.vue'
 
 const props = defineProps({
+  loadBuildingModel: { type: Function, default: null },
   panelType: {
     type: String,
     default: 'both'
@@ -147,6 +148,8 @@ const activeComponentRef = ref(null)
 const routePointPicking = computed(() => panelMode.value === 'calc'
   && activeServiceId.value === 'path-planning'
   && ['A星航路规划', '路径冲突检测（所有冲突）', '路径冲突检测（首个冲突）'].includes(activeFunctionName.value))
+const coneQueryPointPicking = computed(() => conePointPicking.value && activeFunctionName.value === '锥形区域查询')
+const coneBuildingId = computed(() => activeFunctionName.value === '锥形区域查询' ? activeComponentRef.value?.loadedBuildingId : '')
 const geometricConePointPicking = computed(() => conePointPicking.value && activeFunctionName.value === '点缓冲区（锥形）网格化')
 const conePointPicking = computed(() => panelMode.value === 'calc' && !isControlPanelCollapsed.value
   && ['锥形区域查询','点缓冲区（锥形）网格化'].includes(activeFunctionName.value) && Boolean(activeComponentRef.value?.picking))
@@ -245,7 +248,7 @@ const activeComponent = computed(() => {
   return activeService.value?.component
 })
 
-function applyMapPointToActiveService(lon, lat, height) {
+function applyMapPointToActiveService(lon, lat, height, detail) {
   if (!activeComponentRef.value) return
 
   if (activeServiceId.value === 'interop-fusion' && activeFunctionName.value === '经纬度高转网格编码') {
@@ -273,7 +276,7 @@ function applyMapPointToActiveService(lon, lat, height) {
 
   if (activeServiceId.value === 'airspace-grid-query') {
     if (typeof activeComponentRef.value.setPointFromMap === 'function') {
-      activeComponentRef.value.setPointFromMap(lon, lat, height)
+      activeComponentRef.value.setPointFromMap(lon, lat, height, detail)
     }
   }
 
@@ -369,6 +372,7 @@ function onActiveServiceViewBoundsChanged(bounds) {
 }
 
 defineExpose({
+  coneQueryPointPicking, coneBuildingId,
   geometricConePointPicking,
   conePointPicking,
   selectConeCell: detail => activeComponentRef.value?.selectConeCell?.(detail),
@@ -513,6 +517,7 @@ defineExpose({
               :service-name="activeServiceName"
               :function-name="activeFunctionName"
               :theme="props.theme"
+              v-bind="activeFunctionName === '锥形区域查询' ? { loadBuildingModel: props.loadBuildingModel } : {}"
               @close="closeCalcPanel"
               @show-point="handleShowPoint"
               @show-grid="handleShowGrid"

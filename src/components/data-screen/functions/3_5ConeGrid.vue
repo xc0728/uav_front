@@ -1,4 +1,5 @@
 <script setup>
+import HelpTooltip from '../HelpTooltip.vue'
 import { computed, onBeforeUnmount, reactive, ref } from 'vue'
 import { Loader2, MapPin, Trash2 } from 'lucide-vue-next'
 import { requestGeometricCone } from '../../../utils/geometricCone.js'
@@ -68,7 +69,7 @@ onBeforeUnmount(()=>{cancel();removeLayer();removeCenter()})
 
 <template>
   <section class="cone-grid-query" :class="{ 'theme-tech-blue': isTechBlueTheme }">
-    <div class="hint-box">选择底部中心，设置上下半径与竖直高度，生成锥形范围相交的网格。</div>
+    <HelpTooltip target=".group-heading .group-title, .btn-query">选择底部中心，设置上下半径与竖直高度，生成锥形范围相交的网格。</HelpTooltip>
     <div class="form-group">
       <div class="group-heading"><h3 class="group-title">底部中心</h3>
         <button type="button" class="btn-pick" :class="{ active: picking }" :aria-pressed="picking" :disabled="loading" @click="togglePicking"><MapPin :size="14" />{{ picking ? '结束选点' : '地图选点' }}</button>
@@ -79,7 +80,7 @@ onBeforeUnmount(()=>{cancel();removeLayer();removeCenter()})
         <label class="param-line"><span class="param-label">纬度</span><input v-model="form.lat" type="number" step="0.000001" class="param-input" @input="onCenterInput"></label>
         <label class="param-line"><span class="param-label">高程(m)</span><input v-model="form.height" type="number" step="0.1" class="param-input" @input="onCenterInput"></label>
       </fieldset>
-      <p class="field-hint">底部高程取自所选表面；选屋顶需先加载建筑模型。可手动校正高程。</p>
+      <HelpTooltip target="fieldset .param-line:last-child, .btn-pick">底部高程取自所选表面；选屋顶需先加载建筑模型。可手动校正高程。</HelpTooltip>
     </div>
     <fieldset :disabled="loading">
       <div class="form-group">
@@ -107,7 +108,7 @@ onBeforeUnmount(()=>{cancel();removeLayer();removeCenter()})
       <p class="field-hint">完整结果 · 包含边界相交 · 未截断</p>
     </div>
     <div v-if="selectedCell" class="result-box"><h3 class="group-title">选中格元</h3><p class="code">{{ selectedCell.code }}</p><p class="field-hint">底高 {{ selectedCell.bottom.toFixed(2) }} m / 顶高 {{ selectedCell.top.toFixed(2) }} m</p></div>
-    <p class="field-hint">半径为 0 时形成圆锥，两半径相等时形成圆柱。超出格元上限会提示调整参数。</p>
+    <HelpTooltip target="fieldset .form-group:first-child .group-title, fieldset .form-group:first-child .param-line">半径为 0 时形成圆锥，两半径相等时形成圆柱。超出格元上限会提示调整参数。</HelpTooltip>
   </section>
 </template>
 

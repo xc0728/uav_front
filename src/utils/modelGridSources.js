@@ -8,7 +8,9 @@ export const MODEL_GRID_SOURCES = [
   { value: 'surveillance', label: '监视设施', tablePrefix: 'surveillancegrid_', theme: 'surveillance', featureType: 'surveillance_facility', color: '#f43f5e', queryLevel: 17 },
   { value: 'crane', label: '塔吊', tablePrefix: 'cranegrid_', theme: 'structure', featureType: 'tower_crane', color: '#ef4444', queryLevel: 17 },
   { value: 'power', label: '输电设施', tablePrefix: 'powergrid_', theme: 'utility', featureType: 'power_facility', color: '#f59e0b', queryLevel: 17 },
-  { value: 'crane', label: '塔吊', tablePrefix: 'cranegrid_', theme: 'structure', featureType: 'tower_crane', color: '#ef4444', queryLevel: 17 },
+  { value: 'wenming_tower', label: '文明塔', tablePrefix: 'wenming_towergrid_', theme: 'structure', featureType: 'wenming_tower', color: '#d97706', queryLevel: 17 },
+  { value: 'shouchang_bridge', label: '寿昌桥', tablePrefix: 'shouchang_bridgegrid_', theme: 'structure', featureType: 'shouchang_bridge', color: '#0ea5e9', queryLevel: 17 },
+  { value: 'drone_dock', label: '机巢', tablePrefix: 'drone_dockgrid_', theme: 'structure', featureType: 'drone_dock', color: '#10b981', queryLevel: 17 },
 ]
 
 export function getModelGridSource(value) {

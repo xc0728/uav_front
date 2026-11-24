@@ -1,4 +1,5 @@
 <script setup>
+import HelpTooltip from '../HelpTooltip.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Database, SlidersHorizontal, History, ShieldCheck, RefreshCw, Plus, Trash2, Eye, Loader2, AlertCircle, CheckCircle2, Undo2, ChevronLeft, ChevronRight, ArrowRight } from 'lucide-vue-next'
 import { attributeRequest, buildAttributeRequests, collectAttributeObjects, submitAttributeRequests, attributeFieldOptions, createAttributeReadState } from '../../../utils/objectAttributes.js'
@@ -413,8 +414,8 @@ onBeforeUnmount(() => { mounted = false; clearTimeout(timer); requestLifetime.ab
           <label v-else><span>模型类别</span><select v-model="scopeId"><option v-for="source in modelSources" :key="source.value" :value="source.value">{{ source.label }}</option></select></label>
           <button type="button" class="button primary read-button" :disabled="!descriptor.enabled || descriptorState !== 'ready' || (kind === 'STATIC_FEATURE' && (datasetsState !== 'ready' || !selectedDataset))" @click="reload"><RefreshCw :size="15" />读取对象</button>
         </div>
-        <p v-if="kind === 'MODEL_OBJECT' && scopeId === 'field'" class="field-hint">每个场定义及版本作为一个模型对象，分类代码适用于该定义的全部空域绑定和格点。请选择“新增属性”添加分类代码。</p>
-        <p v-if="kind === 'MODEL_OBJECT' && descriptor.modelVerificationMode === 'per_object' && scopeId !== 'field'" class="field-hint">模型按对象检查编号及属性副本；编号无效、属性冲突或同步待确认的对象会显示具体原因。</p>
+        <HelpTooltip target=".source-form label:has(select), .read-button" v-if="kind === 'MODEL_OBJECT' && scopeId === 'field'">每个场定义及版本作为一个模型对象，分类代码适用于该定义的全部空域绑定和格点。请选择“新增属性”添加分类代码。</HelpTooltip>
+        <HelpTooltip target=".source-form label:has(select), .read-button" v-if="kind === 'MODEL_OBJECT' && descriptor.modelVerificationMode === 'per_object' && scopeId !== 'field'">模型按对象检查编号及属性副本；编号无效、属性冲突或同步待确认的对象会显示具体原因。</HelpTooltip>
         <div class="selection-actions">
           <button type="button" class="button" :disabled="!descriptor.enabled || !scopeId || !token.trim()" @click="selectScope">全选当前{{ kind === 'STATIC_FEATURE' ? '数据集' : '模型类别' }}</button>
           <button type="button" class="button" :disabled="!chosen.length" @click="chosen = []">清空选择</button>
@@ -475,7 +476,7 @@ onBeforeUnmount(() => { mounted = false; clearTimeout(timer); requestLifetime.ab
         </div>
         <button type="button" class="button add-button" :disabled="edits.length >= editorKeys.length" @click="addField()"><Plus :size="15" />{{ deleting ? '添加待删除属性' : editMode === 'existing' ? '添加待修改属性' : '添加待新增属性' }}</button>
         <div v-if="selected.length > (descriptor.maxBatchSize || 500)" class="field-hint">所选对象将分批提交，每批最多 {{ descriptor.maxBatchSize || 500 }} 个，各批次独立同步和回滚。</div>
-        <div v-if="selected.length" class="field-hint">编辑列表仅显示当前已读取对象具有的可编辑字段。新增其他白名单字段，请切换“新增普通属性”。部分对象缺少已有字段时，写入前请核对差异预览。</div>
+        <HelpTooltip target=".add-button" v-if="selected.length">编辑列表仅显示当前已读取对象具有的可编辑字段。新增其他白名单字段，请切换“新增普通属性”。部分对象缺少已有字段时，写入前请核对差异预览。</HelpTooltip>
         <details v-if="fieldOptions.readonly.length" class="readonly-properties"><summary>只读属性（{{ fieldOptions.readonly.length }}）</summary><p>{{ fieldOptions.readonly.join('、') }}</p><small>这些字段未开放普通属性维护，可能涉及编号、空间计算或尚未登记的业务字段。保留原值；需核对业务用途后由后端登记。</small></details>
         <label class="reason"><span>{{ deleting ? '删除原因' : '修改原因' }} <em>必填</em></span><textarea v-model="reason" maxlength="500" rows="3" :placeholder="deleting ? '例如：移除误导入的普通属性字段' : '例如：根据最新资料修正所属单位'" /><small>{{ reason.length }} / 500</small></label>
         <div class="field-hint">{{ deleting ? '仅删除明确选择的字段，其余属性保持原值。' : '未编辑的属性保留原值。空字符串会清空文本，“设为空值”会写入 null。' }}</div>

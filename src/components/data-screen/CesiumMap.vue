@@ -611,6 +611,8 @@ let coneRegionLayer = null
 
 const props = defineProps({
   routePointPicking: { type: Boolean, default: false },
+  coneQueryPointPicking: { type: Boolean, default: false },
+  coneBuildingId: { type: String, default: '' },
   geometricConePointPicking: { type: Boolean, default: false },
   show3DToggle: {
     type: Boolean,
@@ -4827,6 +4829,17 @@ defineExpose({
   stopUavAnimationByRouteId,
   getUavCurrentPosition,
   getScenarioFlightPosition,
+  // 锥形面板仅显示或复用模型，不切换其他模型的可见性。
+  async loadConeBuildingModel(id) {
+    const dataset = LOD13_DATASETS.find(d => d.id === id && d.url?.startsWith('/models/buildings/'))
+    if (!dataset) throw new Error('建筑数据集不可用，请刷新后重试')
+    const model = await ensureLod13Loaded(dataset)
+    if (!model) throw new Error('建筑模型加载失败或其他模型正在加载，请稍后重试')
+    model.show = true
+    visibleLod13Ids.value = addLod13ModelId(visibleLod13Ids.value, id)
+    viewer.scene.requestRender()
+    return true
+  },
   // 建筑白膜模型
   loadBuildingModels,
   toggleBuildingsOnMap,
@@ -4931,6 +4944,29 @@ onMounted(async () => {
 
   // 模型、地形、纯底图均可选点；不依赖深度缓冲始终可用。
   function selectMapPoint(position) {
+    if (props.coneQueryPointPicking) {
+      const hit = viewer.scene.pick(position)
+      if (hit?.id?.coneRegionId) return
+      const target = lod13Tilesets.get(props.coneBuildingId)
+      const hitTileset = hit?.tileset || hit?.primitive
+      const isBuilding = target && target.show && (hitTileset === target || hit?.primitive?.tileset === target)
+      // 命中其他三维对象时不将其默认为地面；其原有点击行为不变。
+      if (hit && !isBuilding) return
+      let point
+      if (isBuilding && viewer.scene.pickPositionSupported) {
+        try { point = viewer.scene.pickPosition(position) } catch { return }
+      } else if (!isBuilding) {
+        const ray = viewer.camera.getPickRay(position)
+        point = ray && viewer.scene.globe.pick(ray, viewer.scene)
+        if (!point) point = viewer.camera.pickEllipsoid(position, viewer.scene.globe.ellipsoid)
+      }
+      if (!point) return
+      const c = Cesium.Cartographic.fromCartesian(point)
+      if (!Number.isFinite(c.height)) return
+      emit('point-selected', { lon: Cesium.Math.toDegrees(c.longitude), lat: Cesium.Math.toDegrees(c.latitude),
+        height: c.height, source: isBuilding ? 'building_surface' : 'ground', buildingDatasetId: isBuilding ? props.coneBuildingId : null })
+      return
+    }
     // 获取点击位置的 cartesian 坐标
     const cartesian = pickMapCartesian(position)
     if (!cartesian) return
@@ -5117,30 +5153,57 @@ onBeforeUnmount(() => {
   <section class="cesium-map-container" :style="{ '--chart-panel-width': `${chartPanelWidth}px` }">
     <div ref="cesiumEl" class="cesium-viewer" />
 
-    <ResizableChartPanel v-if="isMapReady" class="chart-feature-panel" @resize="chartPanelWidth = $event">
-      <div class="chart-feature-panel-title">
-        <span>航图要素 · 图例</span>
-        <small>{{ gridResultState.attributeCode ? '已加载专题' : (chartFeatureLayers.length ? `${chartFeatureLayers.length} 类` : '未加载') }}</small>
+    <!-- 图例和查询结果共享纵向空间，长列表收缩滚动，不遮挡底部耗时。 -->
+    <div class="map-right-overlays">
+      <ResizableChartPanel v-if="isMapReady" class="chart-feature-panel" @resize="chartPanelWidth = $event">
+        <div class="chart-feature-panel-title">
+          <span>航图要素 · 图例</span>
+          <small>{{ gridResultState.attributeCode ? '已加载专题' : (chartFeatureLayers.length ? `${chartFeatureLayers.length} 类` : '未加载') }}</small>
+        </div>
+        <div v-if="gridResultState.attributeCode" class="chart-feature-empty">
+          <ChartLegend :attribute-code="gridResultState.attributeCode" variant="dark" />
+          <div>已渲染 {{ Number(gridResultState.total).toLocaleString() }} 个网格</div>
+          <div>点击网格查看场值与高度属性。</div>
+        </div>
+        <div v-else-if="!chartFeatureLayers.length" class="chart-feature-empty">
+          点击网格可查看关联航图要素属性；航图查询后可在此筛选要素显示。
+        </div>
+        <div v-else class="chart-feature-tree">
+          <ChartDatasetTreeNode
+            v-for="node in chartFeatureTree"
+            :key="node.id"
+            :node="node"
+            :selected-dataset-ids="enabledChartFeatureIds"
+            variant="dark"
+            @toggle="setChartFeatureIdsEnabled"
+          />
+        </div>
+      </ResizableChartPanel>
+
+      <!-- 查询网格图例：单层级仅显示层级和尺寸，多层级时显示对应颜色。 -->
+      <div class="grid-result-legend" :class="{ 'is-single-level': !showGridLevelColors }" v-if="gridResultState.visible">
+        <div class="legend-title">{{ gridResultState.title }}</div>
+        <!-- 表头 -->
+        <div class="legend-row legend-head">
+          <span v-if="showGridLevelColors" class="legend-swatch-col"></span>
+          <span class="legend-level-col">层级</span>
+          <span class="legend-size-col">格网尺寸</span>
+        </div>
+        <!-- 各级网格行 -->
+        <div class="legend-levels">
+          <div v-for="item in gridResultState.levels" :key="item.level" class="legend-row">
+            <span v-if="showGridLevelColors" class="legend-swatch legend-swatch-col" :style="{ background: item.color }" />
+            <span class="legend-label legend-level-col">L{{ item.level }}</span>
+            <span class="legend-size legend-size-col">{{ item.sizeLabel || '—' }}</span>
+          </div>
+        </div>
+        <div class="legend-divider" />
+        <div class="legend-row legend-metric" v-if="gridResultState.runtime">
+          <span>计算耗时</span>
+          <span class="legend-value">{{ gridResultState.runtime }}</span>
+        </div>
       </div>
-      <div v-if="gridResultState.attributeCode" class="chart-feature-empty">
-        <ChartLegend :attribute-code="gridResultState.attributeCode" variant="dark" />
-        <div>已渲染 {{ Number(gridResultState.total).toLocaleString() }} 个网格</div>
-        <div>点击网格查看场值与高度属性。</div>
-      </div>
-      <div v-else-if="!chartFeatureLayers.length" class="chart-feature-empty">
-        点击网格可查看关联航图要素属性；航图查询后可在此筛选要素显示。
-      </div>
-      <div v-else class="chart-feature-tree">
-        <ChartDatasetTreeNode
-          v-for="node in chartFeatureTree"
-          :key="node.id"
-          :node="node"
-          :selected-dataset-ids="enabledChartFeatureIds"
-          variant="dark"
-          @toggle="setChartFeatureIdsEnabled"
-        />
-      </div>
-    </ResizableChartPanel>
+    </div>
 
     <aside v-if="selectedGrid || selectedLod13Feature" class="selection-detail-popup">
       <section v-if="selectedGrid" class="selected-grid-detail">
@@ -5409,28 +5472,6 @@ onBeforeUnmount(() => {
       <div v-if="showBaseLayerPanel || showTerrainPanel" class="base-layer-mask" @click="showBaseLayerPanel = false; showTerrainPanel = false" />
     </div>
 
-    <!-- 查询网格图例：单层级仅显示层级和尺寸，多层级时显示对应颜色。 -->
-    <div class="grid-result-legend" :class="{ 'is-single-level': !showGridLevelColors }" v-if="gridResultState.visible">
-      <div class="legend-title">{{ gridResultState.title }}</div>
-      <!-- 表头 -->
-      <div class="legend-row legend-head">
-        <span v-if="showGridLevelColors" class="legend-swatch-col"></span>
-        <span class="legend-level-col">层级</span>
-        <span class="legend-size-col">格网尺寸</span>
-      </div>
-      <!-- 各级网格行 -->
-      <div v-for="item in gridResultState.levels" :key="item.level" class="legend-row">
-        <span v-if="showGridLevelColors" class="legend-swatch legend-swatch-col" :style="{ background: item.color }" />
-        <span class="legend-label legend-level-col">L{{ item.level }}</span>
-        <span class="legend-size legend-size-col">{{ item.sizeLabel || '—' }}</span>
-      </div>
-      <div class="legend-divider" />
-      <div class="legend-row legend-metric" v-if="gridResultState.runtime">
-        <span>计算耗时</span>
-        <span class="legend-value">{{ gridResultState.runtime }}</span>
-      </div>
-    </div>
-
     <!-- 比例尺（左下角，始终显示，独立于图例） -->
     <div class="ref-scale-bar" :style="{ left: `calc(${leftPanelWidth}px + 16px)` }" v-if="isMapReady">
       <div class="scale-track">
@@ -5643,15 +5684,31 @@ onBeforeUnmount(() => {
   height: 100%;
 }
 
-.chart-feature-panel {
+.map-right-overlays {
   position: absolute;
   top: 80px;
   right: 16px;
+  bottom: 20px;
+  left: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+  min-height: 0;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.chart-feature-panel {
+  position: relative;
+  flex: 0 1 auto;
+  min-height: 0;
+  pointer-events: auto;
   box-sizing: border-box;
   width: max-content;
-  min-width: min(360px, calc(100% - 32px));
-  max-width: min(560px, calc(100% - 32px));
-  max-height: calc(100% - 100px);
+  min-width: min(360px, 100%);
+  max-width: min(560px, 100%);
+  max-height: 100%;
   background: rgba(15, 23, 42, 0.9);
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 10px;
@@ -6845,9 +6902,14 @@ onBeforeUnmount(() => {
 
 /* ==================== 查询网格图例 + 比例尺 ==================== */
 .grid-result-legend {
-  position: absolute;
-  right: 16px;
-  bottom: 20px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  margin-top: auto;
+  min-height: 0;
+  max-height: 45%;
+  max-width: 100%;
   padding: 10px 14px;
   background: rgba(15, 23, 42, 0.88);
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -6858,6 +6920,16 @@ onBeforeUnmount(() => {
   min-width: 180px;
   z-index: 5;
   backdrop-filter: blur(6px);
+}
+.grid-result-legend > :not(.legend-levels) {
+  flex-shrink: 0;
+}
+.legend-levels {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+  scrollbar-width: thin;
 }
 .legend-title {
   font-size: 13px;

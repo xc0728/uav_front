@@ -1,4 +1,5 @@
 <script setup>
+import HelpTooltip from '../HelpTooltip.vue'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { errorMessage } from '../../../utils/http.js'
 import { noiseAttributeLabel } from '../../../utils/noiseGrid.js'
@@ -189,7 +190,7 @@ onUnmounted(() => { mounted = false; window.removeEventListener('object-attribut
       <button @click="openImport('parquetAttribute')">导入噪声 / 表格属性</button>
       <button @click="openImport('fieldResample')">导入监视覆盖 / 多维场</button>
     </div>
-    <p class="field-note">统一管理噪声、监视设施覆盖、电磁场等已注册网格属性。绑定数表示关联的空域版本数，不表示网格覆盖数量。</p>
+    <HelpTooltip target=".field-toolbar, .field-row">统一管理噪声、监视设施覆盖、电磁场等已注册网格属性。绑定数表示关联的空域版本数，不表示网格覆盖数量。</HelpTooltip>
     <p v-if="error" role="alert" class="field-error">{{ error }}</p>
     <p v-if="notice" role="status">{{ notice }}</p>
     <div class="field-workspace">

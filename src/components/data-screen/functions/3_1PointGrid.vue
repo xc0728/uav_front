@@ -1,4 +1,5 @@
 <script setup>
+import HelpTooltip from '../HelpTooltip.vue'
 import { computed, reactive, ref } from 'vue'
 import { Loader2, Trash2 } from 'lucide-vue-next'
 import LineGrid from './3_2LineGrid.vue'
@@ -232,9 +233,9 @@ async function submitPointBufferGrid() {
   <div class="point-grid-query techblue-aware" :class="{ 'theme-tech-blue': isTechBlueTheme }">
     <!-- 点网格化 -->
     <template v-if="functionName === '点网格化'">
-      <div class="hint-box">
+      <HelpTooltip target=".form-group:first-of-type .param-line:nth-child(-n+4)">
         <span>点击地图可自动填充经纬度和高度</span>
-      </div>
+      </HelpTooltip>
 
       <!-- 参数表单 -->
       <div class="form-group">
@@ -329,9 +330,9 @@ async function submitPointBufferGrid() {
 
     <!-- 点缓冲区（球体）网格化 -->
     <template v-if="functionName === '点缓冲区（球体）网格化'">
-      <div class="hint-box">
+      <HelpTooltip target=".form-group:first-of-type .param-line:nth-child(-n+4)">
         <span>点击地图可自动填充经纬度和高度</span>
-      </div>
+      </HelpTooltip>
 
       <!-- 参数表单 -->
       <div class="form-group">

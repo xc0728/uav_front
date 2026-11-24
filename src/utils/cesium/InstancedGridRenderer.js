@@ -143,7 +143,7 @@ function packCells(cells, defaultLevel) {
   const overviewSegmentCounts = new Uint8Array(cells.length)
   const overviewColumnBounds = new Float64Array(cells.length * 2)
   const displayClasses = new Array(cells.length)
-  const chartSourceMasks = new Uint8Array(cells.length)
+  const chartSourceMasks = new Uint16Array(cells.length)
   const datasetIds = new Array(cells.length)
   const datasetVersions = new Float64Array(cells.length)
   const attributeCodes = new Array(cells.length)

@@ -53,6 +53,9 @@ export const CHART_DATASETS = [
   [MODEL_GRID_DATASET_IDS.communication, '通信设施模型网格', 'communication', '#14b8a6', '3D', 'communication_facility', ['环境要素', '建构筑物', '人工构筑物'], 14, 'model_grid', 'communication'],
   [MODEL_GRID_DATASET_IDS.power, '输电塔模型网格', 'utility', '#f59e0b', '3D', 'power_facility', ['环境要素', '建构筑物', '人工构筑物'], 14.1, 'model_grid', 'power'],
   [MODEL_GRID_DATASET_IDS.crane, '塔吊模型网格', 'structure', '#ef4444', '3D', 'tower_crane', ['环境要素', '建构筑物', '人工构筑物'], 14.2, 'model_grid', 'crane'],
+  [MODEL_GRID_DATASET_IDS.wenming_tower, '文明塔模型网格', 'structure', '#d97706', '3D', 'wenming_tower', ['环境要素', '建构筑物', '人工构筑物'], 14.3, 'model_grid', 'wenming_tower'],
+  [MODEL_GRID_DATASET_IDS.shouchang_bridge, '寿昌桥模型网格', 'structure', '#0ea5e9', '3D', 'shouchang_bridge', ['环境要素', '建构筑物', '人工构筑物'], 14.4, 'model_grid', 'shouchang_bridge'],
+  [MODEL_GRID_DATASET_IDS.drone_dock, '机巢模型网格', 'structure', '#10b981', '3D', 'drone_dock', ['环境要素', '建构筑物', '人工构筑物'], 14.5, 'model_grid', 'drone_dock'],
   [MODEL_GRID_DATASET_IDS.navigation, '导航设施模型网格', 'navigation', '#8b5cf6', '3D', 'navigation_facility', ['功能要素', '飞行控制空间', '飞行信息控制要素'], 78.1, 'model_grid', 'navigation'],
 ].map(([id, label, theme, color, dimensionMode, featureType, catalogPath, catalogOrder, sourceKind = 'static', modelSource]) => ({
   id, label, theme, color, dimensionMode, featureType, catalogPath, catalogOrder, sourceKind, modelSource,
@@ -625,127 +628,175 @@ function lastGridCode(cells) {
   return cells.length ? String(cells[cells.length - 1]?.code || '') : ''
 }
 
-export async function queryChartSourcePages(payload, { signal, onPage } = {}) {
-  const requestedIds = payload.datasetIds || []
-  const requestedModelSources = requestedIds
-    .map(id => MODEL_GRID_SOURCE_BY_DATASET_ID.get(id))
-    .filter(Boolean)
-  const managedIds = requestedIds.filter(id => id.startsWith('managed_'))
-  const staticIds = requestedIds.filter(id => !MODEL_GRID_SOURCE_BY_DATASET_ID.has(id) && !id.startsWith('managed_'))
-  const states = [
-    ...(staticIds.length ? [{
-      name: 'static', cursor: undefined, watermark: undefined, hasMore: true,
-      done: false, initialized: false, buffer: [], response: null,
-      query: cursor => queryChartRegion({ ...payload, datasetIds: staticIds }, { signal, cursor }),
-    }] : []),
-    ...managedIds.map(id => {
-      let revision
-      return { name: id, opaqueCursor: true, cursor: undefined, watermark: undefined, hasMore: true,
-        done: false, initialized: false, buffer: [], response: null,
-        query: async cursor => {
-          const response = await queryManagedCells(payload, id, { signal, cursor, revision })
-          revision = response.data.revision
-          return response
-        },
-      }
-    }),
-    ...requestedModelSources.map(source => ({
-      name: `model_grid_${source}`, cursor: undefined, watermark: undefined, hasMore: true,
-      done: false, initialized: false, buffer: [], response: null,
-      query: cursor => queryModelGridCells(payload, source, { signal, cursor }),
-    })),
-  ]
-  let pageIndex = 0
-  let committedCursor
-
-  async function fetchNext(state) {
-    const response = await state.query(state.cursor)
-    const data = response?.data || {}
-    let cells = data.cells || []
-    if (payload.displayOnly === true) {
-      const dictionary = new Map((data.displayClasses || []).map(category => [category.id, category]))
-      cells = cells.map(cell => {
-        const { features, classIds, ...grid } = cell
-        const displayClasses = classIds
-          ? classIds.map(id => {
-              const category = dictionary.get(id)
-              if (!category) throw new Error('精简展示分类编号无效')
-              return category
-            })
-          : chartDisplayClasses(cell)
-        return { ...grid, displayOnly: true, displayClasses }
-      })
-    }
-    const scannedCursor = data.scannedCursor || lastGridCode(cells) || data.nextCursor
-    if (data.hasMore === true && !scannedCursor) {
-      throw new Error(`${state.name} 航图分页返回 hasMore，但当前页没有可推进游标`)
-    }
-    if (scannedCursor && (state.opaqueCursor ? state.watermark : state.cursor) && scannedCursor <= (state.opaqueCursor ? state.watermark : state.cursor)) {
-      throw new Error(`${state.name} 航图分页游标没有向前推进`)
-    }
-    state.response = response
-    state.buffer.push(...cells)
-    state.initialized = true
-    state.hasMore = data.hasMore === true
-    state.done = !state.hasMore
-    if (scannedCursor) {
-      state.cursor = state.opaqueCursor ? data.nextCursor : scannedCursor
-      state.watermark = scannedCursor
-    }
+export async function queryChartSourcePages(payload, { signal: externalSignal, onPage } = {}) {
+  const concurrency = payload.query_concurrency ?? 4
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) {
+    throw new Error('query_concurrency 必须是 1-4 的整数')
   }
-
-  while (!signal?.aborted && states.length > 0) {
-    const refill = states.filter(state =>
-      !state.initialized || (!state.done && state.watermark === committedCursor),
-    )
-    await Promise.all(refill.map(fetchNext))
-
-    const activeWatermarks = states
-      .filter(state => !state.done)
-      .map(state => state.watermark)
+  const controller = new AbortController()
+  const signal = controller.signal
+  const cancel = () => controller.abort(externalSignal.reason)
+  externalSignal?.addEventListener('abort', cancel, { once: true })
+  if (externalSignal?.aborted) cancel()
+  function checkAbort() {
+    if (signal.aborted) throw signal.reason ?? new DOMException('查询已取消', 'AbortError')
+  }
+  try {
+    const requestedIds = payload.datasetIds || []
+    const requestedModelSources = requestedIds
+      .map(id => MODEL_GRID_SOURCE_BY_DATASET_ID.get(id))
       .filter(Boolean)
-      .sort()
-    const boundary = activeWatermarks[0]
-    const boundedGroups = states.map(state => {
-      if (!boundary) {
-        const cells = state.buffer
-        state.buffer = []
-        return cells
-      }
-      const cells = state.buffer.filter(cell => String(cell?.code || '') <= boundary)
-      state.buffer = state.buffer.filter(cell => String(cell?.code || '') > boundary)
-      return cells
-    })
-    const cells = mergeChartCells(boundedGroups)
-    const pending = states.some(state => !state.done || state.buffer.length > 0)
-    const features = cells.flatMap(cell => cell.features || [])
-    const staticResponse = states.find(state => state.name === 'static')?.response
-    const modelGridResponse = states.find(state => state.name.startsWith('model_grid_'))?.response
-    const data = {
-      ...(staticResponse?.data || modelGridResponse?.data || states[0]?.response?.data || {}),
-      cells,
-      matchedCount: cells.length,
-      mappingCount: payload.displayOnly ? null : features.length,
-      displayOnly: payload.displayOnly === true,
-      lod13Count: new Set(features
-        .filter(feature => feature.datasetId === LOD13_BUILDING_DATASET_ID)
-        .map(feature => feature.code)).size,
-      modelGridCount: new Set(features
-        .filter(feature => MODEL_GRID_SOURCE_BY_DATASET_ID.has(feature.datasetId))
-        .map(feature => `${feature.datasetId}\u0000${feature.code}`)).size,
-      hasMore: pending,
-      nextCursor: pending ? (boundary || committedCursor) : null,
-      dataSource: managedIds.length ? 'mixed' : 'clickhouse',
-      pageIndex,
-    }
-    const page = { status: 'success', success: true, data }
-    if (onPage) await onPage(page)
-    if (boundary) committedCursor = boundary
-    pageIndex += 1
-    if (!pending) break
-  }
+    const managedIds = requestedIds.filter(id => id.startsWith('managed_'))
+    const staticIds = requestedIds.filter(id => !MODEL_GRID_SOURCE_BY_DATASET_ID.has(id) && !id.startsWith('managed_'))
+    const states = [
+      ...(staticIds.length ? [{
+        name: 'static', cursor: undefined, watermark: undefined, hasMore: true,
+        done: false, initialized: false, buffer: [], response: null,
+        query: cursor => queryChartRegion({ ...payload, datasetIds: staticIds }, { signal, cursor }),
+      }] : []),
+      ...managedIds.map(id => {
+        let revision
+        return { name: id, opaqueCursor: true, cursor: undefined, watermark: undefined, hasMore: true,
+          done: false, initialized: false, buffer: [], response: null,
+          query: async cursor => {
+            const response = await queryManagedCells(payload, id, { signal, cursor, revision })
+            revision = response.data.revision
+            return response
+          },
+        }
+      }),
+      ...requestedModelSources.map(source => ({
+        name: `model_grid_${source}`, cursor: undefined, watermark: undefined, hasMore: true,
+        done: false, initialized: false, buffer: [], response: null,
+        query: cursor => queryModelGridCells(payload, source, { signal, cursor }),
+      })),
+    ]
+    let pageIndex = 0
+    let committedCursor
 
-  return { cursor: committedCursor, pageCount: pageIndex }
+    async function fetchNext(state) {
+      const response = await state.query(state.cursor)
+      checkAbort()
+      const data = response?.data || {}
+      let cells = data.cells || []
+      if (payload.displayOnly === true) {
+        const dictionary = new Map((data.displayClasses || []).map(category => [category.id, category]))
+        cells = cells.map(cell => {
+          const { features, classIds, ...grid } = cell
+          const displayClasses = classIds
+            ? classIds.map(id => {
+                const category = dictionary.get(id)
+                if (!category) throw new Error('精简展示分类编号无效')
+                return category
+              })
+            : chartDisplayClasses(cell)
+          return { ...grid, displayOnly: true, displayClasses }
+        })
+      }
+      const scannedCursor = data.scannedCursor || lastGridCode(cells) || data.nextCursor
+      if (data.hasMore === true && !scannedCursor) {
+        throw new Error(`${state.name} 航图分页返回 hasMore，但当前页没有可推进游标`)
+      }
+      if (scannedCursor && (state.opaqueCursor ? state.watermark : state.cursor) && scannedCursor <= (state.opaqueCursor ? state.watermark : state.cursor)) {
+        throw new Error(`${state.name} 航图分页游标没有向前推进`)
+      }
+      state.response = response
+      state.buffer.push(...cells)
+      state.initialized = true
+      state.hasMore = data.hasMore === true
+      state.done = !state.hasMore
+      if (scannedCursor) {
+        state.cursor = state.opaqueCursor ? data.nextCursor : scannedCursor
+        state.watermark = scannedCursor
+      }
+    }
+
+    // 所有来源共用本次查询的并发预算；同一来源仍按游标顺序补页。
+    async function refillSources(refill) {
+      let next = 0
+      let failed = false
+      let firstError
+      async function worker() {
+        while (!failed && !signal.aborted && next < refill.length) {
+          const state = refill[next++]
+          try {
+            await fetchNext(state)
+          } catch (error) {
+            if (!failed) {
+              failed = true
+              firstError = error
+              controller.abort(error)
+            }
+          }
+        }
+      }
+      // 等待在途请求完成取消清理，保留最初错误而非后续 AbortError。
+      await Promise.all(Array.from({ length: Math.min(concurrency, refill.length) }, worker))
+      if (failed) throw firstError
+      checkAbort()
+    }
+
+    checkAbort()
+    while (states.length > 0) {
+      const refill = states.filter(state =>
+        !state.initialized || (!state.done && state.watermark === committedCursor),
+      )
+      await refillSources(refill)
+      checkAbort()
+
+      const activeWatermarks = states
+        .filter(state => !state.done)
+        .map(state => state.watermark)
+        .filter(Boolean)
+        .sort()
+      const boundary = activeWatermarks[0]
+      const boundedGroups = states.map(state => {
+        if (!boundary) {
+          const cells = state.buffer
+          state.buffer = []
+          return cells
+        }
+        const cells = state.buffer.filter(cell => String(cell?.code || '') <= boundary)
+        state.buffer = state.buffer.filter(cell => String(cell?.code || '') > boundary)
+        return cells
+      })
+      const cells = mergeChartCells(boundedGroups)
+      const pending = states.some(state => !state.done || state.buffer.length > 0)
+      const features = cells.flatMap(cell => cell.features || [])
+      const staticResponse = states.find(state => state.name === 'static')?.response
+      const modelGridResponse = states.find(state => state.name.startsWith('model_grid_'))?.response
+      const data = {
+        ...(staticResponse?.data || modelGridResponse?.data || states[0]?.response?.data || {}),
+        cells,
+        matchedCount: cells.length,
+        mappingCount: payload.displayOnly ? null : features.length,
+        displayOnly: payload.displayOnly === true,
+        lod13Count: new Set(features
+          .filter(feature => feature.datasetId === LOD13_BUILDING_DATASET_ID)
+          .map(feature => feature.code)).size,
+        modelGridCount: new Set(features
+          .filter(feature => MODEL_GRID_SOURCE_BY_DATASET_ID.has(feature.datasetId))
+          .map(feature => `${feature.datasetId}\u0000${feature.code}`)).size,
+        hasMore: pending,
+        nextCursor: pending ? (boundary || committedCursor) : null,
+        dataSource: managedIds.length ? 'mixed' : 'clickhouse',
+        pageIndex,
+      }
+      const page = { status: 'success', success: true, data }
+      if (onPage) await onPage(page)
+      checkAbort()
+      if (boundary) committedCursor = boundary
+      pageIndex += 1
+      if (!pending) break
+    }
+
+    return { cursor: committedCursor, pageCount: pageIndex }
+  } catch (error) {
+    controller.abort(error)
+    throw error
+  } finally {
+    externalSignal?.removeEventListener('abort', cancel)
+  }
 }
 
 export async function queryChartSources(payload, { signal } = {}) {
